@@ -3,6 +3,7 @@ IMPORTLIB = dwrite
 UNIXLIB   = dwrite.so
 IMPORTS   = user32 gdi32 advapi32
 EXTRAINCL = $(FREETYPE_CFLAGS)
+EXTRALIBS = $(FREETYPE_LIBS) -lz
 
 C_SRCS = \
 	analyzer.c \

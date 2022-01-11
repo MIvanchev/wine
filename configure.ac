@@ -1483,17 +1483,17 @@ then
         [AC_CHECK_HEADERS([ft2build.h])
         if test "$ac_cv_header_ft2build_h" = "yes"
         then
-            WINE_CHECK_SONAME(freetype,FT_Init_FreeType,
+            AC_CHECK_LIB(freetype,FT_Init_FreeType,
                 [AC_DEFINE(HAVE_FREETYPE, 1, [Define if FreeType 2 is installed])
                  AC_CHECK_TYPES(FT_TrueTypeEngineType,,,[#include <ft2build.h>
 #include FT_MODULE_H])],
-                [FREETYPE_LIBS=""],[$FREETYPE_LIBS])
+                [FREETYPE_LIBS=""],[-lz])
         else
             FREETYPE_CFLAGS=""
             FREETYPE_LIBS=""
         fi])
 fi
-WINE_ERROR_WITH(freetype,[test "x$ac_cv_lib_soname_freetype" = x],
+WINE_ERROR_WITH(freetype,[test "x$ac_cv_lib_freetype_FT_Init_FreeType" != xyes],
                 [FreeType ${notice_platform}development files not found. Fonts will not be built.],
                 [enable_fonts])
 
@@ -1677,12 +1677,14 @@ then
         [AC_CHECK_HEADERS([fontconfig/fontconfig.h])
         if test "$ac_cv_header_fontconfig_fontconfig_h" = "yes"
         then
-            WINE_CHECK_SONAME(fontconfig,FcInit,,[FONTCONFIG_CFLAGS=""],[$FONTCONFIG_LIBS])
+            AC_CHECK_LIB(fontconfig,FcInit,
+                    [AC_DEFINE(HAVE_LIBFONTCONFIG, 1, [Define if Fontconfig is available])],
+                    [FONTCONFIG_CFLAGS=""],[$FREETYPE_LIBS -lz -lexpat])
         else
             FONTCONFIG_CFLAGS=""
         fi])
 fi
-WINE_NOTICE_WITH(fontconfig,[test "x$ac_cv_lib_soname_fontconfig" = "x"],
+WINE_NOTICE_WITH(fontconfig,[test "x$ac_cv_lib_fontconfig_FcInit" != "xyes"],
                  [fontconfig ${notice_platform}development files not found, fontconfig won't be supported.])
 
 dnl **** Check for krb5 ****

@@ -148,84 +148,85 @@ static FT_Version_t FT_Version;
 static DWORD FT_SimpleVersion;
 #define FT_VERSION_VALUE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
 
-static void *ft_handle = NULL;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
-MAKE_FUNCPTR(FT_Done_Face);
-MAKE_FUNCPTR(FT_Get_Char_Index);
-MAKE_FUNCPTR(FT_Get_First_Char);
-MAKE_FUNCPTR(FT_Get_Next_Char);
-MAKE_FUNCPTR(FT_Get_Sfnt_Name);
-MAKE_FUNCPTR(FT_Get_Sfnt_Name_Count);
-MAKE_FUNCPTR(FT_Get_Sfnt_Table);
-MAKE_FUNCPTR(FT_Get_WinFNT_Header);
-MAKE_FUNCPTR(FT_Init_FreeType);
-MAKE_FUNCPTR(FT_Library_Version);
-MAKE_FUNCPTR(FT_Load_Glyph);
-MAKE_FUNCPTR(FT_Load_Sfnt_Table);
-MAKE_FUNCPTR(FT_Matrix_Multiply);
-MAKE_FUNCPTR(FT_MulDiv);
+#define pFT_Done_Face                   FT_Done_Face
+#define pFT_Get_Char_Index              FT_Get_Char_Index
+#define pFT_Get_First_Char              FT_Get_First_Char
+#define pFT_Get_Next_Char               FT_Get_Next_Char
+#define pFT_Get_Sfnt_Name               FT_Get_Sfnt_Name
+#define pFT_Get_Sfnt_Name_Count         FT_Get_Sfnt_Name_Count
+#define pFT_Get_Sfnt_Table              FT_Get_Sfnt_Table
+#define pFT_Get_WinFNT_Header           FT_Get_WinFNT_Header
+#define pFT_Init_FreeType               FT_Init_FreeType
+#define pFT_Library_Version             FT_Library_Version
+#define pFT_Load_Glyph                  FT_Load_Glyph
+#define pFT_Load_Sfnt_Table             FT_Load_Sfnt_Table
+#define pFT_Matrix_Multiply             FT_Matrix_Multiply
+#define pFT_MulDiv                      FT_MulDiv
 #ifdef FT_MULFIX_INLINED
-#define pFT_MulFix FT_MULFIX_INLINED
+#define pFT_MulFix                      FT_MULFIX_INLINED
 #else
-MAKE_FUNCPTR(FT_MulFix);
+#define pFT_MulFix                      FT_MulFix
 #endif
-MAKE_FUNCPTR(FT_New_Face);
-MAKE_FUNCPTR(FT_New_Memory_Face);
-MAKE_FUNCPTR(FT_Outline_Get_Bitmap);
-MAKE_FUNCPTR(FT_Outline_Get_CBox);
-MAKE_FUNCPTR(FT_Outline_Transform);
-MAKE_FUNCPTR(FT_Outline_Translate);
-MAKE_FUNCPTR(FT_Render_Glyph);
-MAKE_FUNCPTR(FT_Set_Charmap);
-MAKE_FUNCPTR(FT_Set_Pixel_Sizes);
-MAKE_FUNCPTR(FT_Vector_Length);
-MAKE_FUNCPTR(FT_Vector_Transform);
-MAKE_FUNCPTR(FT_Vector_Unit);
-static FT_Error (*pFT_Outline_Embolden)(FT_Outline *, FT_Pos);
-static FT_TrueTypeEngineType (*pFT_Get_TrueType_Engine_Type)(FT_Library);
-#ifdef FT_LCD_FILTER_H
-static FT_Error (*pFT_Library_SetLcdFilter)(FT_Library, FT_LcdFilter);
-#endif
-static FT_Error (*pFT_Property_Set)(FT_Library, const FT_String *, const FT_String *, const void *);
+#define pFT_New_Face                    FT_New_Face
+#define pFT_New_Memory_Face             FT_New_Memory_Face
+#define pFT_Outline_Get_Bitmap          FT_Outline_Get_Bitmap
+#define pFT_Outline_Get_CBox            FT_Outline_Get_CBox
+#define pFT_Outline_Transform           FT_Outline_Transform
+#define pFT_Outline_Translate           FT_Outline_Translate
+#define pFT_Render_Glyph                FT_Render_Glyph
+#define pFT_Set_Charmap                 FT_Set_Charmap
+#define pFT_Set_Pixel_Sizes             FT_Set_Pixel_Sizes
+#define pFT_Vector_Length               FT_Vector_Length
+#define pFT_Vector_Transform            FT_Vector_Transform
+#define pFT_Vector_Unit                 FT_Vector_Unit
+#define pFT_Outline_Embolden            FT_Outline_Embolden
+#define pFT_Get_TrueType_Engine_Type    FT_Get_TrueType_Engine_Type
+#define pFT_Library_SetLcdFilter        FT_Library_SetLcdFilter
+#define pFT_Property_Set                FT_Property_Set
 
-#ifdef SONAME_LIBFONTCONFIG
+#define FT_VERSION_ATLEAST(major, minor, patch) \
+    ((FREETYPE_MAJOR) > (major) \
+     || ((FREETYPE_MAJOR) == (major) && (FREETYPE_MINOR) > (minor)) \
+     || ((FREETYPE_MAJOR) == (major) && (FREETYPE_MINOR) == (minor) \
+	  && (FREETYPE_PATCH) >= (patch)))
+
+#define FT_HAS_GET_TRUETYPE_ENGINE_TYPE (FT_VERSION_ATLEAST(2, 2, 0))
+
+#ifdef HAVE_LIBFONTCONFIG
 #include <fontconfig/fontconfig.h>
-MAKE_FUNCPTR(FcConfigSubstitute);
-MAKE_FUNCPTR(FcDefaultSubstitute);
-MAKE_FUNCPTR(FcFontList);
-MAKE_FUNCPTR(FcFontMatch);
-MAKE_FUNCPTR(FcFontSetDestroy);
-MAKE_FUNCPTR(FcInit);
-MAKE_FUNCPTR(FcPatternAddString);
-MAKE_FUNCPTR(FcPatternCreate);
-MAKE_FUNCPTR(FcPatternDestroy);
-MAKE_FUNCPTR(FcPatternGetBool);
-MAKE_FUNCPTR(FcPatternGetInteger);
-MAKE_FUNCPTR(FcPatternGetString);
-MAKE_FUNCPTR(FcConfigGetFontDirs);
-MAKE_FUNCPTR(FcConfigGetCurrent);
-MAKE_FUNCPTR(FcCacheCopySet);
-MAKE_FUNCPTR(FcCacheNumSubdir);
-MAKE_FUNCPTR(FcCacheSubdir);
-MAKE_FUNCPTR(FcDirCacheRead);
-MAKE_FUNCPTR(FcDirCacheUnload);
-MAKE_FUNCPTR(FcStrListCreate);
-MAKE_FUNCPTR(FcStrListDone);
-MAKE_FUNCPTR(FcStrListNext);
-MAKE_FUNCPTR(FcStrSetAdd);
-MAKE_FUNCPTR(FcStrSetCreate);
-MAKE_FUNCPTR(FcStrSetDestroy);
-MAKE_FUNCPTR(FcStrSetMember);
+#define pFcConfigSubstitute     FcConfigSubstitute
+#define pFcDefaultSubstitute    FcDefaultSubstitute
+#define pFcFontList             FcFontList
+#define pFcFontMatch            FcFontMatch
+#define pFcFontSetDestroy       FcFontSetDestroy
+#define pFcInit                 FcInit
+#define pFcPatternAddString     FcPatternAddString
+#define pFcPatternCreate        FcPatternCreate
+#define pFcPatternDestroy       FcPatternDestroy
+#define pFcPatternGetBool       FcPatternGetBool
+#define pFcPatternGetInteger    FcPatternGetInteger
+#define pFcPatternGetString     FcPatternGetString
+#define pFcConfigGetFontDirs    FcConfigGetFontDirs
+#define pFcConfigGetCurrent     FcConfigGetCurrent
+#define pFcCacheCopySet         FcCacheCopySet
+#define pFcCacheNumSubdir       FcCacheNumSubdir
+#define pFcCacheSubdir          FcCacheSubdir
+#define pFcDirCacheRead         FcDirCacheRead
+#define pFcDirCacheUnload       FcDirCacheUnload
+#define pFcStrListCreate        FcStrListCreate
+#define pFcStrListDone          FcStrListDone
+#define pFcStrListNext          FcStrListNext
+#define pFcStrSetAdd            FcStrSetAdd
+#define pFcStrSetCreate         FcStrSetCreate
+#define pFcStrSetDestroy        FcStrSetDestroy
+#define pFcStrSetMember         FcStrSetMember
 #ifndef FC_NAMELANG
 #define FC_NAMELANG "namelang"
 #endif
 #ifndef FC_PRGNAME
 #define FC_PRGNAME "prgname"
 #endif
-#endif /* SONAME_LIBFONTCONFIG */
-
-#undef MAKE_FUNCPTR
+#endif /* HAVE_LIBFONTCONFIG */
 
 #ifndef FT_MAKE_TAG
 #define FT_MAKE_TAG( ch0, ch1, ch2, ch3 ) \
@@ -552,12 +553,12 @@ static BOOL is_hinting_enabled(void)
     if (enabled == -1)
     {
         /* Use the >= 2.2.0 function if available */
-        if (pFT_Get_TrueType_Engine_Type)
-        {
-            FT_TrueTypeEngineType type = pFT_Get_TrueType_Engine_Type(library);
-            enabled = (type == FT_TRUETYPE_ENGINE_TYPE_PATENTED);
-        }
-        else enabled = FALSE;
+#if FT_HAS_GET_TRUETYPE_ENGINE_TYPE
+        FT_TrueTypeEngineType type = pFT_Get_TrueType_Engine_Type(library);
+        enabled = (type == FT_TRUETYPE_ENGINE_TYPE_PATENTED);
+#else
+        enabled = FALSE;
+#endif
         TRACE("hinting is %senabled\n", enabled ? "" : "NOT ");
     }
     return enabled;
@@ -572,8 +573,7 @@ static BOOL is_subpixel_rendering_enabled( void )
         if (FT_SimpleVersion >= FT_VERSION_VALUE(2, 8, 1))
             enabled = TRUE;
 #ifdef FT_LCD_FILTER_H
-        else if (pFT_Library_SetLcdFilter &&
-                 pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature)
+        else if (pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature)
             enabled = TRUE;
 #endif
         else enabled = FALSE;
@@ -1493,7 +1493,7 @@ static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
 }
 #endif
 
-#ifdef SONAME_LIBFONTCONFIG
+#ifdef HAVE_LIBFONTCONFIG
 
 static BOOL fontconfig_enabled;
 static FcPattern *pattern_serif;
@@ -1589,43 +1589,6 @@ static void fontconfig_add_font( FcPattern *pattern, DWORD flags )
 
 static void init_fontconfig(void)
 {
-    void *fc_handle = dlopen(SONAME_LIBFONTCONFIG, RTLD_NOW);
-
-    if (!fc_handle)
-    {
-        TRACE("Wine cannot find the fontconfig library (%s).\n", SONAME_LIBFONTCONFIG);
-        return;
-    }
-
-#define LOAD_FUNCPTR(f) if((p##f = dlsym(fc_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); return;}
-    LOAD_FUNCPTR(FcConfigSubstitute);
-    LOAD_FUNCPTR(FcDefaultSubstitute);
-    LOAD_FUNCPTR(FcFontList);
-    LOAD_FUNCPTR(FcFontMatch);
-    LOAD_FUNCPTR(FcFontSetDestroy);
-    LOAD_FUNCPTR(FcInit);
-    LOAD_FUNCPTR(FcPatternAddString);
-    LOAD_FUNCPTR(FcPatternCreate);
-    LOAD_FUNCPTR(FcPatternDestroy);
-    LOAD_FUNCPTR(FcPatternGetBool);
-    LOAD_FUNCPTR(FcPatternGetInteger);
-    LOAD_FUNCPTR(FcPatternGetString);
-    LOAD_FUNCPTR(FcConfigGetFontDirs);
-    LOAD_FUNCPTR(FcConfigGetCurrent);
-    LOAD_FUNCPTR(FcCacheCopySet);
-    LOAD_FUNCPTR(FcCacheNumSubdir);
-    LOAD_FUNCPTR(FcCacheSubdir);
-    LOAD_FUNCPTR(FcDirCacheRead);
-    LOAD_FUNCPTR(FcDirCacheUnload);
-    LOAD_FUNCPTR(FcStrListCreate);
-    LOAD_FUNCPTR(FcStrListDone);
-    LOAD_FUNCPTR(FcStrListNext);
-    LOAD_FUNCPTR(FcStrSetAdd);
-    LOAD_FUNCPTR(FcStrSetCreate);
-    LOAD_FUNCPTR(FcStrSetDestroy);
-    LOAD_FUNCPTR(FcStrSetMember);
-#undef LOAD_FUNCPTR
-
     if (pFcInit())
     {
         FcPattern *pattern = pFcPatternCreate();
@@ -1836,60 +1799,8 @@ static void load_mac_fonts(void)
 
 static BOOL init_freetype(void)
 {
-    ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
-    if(!ft_handle) {
-        WINE_MESSAGE(
-      "Wine cannot find the FreeType font library.  To enable Wine to\n"
-      "use TrueType fonts please install a version of FreeType greater than\n"
-      "or equal to 2.0.5.\n"
-      "http://www.freetype.org\n");
-	return FALSE;
-    }
-
-#define LOAD_FUNCPTR(f) if((p##f = dlsym(ft_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); goto sym_not_found;}
-
-    LOAD_FUNCPTR(FT_Done_Face)
-    LOAD_FUNCPTR(FT_Get_Char_Index)
-    LOAD_FUNCPTR(FT_Get_First_Char)
-    LOAD_FUNCPTR(FT_Get_Next_Char)
-    LOAD_FUNCPTR(FT_Get_Sfnt_Name)
-    LOAD_FUNCPTR(FT_Get_Sfnt_Name_Count)
-    LOAD_FUNCPTR(FT_Get_Sfnt_Table)
-    LOAD_FUNCPTR(FT_Get_WinFNT_Header)
-    LOAD_FUNCPTR(FT_Init_FreeType)
-    LOAD_FUNCPTR(FT_Library_Version)
-    LOAD_FUNCPTR(FT_Load_Glyph)
-    LOAD_FUNCPTR(FT_Load_Sfnt_Table)
-    LOAD_FUNCPTR(FT_Matrix_Multiply)
-    LOAD_FUNCPTR(FT_MulDiv)
-#ifndef FT_MULFIX_INLINED
-    LOAD_FUNCPTR(FT_MulFix)
-#endif
-    LOAD_FUNCPTR(FT_New_Face)
-    LOAD_FUNCPTR(FT_New_Memory_Face)
-    LOAD_FUNCPTR(FT_Outline_Get_Bitmap)
-    LOAD_FUNCPTR(FT_Outline_Get_CBox)
-    LOAD_FUNCPTR(FT_Outline_Transform)
-    LOAD_FUNCPTR(FT_Outline_Translate)
-    LOAD_FUNCPTR(FT_Render_Glyph)
-    LOAD_FUNCPTR(FT_Set_Charmap)
-    LOAD_FUNCPTR(FT_Set_Pixel_Sizes)
-    LOAD_FUNCPTR(FT_Vector_Length)
-    LOAD_FUNCPTR(FT_Vector_Transform)
-    LOAD_FUNCPTR(FT_Vector_Unit)
-#undef LOAD_FUNCPTR
-    /* Don't warn if these ones are missing */
-    pFT_Outline_Embolden = dlsym(ft_handle, "FT_Outline_Embolden");
-    pFT_Get_TrueType_Engine_Type = dlsym(ft_handle, "FT_Get_TrueType_Engine_Type");
-#ifdef FT_LCD_FILTER_H
-    pFT_Library_SetLcdFilter = dlsym(ft_handle, "FT_Library_SetLcdFilter");
-#endif
-    pFT_Property_Set = dlsym(ft_handle, "FT_Property_Set");
-
     if(pFT_Init_FreeType(&library) != 0) {
         ERR("Can't init FreeType library\n");
-	dlclose(ft_handle);
-        ft_handle = NULL;
 	return FALSE;
     }
     pFT_Library_Version(library,&FT_Version.major,&FT_Version.minor,&FT_Version.patch);
@@ -1900,28 +1811,16 @@ static BOOL init_freetype(void)
                        ((FT_Version.patch      ) & 0x0000ff);
 
     /* In FreeType < 2.8.1 v40's FT_LOAD_TARGET_MONO has broken advance widths. */
-    if (pFT_Property_Set && FT_SimpleVersion < FT_VERSION_VALUE(2, 8, 1))
-    {
-        FT_UInt interpreter_version = 35;
-        pFT_Property_Set( library, "truetype", "interpreter-version", &interpreter_version );
-    }
+#if FT_VERSION_ATLEAST(2, 8, 1)
+    FT_UInt interpreter_version = 35;
+    pFT_Property_Set( library, "truetype", "interpreter-version", &interpreter_version );
+#endif
 
 #ifdef FT_LCD_FILTER_H
-    if (pFT_Library_SetLcdFilter)
-        pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
+    pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
 #endif
 
     return TRUE;
-
-sym_not_found:
-    WINE_MESSAGE(
-      "Wine cannot find certain functions that it needs inside the FreeType\n"
-      "font library.  To enable Wine to use TrueType fonts please upgrade\n"
-      "FreeType to at least version 2.1.4.\n"
-      "http://www.freetype.org\n");
-    dlclose(ft_handle);
-    ft_handle = NULL;
-    return FALSE;
 }
 
 /*************************************************************
@@ -1929,7 +1828,7 @@ sym_not_found:
  */
 static void freetype_load_fonts(void)
 {
-#ifdef SONAME_LIBFONTCONFIG
+#ifdef HAVE_LIBFONTCONFIG
     load_fontconfig_fonts();
 #elif defined(HAVE_CARBON_CARBON_H)
     load_mac_fonts();
@@ -2390,7 +2289,7 @@ done:
 static BOOL fontconfig_enum_family_fallbacks( DWORD pitch_and_family, int index,
                                               WCHAR buffer[LF_FACESIZE] )
 {
-#ifdef SONAME_LIBFONTCONFIG
+#ifdef HAVE_LIBFONTCONFIG
     FcPattern *pat;
     char *str;
     DWORD len;
@@ -2739,8 +2638,6 @@ static BOOL get_bold_glyph_outline(FT_GlyphSlot glyph, LONG ppem, FT_Glyph_Metri
     FT_BBox bbox;
 
     if(glyph->format != FT_GLYPH_FORMAT_OUTLINE)
-        return FALSE;
-    if(!pFT_Outline_Embolden)
         return FALSE;
 
     strength = pFT_MulDiv(ppem, 1 << 6, 24);
@@ -4288,7 +4185,7 @@ static const struct font_backend_funcs font_funcs =
 const struct font_backend_funcs *init_freetype_lib(void)
 {
     if (!init_freetype()) return NULL;
-#ifdef SONAME_LIBFONTCONFIG
+#ifdef HAVE_LIBFONTCONFIG
     init_fontconfig();
 #endif
     NtQueryDefaultLocale( FALSE, &system_lcid );
