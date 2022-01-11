@@ -48,7 +48,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
-static void *ft_handle = NULL;
 static FT_Library library = 0;
 typedef struct
 {
@@ -57,37 +56,43 @@ typedef struct
     FT_Int patch;
 } FT_Version_t;
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
-MAKE_FUNCPTR(FT_Activate_Size);
-MAKE_FUNCPTR(FT_Done_Face);
-MAKE_FUNCPTR(FT_Done_FreeType);
-MAKE_FUNCPTR(FT_Done_Glyph);
-MAKE_FUNCPTR(FT_Done_Size);
-MAKE_FUNCPTR(FT_Get_First_Char);
-MAKE_FUNCPTR(FT_Get_Glyph);
-MAKE_FUNCPTR(FT_Get_Kerning);
-MAKE_FUNCPTR(FT_Get_Sfnt_Table);
-MAKE_FUNCPTR(FT_Glyph_Copy);
-MAKE_FUNCPTR(FT_Glyph_Get_CBox);
-MAKE_FUNCPTR(FT_Glyph_Transform);
-MAKE_FUNCPTR(FT_Init_FreeType);
-MAKE_FUNCPTR(FT_Library_Version);
-MAKE_FUNCPTR(FT_Load_Glyph);
-MAKE_FUNCPTR(FT_Matrix_Multiply);
-MAKE_FUNCPTR(FT_MulDiv);
-MAKE_FUNCPTR(FT_New_Memory_Face);
-MAKE_FUNCPTR(FT_New_Size);
-MAKE_FUNCPTR(FT_Outline_Copy);
-MAKE_FUNCPTR(FT_Outline_Decompose);
-MAKE_FUNCPTR(FT_Outline_Done);
-MAKE_FUNCPTR(FT_Outline_Embolden);
-MAKE_FUNCPTR(FT_Outline_Get_Bitmap);
-MAKE_FUNCPTR(FT_Outline_New);
-MAKE_FUNCPTR(FT_Outline_Transform);
-MAKE_FUNCPTR(FT_Outline_Translate);
-MAKE_FUNCPTR(FT_Set_Pixel_Sizes);
-#undef MAKE_FUNCPTR
-static FT_Error (*pFT_Outline_EmboldenXY)(FT_Outline *, FT_Pos, FT_Pos);
+#define pFT_Activate_Size         FT_Activate_Size
+#define pFT_Done_Face             FT_Done_Face
+#define pFT_Done_FreeType         FT_Done_FreeType
+#define pFT_Done_Glyph            FT_Done_Glyph
+#define pFT_Done_Size             FT_Done_Size
+#define pFT_Get_First_Char        FT_Get_First_Char
+#define pFT_Get_Glyph             FT_Get_Glyph
+#define pFT_Get_Kerning           FT_Get_Kerning
+#define pFT_Get_Sfnt_Table        FT_Get_Sfnt_Table
+#define pFT_Glyph_Copy            FT_Glyph_Copy
+#define pFT_Glyph_Get_CBox        FT_Glyph_Get_CBox
+#define pFT_Glyph_Transform       FT_Glyph_Transform
+#define pFT_Init_FreeType         FT_Init_FreeType
+#define pFT_Library_Version       FT_Library_Version
+#define pFT_Load_Glyph            FT_Load_Glyph
+#define pFT_Matrix_Multiply       FT_Matrix_Multiply
+#define pFT_MulDiv                FT_MulDiv
+#define pFT_New_Memory_Face       FT_New_Memory_Face
+#define pFT_New_Size              FT_New_Size
+#define pFT_Outline_Copy          FT_Outline_Copy
+#define pFT_Outline_Decompose     FT_Outline_Decompose
+#define pFT_Outline_Done          FT_Outline_Done
+#define pFT_Outline_Embolden      FT_Outline_Embolden
+#define pFT_Outline_Get_Bitmap    FT_Outline_Get_Bitmap
+#define pFT_Outline_New           FT_Outline_New
+#define pFT_Outline_Transform     FT_Outline_Transform
+#define pFT_Outline_Translate     FT_Outline_Translate
+#define pFT_Set_Pixel_Sizes       FT_Set_Pixel_Sizes
+#define pFT_Outline_EmboldenXY    FT_Outline_EmboldenXY
+
+#define FT_VERSION_ATLEAST(major, minor, patch) \
+    ((FREETYPE_MAJOR) > (major) \
+     || ((FREETYPE_MAJOR) == (major) && (FREETYPE_MINOR) > (minor)) \
+     || ((FREETYPE_MAJOR) == (major) && (FREETYPE_MINOR) == (minor) \
+	  && (FREETYPE_PATCH) >= (patch)))
+
+#define FT_HAS_OUTLINE_EMBOLDENXY (FT_VERSION_ATLEAST(2, 4, 10))
 
 #define FaceFromObject(o) ((FT_Face)(ULONG_PTR)(o))
 
@@ -117,62 +122,15 @@ static NTSTATUS process_attach(void *args)
 {
     FT_Version_t FT_Version;
 
-    ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
-    if (!ft_handle)
-    {
-        WINE_MESSAGE("Wine cannot find the FreeType font library.\n");
-        return STATUS_DLL_NOT_FOUND;
-    }
-
-#define LOAD_FUNCPTR(f) if((p##f = dlsym(ft_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); goto sym_not_found;}
-    LOAD_FUNCPTR(FT_Activate_Size)
-    LOAD_FUNCPTR(FT_Done_Face)
-    LOAD_FUNCPTR(FT_Done_FreeType)
-    LOAD_FUNCPTR(FT_Done_Glyph)
-    LOAD_FUNCPTR(FT_Done_Size)
-    LOAD_FUNCPTR(FT_Get_First_Char)
-    LOAD_FUNCPTR(FT_Get_Glyph)
-    LOAD_FUNCPTR(FT_Get_Kerning)
-    LOAD_FUNCPTR(FT_Get_Sfnt_Table)
-    LOAD_FUNCPTR(FT_Glyph_Copy)
-    LOAD_FUNCPTR(FT_Glyph_Get_CBox)
-    LOAD_FUNCPTR(FT_Glyph_Transform)
-    LOAD_FUNCPTR(FT_Init_FreeType)
-    LOAD_FUNCPTR(FT_Library_Version)
-    LOAD_FUNCPTR(FT_Load_Glyph)
-    LOAD_FUNCPTR(FT_Matrix_Multiply)
-    LOAD_FUNCPTR(FT_MulDiv)
-    LOAD_FUNCPTR(FT_New_Memory_Face)
-    LOAD_FUNCPTR(FT_New_Size)
-    LOAD_FUNCPTR(FT_Outline_Copy)
-    LOAD_FUNCPTR(FT_Outline_Decompose)
-    LOAD_FUNCPTR(FT_Outline_Done)
-    LOAD_FUNCPTR(FT_Outline_Embolden)
-    LOAD_FUNCPTR(FT_Outline_Get_Bitmap)
-    LOAD_FUNCPTR(FT_Outline_New)
-    LOAD_FUNCPTR(FT_Outline_Transform)
-    LOAD_FUNCPTR(FT_Outline_Translate)
-    LOAD_FUNCPTR(FT_Set_Pixel_Sizes)
-#undef LOAD_FUNCPTR
-    pFT_Outline_EmboldenXY = dlsym(ft_handle, "FT_Outline_EmboldenXY");
-
     if (pFT_Init_FreeType(&library) != 0)
     {
         ERR("Can't init FreeType library\n");
-        dlclose(ft_handle);
-        ft_handle = NULL;
         return STATUS_UNSUCCESSFUL;
     }
     pFT_Library_Version(library, &FT_Version.major, &FT_Version.minor, &FT_Version.patch);
 
     TRACE("FreeType version is %d.%d.%d\n", FT_Version.major, FT_Version.minor, FT_Version.patch);
     return STATUS_SUCCESS;
-
-sym_not_found:
-    WINE_MESSAGE("Wine cannot find certain functions that it needs from FreeType library.\n");
-    dlclose(ft_handle);
-    ft_handle = NULL;
-    return STATUS_UNSUCCESSFUL;
 }
 
 static NTSTATUS process_detach(void *args)
@@ -429,10 +387,11 @@ static void embolden_glyph_outline(FT_Outline *outline, FLOAT emsize)
     FT_Pos strength;
 
     strength = pFT_MulDiv(emsize, 1 << 6, 24);
-    if (pFT_Outline_EmboldenXY)
-        pFT_Outline_EmboldenXY(outline, strength, 0);
-    else
-        pFT_Outline_Embolden(outline, strength);
+#if FT_HAS_OUTLINE_EMBOLDENXY
+    pFT_Outline_EmboldenXY(outline, strength, 0);
+#else
+    pFT_Outline_Embolden(outline, strength);
+#endif
 }
 
 static void embolden_glyph(FT_Glyph glyph, FLOAT emsize)
