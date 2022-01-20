@@ -1128,9 +1128,8 @@ then
     ac_save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $X_CFLAGS"
 
-    WINE_CHECK_SONAME(X11,XCreateWindow,,,[$X_LIBS $X_EXTRA_LIBS])
-    WINE_CHECK_SONAME(Xext,XextCreateExtension,[X_LIBS="$X_LIBS -lXext"],,[$X_LIBS -lX11 $X_EXTRA_LIBS])
-    X_LIBS="$X_LIBS -lX11"
+    WINE_CHECK_LIB(X11,XCreateWindow)
+    WINE_CHECK_LIB(Xext,XextCreateExtension)
 
     dnl *** All of the following tests require X11/Xlib.h
     AC_CHECK_HEADERS([X11/Xlib.h \
@@ -1155,31 +1154,31 @@ then
 # include <X11/Xutil.h>
 #endif])
 
-        dnl *** Check for X keyboard extension
+        dnl *** Check for X keyboard extension (but we already checked for X11 itself)
         if test "$ac_cv_header_X11_XKBlib_h" = "yes"
         then
-              AC_CHECK_LIB(X11, XkbQueryExtension,
-              AC_DEFINE(HAVE_XKB, 1, [Define if you have the XKB extension]),,[$X_LIBS $X_EXTRA_LIBS])
+            AC_CHECK_LIB(X11, XkbQueryExtension,
+              AC_DEFINE(HAVE_XKB, 1, [Define if you have the XKB extension]),,[$X11_LIBS])
         fi
 
         dnl *** Check for X cursor
         if test "$ac_cv_header_X11_Xcursor_Xcursor_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xcursor,XcursorImageLoadCursor,,,[$X_LIBS $X_EXTRA_LIBS])
+            WINE_CHECK_LIB(Xcursor,XcursorImageLoadCursor,,,[-ldl])
         fi
-        WINE_NOTICE_WITH(xcursor,[test "x$ac_cv_lib_soname_Xcursor" = "x"],
+        WINE_NOTICE_WITH(xcursor,[test "x$ac_cv_lib_Xcursor_XcursorImageLoadCursor" != "xyes"],
                          [libxcursor ${notice_platform}development files not found, the Xcursor extension won't be supported.])
 
         dnl *** Check for X input extension
         if test "$ac_cv_header_X11_extensions_XInput_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xi,XOpenDevice,,,[$X_LIBS $X_EXTRA_LIBS])
+            WINE_CHECK_LIB(Xi,XOpenDevice)
         fi
-        WINE_NOTICE_WITH(xinput,[test "x$ac_cv_lib_soname_Xi" = "x"],
+        WINE_NOTICE_WITH(xinput,[test "x$ac_cv_lib_Xi_XOpenDevice" != "xyes"],
                          [libxi ${notice_platform}development files not found, the Xinput extension won't be supported.])
 
         dnl *** Check for X input 2 extension
-        if test "x$ac_cv_lib_soname_Xi" != x
+        if test "x$ac_cv_lib_Xi_XOpenDevice" != x
         then
             WINE_NOTICE_WITH(xinput2,[test "$ac_cv_header_X11_extensions_XInput2_h" != "yes"],
                              [XInput2 headers not found, the XInput 2 extension won't be supported.])
@@ -1188,8 +1187,9 @@ then
         dnl *** Check for X Shm extension
         if test "$ac_cv_header_X11_extensions_XShm_h" = "yes"
         then
-              AC_CHECK_LIB(Xext, XShmQueryExtension,
-              AC_DEFINE(HAVE_LIBXXSHM, 1, [Define if you have the X Shm extension]),,[$X_LIBS $X_EXTRA_LIBS])
+            AC_CHECK_LIB(Xext, XShmQueryExtension,
+                [AC_DEFINE(HAVE_LIBXXSHM, 1, [Define if you have the X Shm extension])
+                 XEXT_LIBS="$XEXT_LIBS -ldl"],,[$XEXT_LIBS -ldl])
         fi
         WINE_NOTICE_WITH(xshm,[test "$ac_cv_lib_Xext_XShmQueryExtension" != "yes"],
                          [XShm ${notice_platform}development files not found, X Shared Memory won't be supported.])
@@ -1197,8 +1197,8 @@ then
         dnl *** Check for X shape extension
         if test "$ac_cv_header_X11_extensions_shape_h" = "yes"
         then
-              AC_CHECK_LIB(Xext,XShapeQueryExtension,
-	      AC_DEFINE(HAVE_LIBXSHAPE, 1, [Define if you have the X Shape extension]),,[$X_LIBS $X_EXTRA_LIBS])
+            AC_CHECK_LIB(Xext,XShapeQueryExtension,
+                AC_DEFINE(HAVE_LIBXSHAPE, 1, [Define if you have the X Shape extension]),,[$XEXT_LIBS])
         fi
         WINE_NOTICE_WITH(xshape,[test "$ac_cv_lib_Xext_XShapeQueryExtension" != "yes"],
                          [XShape ${notice_platform}development files not found, XShape won't be supported.])
@@ -1206,39 +1206,39 @@ then
         dnl *** Check for XFree86 VMODE extension
         if test "$ac_cv_header_X11_extensions_xf86vmode_h" = "yes" -o "$ac_cv_header_X11_extensions_xf86vmproto_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xxf86vm,XF86VidModeQueryExtension,,,[$X_LIBS $X_EXTRA_LIBS])
+            WINE_CHECK_LIB(Xxf86vm,XF86VidModeQueryExtension)
         fi
-        WINE_NOTICE_WITH(xxf86vm,[test "x$ac_cv_lib_soname_Xxf86vm" = "x"],
+        WINE_NOTICE_WITH(xxf86vm,[test "x$ac_cv_lib_Xxf86vm_XF86VidModeQueryExtension" != "xyes"],
                          [libXxf86vm ${notice_platform}development files not found, XFree86 Vidmode won't be supported.])
 
         dnl *** Check for Transform functions in Xrender
-        if test "$ac_cv_header_X11_extensions_Xrender_h" = "yes" -a "x$ac_cv_lib_soname_X11" != "x"
+        if test "$ac_cv_header_X11_extensions_Xrender_h" = "yes" -a "x$ac_cv_lib_X11_XCreateWindow" = "xyes"
         then
-            WINE_CHECK_SONAME(Xrender,XRenderQueryExtension,
+            WINE_CHECK_LIB(Xrender,XRenderQueryExtension,
               [AC_CHECK_LIB(Xrender,XRenderSetPictureTransform,
                 [AC_DEFINE(HAVE_XRENDERSETPICTURETRANSFORM, 1,
-                 [Define if Xrender has the XRenderSetPictureTransform function])],,[$X_LIBS $X_EXTRA_LIBS])
+                 [Define if Xrender has the XRenderSetPictureTransform function])],,[$XRENDER_LIBS])
                AC_CHECK_LIB(Xrender,XRenderCreateLinearGradient,
                 [AC_DEFINE(HAVE_XRENDERCREATELINEARGRADIENT, 1,
-                 [Define if Xrender has the XRenderCreateLinearGradient function])],,[$X_LIBS $X_EXTRA_LIBS])],,[$X_LIBS $X_EXTRA_LIBS])
+                 [Define if Xrender has the XRenderCreateLinearGradient function])],,[$XRENDER_LIBS])],,[-ldl])
 
         fi
-        WINE_WARNING_WITH(xrender,[test "x$ac_cv_lib_soname_Xrender" = "x"],
+        WINE_WARNING_WITH(xrender,[test "x$ac_cv_lib_Xrender_XRenderQueryExtension" != "xyes"],
                          [libxrender ${notice_platform}development files not found, XRender won't be supported.])
 
         dnl *** Check for X RandR extension
-        if test "$ac_cv_header_X11_extensions_Xrandr_h" = "yes" -a "x$ac_cv_lib_soname_Xrender" != "x"
+        if test "$ac_cv_header_X11_extensions_Xrandr_h" = "yes" -a "x$ac_cv_lib_Xrender_XRenderQueryExtension" != "x"
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>]], [[static typeof(XRRSetScreenConfigAndRate) * func; if (func) return 0;]])],
-                  [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,
+                  [WINE_CHECK_LIB(Xrandr,XRRQueryExtension,
                     [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>]], [[static typeof(XRRGetProviderResources) *f; if (f) return 0;]])],
                       [AC_DEFINE(HAVE_XRRGETPROVIDERRESOURCES, 1,
                         [Define if Xrandr has the XRRGetProviderResources function])],
-                      [WINE_NOTICE([libxrandr ${notice_platform}development files too old, XRandR display device handler won't be supported.])])],,[$X_LIBS $X_EXTRA_LIBS])])
+                      [WINE_NOTICE([libxrandr ${notice_platform}development files too old, XRandR display device handler won't be supported.])])],,[-ldl])])
         fi
-        WINE_NOTICE_WITH(xrandr,[test "x$ac_cv_lib_soname_Xrandr" = "x"],
+        WINE_NOTICE_WITH(xrandr,[test "x$ac_cv_lib_Xrandr_XRRQueryExtension" != "xyes"],
                          [libxrandr ${notice_platform}development files not found, XRandr won't be supported.])
 
         dnl *** Check for Xfixes extension
@@ -1246,9 +1246,9 @@ then
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xfixes.h>]], [[static typeof(XFixesQueryVersion) * func; if (func) return 0;]])],
-                  [WINE_CHECK_SONAME(Xfixes,XFixesQueryVersion,,,[$X_LIBS $X_EXTRA_LIBS])])
+                  [WINE_CHECK_LIB(Xfixes,XFixesQueryVersion)])
         fi
-        WINE_NOTICE_WITH(xfixes,[test "x$ac_cv_lib_soname_Xfixes" = "x"],
+        WINE_NOTICE_WITH(xfixes,[test "x$ac_cv_lib_Xfixes_XFixesQueryVersion" != "xyes"],
                          [libxfixes ${notice_platform}development files not found, Xfixes won't be supported.])
 
         dnl *** Check for Xinerama extension
@@ -1256,17 +1256,17 @@ then
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xinerama.h>]], [[static typeof(XineramaQueryScreens) * func; if (func) return 0;]])],
-                  [WINE_CHECK_SONAME(Xinerama,XineramaQueryScreens,,,[$X_LIBS $X_EXTRA_LIBS])])
+                  [WINE_CHECK_LIB(Xinerama,XineramaQueryScreens)])
         fi
-        WINE_NOTICE_WITH(xinerama,[test "x$ac_cv_lib_soname_Xinerama" = "x"],
+        WINE_NOTICE_WITH(xinerama,[test "x$ac_cv_lib_Xinerama_XineramaQueryScreens" != "xyes"],
                          [libxinerama ${notice_platform}development files not found, multi-monitor setups won't be supported.])
 
         dnl *** Check for X Composite extension
         if test "$ac_cv_header_X11_extensions_Xcomposite_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xcomposite,XCompositeRedirectWindow,,,[$X_LIBS $X_EXTRA_LIBS])
+            WINE_CHECK_LIB(Xcomposite,XCompositeRedirectWindow)
         fi
-        WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_soname_Xcomposite" = "x"],
+        WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_Xcomposite_XCompositeRedirectWindow" != "xyes"],
                          [libxcomposite ${notice_platform}development files not found, Xcomposite won't be supported.])
 
         dnl *** Check for XICCallback struct
@@ -1487,7 +1487,7 @@ then
                 [AC_DEFINE(HAVE_FREETYPE, 1, [Define if FreeType 2 is installed])
                  AC_CHECK_TYPES(FT_TrueTypeEngineType,,,[#include <ft2build.h>
 #include FT_MODULE_H])],
-                [FREETYPE_LIBS=""],[-lz])
+                [FREETYPE_CFLAGS="" FREETYPE_LIBS=""], [$FREETYPE_LIBS])
         else
             FREETYPE_CFLAGS=""
             FREETYPE_LIBS=""
@@ -1679,9 +1679,10 @@ then
         then
             AC_CHECK_LIB(fontconfig,FcInit,
                     [AC_DEFINE(HAVE_LIBFONTCONFIG, 1, [Define if Fontconfig is available])],
-                    [FONTCONFIG_CFLAGS=""],[$FREETYPE_LIBS -lz -lexpat])
+                    [FONTCONFIG_CFLAGS="" FONTCONFIG_LIBS=""],[$FONTCONFIG_LIBS])
         else
             FONTCONFIG_CFLAGS=""
+            FONTCONFIG_LIBS=""
         fi])
 fi
 WINE_NOTICE_WITH(fontconfig,[test "x$ac_cv_lib_fontconfig_FcInit" != "xyes"],

@@ -251,7 +251,7 @@ typedef struct tagWTPACKET {
 } WTPACKET, *LPWTPACKET;
 
 
-#ifdef SONAME_LIBXI
+#ifdef HAVE_LIBXI
 
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput.h>
@@ -311,39 +311,18 @@ static WTI_CURSORS_INFO gSysCursor[CURSORMAX];
 static INT              gNumCursors; /* do NOT use this to iterate through gSysCursor slots */
 
 
-/* XInput stuff */
-static void *xinput_handle;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f;
-MAKE_FUNCPTR(XListInputDevices)
-MAKE_FUNCPTR(XFreeDeviceList)
-MAKE_FUNCPTR(XOpenDevice)
-MAKE_FUNCPTR(XQueryDeviceState)
-MAKE_FUNCPTR(XGetDeviceButtonMapping)
-MAKE_FUNCPTR(XCloseDevice)
-MAKE_FUNCPTR(XSelectExtensionEvent)
-MAKE_FUNCPTR(XFreeDeviceState)
-#undef MAKE_FUNCPTR
+#define pXListInputDevices          XListInputDevices
+#define pXFreeDeviceList            XFreeDeviceList
+#define pXOpenDevice                XOpenDevice
+#define pXQueryDeviceState          XQueryDeviceState
+#define pXGetDeviceButtonMapping    XGetDeviceButtonMapping
+#define pXCloseDevice               XCloseDevice
+#define pXSelectExtensionEvent      XSelectExtensionEvent
+#define pXFreeDeviceState           XFreeDeviceState
 
 static INT X11DRV_XInput_Init(void)
 {
-    xinput_handle = dlopen(SONAME_LIBXI, RTLD_NOW);
-    if (xinput_handle)
-    {
-#define LOAD_FUNCPTR(f) if((p##f = dlsym(xinput_handle, #f)) == NULL) goto sym_not_found
-        LOAD_FUNCPTR(XListInputDevices);
-        LOAD_FUNCPTR(XFreeDeviceList);
-        LOAD_FUNCPTR(XOpenDevice);
-        LOAD_FUNCPTR(XGetDeviceButtonMapping);
-        LOAD_FUNCPTR(XCloseDevice);
-        LOAD_FUNCPTR(XSelectExtensionEvent);
-        LOAD_FUNCPTR(XQueryDeviceState);
-        LOAD_FUNCPTR(XFreeDeviceState);
-#undef LOAD_FUNCPTR
-        return 1;
-    }
-sym_not_found:
-    return 0;
+    return 1;
 }
 
 static int Tablet_ErrorHandler(Display *dpy, XErrorEvent *event, void* arg)
@@ -1016,7 +995,7 @@ int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
     XEventClass     event_list[7];
     Window          win = X11DRV_get_whole_window( hOwner );
 
-    if (!win || !xinput_handle) return 0;
+    if (!win) return 0;
 
     TRACE("Creating context for window %p (%lx)  %i cursors\n", hOwner, win, gNumCursors);
 
@@ -1129,8 +1108,6 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
     int rc = 0;
     LPWTI_CURSORS_INFO  tgtcursor;
     TRACE("(%u, %u, %p)\n", wCategory, nIndex, lpOutput);
-
-    if (!xinput_handle) return 0;
 
     switch(wCategory)
     {
@@ -1577,4 +1554,4 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
     return 0;
 }
 
-#endif /* SONAME_LIBXI */
+#endif /* HAVE_LIBXI */

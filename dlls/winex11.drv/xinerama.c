@@ -53,26 +53,13 @@ static inline MONITORINFOEXW *get_primary(void)
     return &monitors[idx];
 }
 
-#ifdef SONAME_LIBXINERAMA
+#ifdef HAVE_LIBXINERAMA
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
-
-MAKE_FUNCPTR(XineramaQueryExtension);
-MAKE_FUNCPTR(XineramaQueryScreens);
+#define pXineramaQueryExtension XineramaQueryExtension
+#define pXineramaQueryScreens XineramaQueryScreens
 
 static void load_xinerama(void)
 {
-    void *handle;
-
-    if (!(handle = dlopen(SONAME_LIBXINERAMA, RTLD_NOW)))
-    {
-        WARN( "failed to open %s\n", SONAME_LIBXINERAMA );
-        return;
-    }
-    pXineramaQueryExtension = dlsym( handle, "XineramaQueryExtension" );
-    if (!pXineramaQueryExtension) WARN( "XineramaQueryScreens not found\n" );
-    pXineramaQueryScreens = dlsym( handle, "XineramaQueryScreens" );
-    if (!pXineramaQueryScreens) WARN( "XineramaQueryScreens not found\n" );
 }
 
 static int query_screens(void)
@@ -83,8 +70,7 @@ static int query_screens(void)
     if (!monitors)  /* first time around */
         load_xinerama();
 
-    if (!pXineramaQueryExtension || !pXineramaQueryScreens ||
-        !pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
+    if (!pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
         !(screens = pXineramaQueryScreens( gdi_display, &count ))) return 0;
 
     if (monitors != &default_monitor) HeapFree( GetProcessHeap(), 0, monitors );
@@ -110,14 +96,14 @@ static int query_screens(void)
     return count;
 }
 
-#else  /* SONAME_LIBXINERAMA */
+#else  /* HAVE_LIBXINERAMA */
 
 static inline int query_screens(void)
 {
     return 0;
 }
 
-#endif  /* SONAME_LIBXINERAMA */
+#endif  /* HAVE_LIBXINERAMA */
 
 static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count )
 {

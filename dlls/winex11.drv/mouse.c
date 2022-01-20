@@ -30,19 +30,16 @@
 #include <X11/extensions/XInput2.h>
 #endif
 
-#ifdef SONAME_LIBXCURSOR
+#ifdef HAVE_LIBXCURSOR
 # include <X11/Xcursor/Xcursor.h>
-static void *xcursor_handle;
-# define MAKE_FUNCPTR(f) static typeof(f) * p##f
-MAKE_FUNCPTR(XcursorImageCreate);
-MAKE_FUNCPTR(XcursorImageDestroy);
-MAKE_FUNCPTR(XcursorImageLoadCursor);
-MAKE_FUNCPTR(XcursorImagesCreate);
-MAKE_FUNCPTR(XcursorImagesDestroy);
-MAKE_FUNCPTR(XcursorImagesLoadCursor);
-MAKE_FUNCPTR(XcursorLibraryLoadCursor);
-# undef MAKE_FUNCPTR
-#endif /* SONAME_LIBXCURSOR */
+#define pXcursorImageCreate         XcursorImageCreate
+#define pXcursorImageDestroy        XcursorImageDestroy
+#define pXcursorImageLoadCursor     XcursorImageLoadCursor
+#define pXcursorImagesCreate        XcursorImagesCreate
+#define pXcursorImagesDestroy       XcursorImagesDestroy
+#define pXcursorImagesLoadCursor    XcursorImagesLoadCursor
+#define pXcursorLibraryLoadCursor   XcursorLibraryLoadCursor
+#endif /* HAVE_LIBXCURSOR */
 
 #define NONAMELESSUNION
 #define OEMRESOURCE
@@ -134,13 +131,11 @@ static Cursor create_cursor( HANDLE handle );
 #ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
 static BOOL xinput2_available;
 static BOOL broken_rawevents;
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
-MAKE_FUNCPTR(XIGetClientPointer);
-MAKE_FUNCPTR(XIFreeDeviceInfo);
-MAKE_FUNCPTR(XIQueryDevice);
-MAKE_FUNCPTR(XIQueryVersion);
-MAKE_FUNCPTR(XISelectEvents);
-#undef MAKE_FUNCPTR
+#define pXIGetClientPointer XIGetClientPointer
+#define pXIFreeDeviceInfo   XIFreeDeviceInfo
+#define pXIQueryDevice      XIQueryDevice
+#define pXIQueryVersion     XIQueryVersion
+#define pXISelectEvents     XISelectEvents
 #endif
 
 /***********************************************************************
@@ -150,24 +145,6 @@ MAKE_FUNCPTR(XISelectEvents);
  */
 void X11DRV_Xcursor_Init(void)
 {
-#ifdef SONAME_LIBXCURSOR
-    xcursor_handle = dlopen(SONAME_LIBXCURSOR, RTLD_NOW);
-    if (!xcursor_handle)
-    {
-        WARN("Xcursor failed to load.  Using fallback code.\n");
-        return;
-    }
-#define LOAD_FUNCPTR(f) p##f = dlsym(xcursor_handle, #f)
-
-    LOAD_FUNCPTR(XcursorImageCreate);
-    LOAD_FUNCPTR(XcursorImageDestroy);
-    LOAD_FUNCPTR(XcursorImageLoadCursor);
-    LOAD_FUNCPTR(XcursorImagesCreate);
-    LOAD_FUNCPTR(XcursorImagesDestroy);
-    LOAD_FUNCPTR(XcursorImagesLoadCursor);
-    LOAD_FUNCPTR(XcursorLibraryLoadCursor);
-#undef LOAD_FUNCPTR
-#endif /* SONAME_LIBXCURSOR */
 }
 
 
@@ -699,7 +676,7 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
     __wine_send_input( hwnd, input, NULL );
 }
 
-#ifdef SONAME_LIBXCURSOR
+#ifdef HAVE_LIBXCURSOR
 
 /***********************************************************************
  *              create_xcursor_frame
@@ -866,7 +843,7 @@ cleanup:
     return cursor;
 }
 
-#endif /* SONAME_LIBXCURSOR */
+#endif /* HAVE_LIBXCURSOR */
 
 
 struct system_cursors
@@ -1108,14 +1085,11 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
 done:
     if (valueA[0])
     {
-#ifdef SONAME_LIBXCURSOR
-        if (pXcursorLibraryLoadCursor)
-        {
-            if (!names)
-                cursor = pXcursorLibraryLoadCursor( gdi_display, valueA );
-            else
-                while (*names && !cursor) cursor = pXcursorLibraryLoadCursor( gdi_display, *names++ );
-        }
+#ifdef HAVE_LIBXCURSOR
+        if (!names)
+            cursor = pXcursorLibraryLoadCursor( gdi_display, valueA );
+        else
+            while (*names && !cursor) cursor = pXcursorLibraryLoadCursor( gdi_display, *names++ );
 #endif
         if (!cursor)
         {
@@ -1430,9 +1404,8 @@ static Cursor create_cursor( HANDLE handle )
 
     if (info.hbmColor)
     {
-#ifdef SONAME_LIBXCURSOR
-        if (pXcursorImagesLoadCursor)
-            cursor = create_xcursor_cursor( hdc, &info, handle, bm.bmWidth, bm.bmHeight );
+#ifdef HAVE_LIBXCURSOR
+        cursor = create_xcursor_cursor( hdc, &info, handle, bm.bmWidth, bm.bmHeight );
 #endif
         if (!cursor) cursor = create_xlib_load_mono_cursor( hdc, handle, bm.bmWidth, bm.bmHeight );
         if (!cursor) cursor = create_xlib_color_cursor( hdc, &info, bm.bmWidth, bm.bmHeight );
@@ -1925,28 +1898,8 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
  */
 void X11DRV_XInput2_Init(void)
 {
-#if defined(SONAME_LIBXI) && defined(HAVE_X11_EXTENSIONS_XINPUT2_H)
+#if defined(HAVE_LIBXI) && defined(HAVE_X11_EXTENSIONS_XINPUT2_H)
     int event, error;
-    void *libxi_handle = dlopen( SONAME_LIBXI, RTLD_NOW );
-
-    if (!libxi_handle)
-    {
-        WARN( "couldn't load %s\n", SONAME_LIBXI );
-        return;
-    }
-#define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( libxi_handle, #f))) \
-    { \
-        WARN("Failed to load %s.\n", #f); \
-        return; \
-    }
-
-    LOAD_FUNCPTR(XIGetClientPointer);
-    LOAD_FUNCPTR(XIFreeDeviceInfo);
-    LOAD_FUNCPTR(XIQueryDevice);
-    LOAD_FUNCPTR(XIQueryVersion);
-    LOAD_FUNCPTR(XISelectEvents);
-#undef LOAD_FUNCPTR
 
     xinput2_available = XQueryExtension( gdi_display, "XInputExtension", &xinput2_opcode, &event, &error );
 

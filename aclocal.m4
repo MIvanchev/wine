@@ -73,6 +73,24 @@ AC_DEFUN([WINE_PATH_MINGW_PKG_CONFIG],
 esac
 AC_CHECK_PROGS(MINGW_PKG_CONFIG,[$ac_prefix_list],false)])
 
+dnl **** Check whether a library is available and get linkage information ****
+dnl
+dnl Usage: WINE_CHECK_LIB(library, function, [action-if-found, [action-if-not-found, [other_libraries]]]])
+dnl
+AC_DEFUN([WINE_CHECK_LIB],
+[AC_REQUIRE([WINE_PATH_PKG_CONFIG])dnl
+AS_VAR_PUSHDEF([ac_libs], [m4_toupper($1)_LIBS])dnl
+AC_ARG_VAR(ac_libs, [Linker flags for $1, overriding pkg-config])dnl
+AS_VAR_SET_IF([PKG_CONFIG], [ac_libs=`$PKG_CONFIG --libs --static $(echo [$1] | tr A-Z a-z) 2>/dev/null`])
+AS_VAR_SET(ac_libs, ["$ac_libs $5"])
+AC_CHECK_LIB([$1], [$2],
+             [AC_DEFINE(AS_TR_CPP(HAVE_LIB$1), 1, [Define if -l$1 is available])
+              $3],
+             [AS_VAR_SET(ac_libs, [])
+              $4], [$ac_libs])
+AS_ECHO(["$as_me:${as_lineno-$LINENO}: $1 libs: $ac_libs"]) >&AS_MESSAGE_LOG_FD
+AS_VAR_POPDEF([ac_libs])])
+
 dnl **** Extract the soname of a library ****
 dnl
 dnl Usage: WINE_CHECK_SONAME(library, function, [action-if-found, [action-if-not-found, [other_libraries, [pattern]]]])
@@ -121,7 +139,7 @@ m4_ifval([$4],[test "$cross_compiling" = yes || ac_cflags=[$]{ac_cflags:-[$4]}])
 AC_ARG_VAR(ac_libs, [Linker flags for $2, overriding pkg-config])dnl
 AS_VAR_IF([ac_libs],[],
       [AS_VAR_SET_IF([PKG_CONFIG],
-      [ac_libs=`$PKG_CONFIG --libs [$2] 2>/dev/null`])])
+      [ac_libs=`$PKG_CONFIG --libs --static  [$2] 2>/dev/null`])])
 m4_ifval([$5],[test "$cross_compiling" = yes || ac_libs=[$]{ac_libs:-[$5]}])
 m4_ifval([$3],[ac_libs=[$]{ac_libs:-"$3"}])
 AS_ECHO(["$as_me:${as_lineno-$LINENO}: $2 cflags: $ac_cflags"]) >&AS_MESSAGE_LOG_FD

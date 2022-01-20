@@ -40,7 +40,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrender);
 
-#ifdef SONAME_LIBXRENDER
+#ifdef HAVE_LIBXRENDER
 
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
@@ -165,30 +165,25 @@ static INT mru = -1;
 
 #define INIT_CACHE_SIZE 10
 
-static void *xrender_handle;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f;
-MAKE_FUNCPTR(XRenderAddGlyphs)
-MAKE_FUNCPTR(XRenderChangePicture)
-MAKE_FUNCPTR(XRenderComposite)
-MAKE_FUNCPTR(XRenderCompositeText16)
-MAKE_FUNCPTR(XRenderCreateGlyphSet)
-MAKE_FUNCPTR(XRenderCreatePicture)
-MAKE_FUNCPTR(XRenderFillRectangle)
-MAKE_FUNCPTR(XRenderFindFormat)
-MAKE_FUNCPTR(XRenderFindVisualFormat)
-MAKE_FUNCPTR(XRenderFreeGlyphSet)
-MAKE_FUNCPTR(XRenderFreePicture)
-MAKE_FUNCPTR(XRenderSetPictureClipRectangles)
+#define pXRenderAddGlyphs                   XRenderAddGlyphs
+#define pXRenderChangePicture               XRenderChangePicture
+#define pXRenderComposite                   XRenderComposite
+#define pXRenderCompositeText16             XRenderCompositeText16
+#define pXRenderCreateGlyphSet              XRenderCreateGlyphSet
+#define pXRenderCreatePicture               XRenderCreatePicture
+#define pXRenderFillRectangle               XRenderFillRectangle
+#define pXRenderFindFormat                  XRenderFindFormat
+#define pXRenderFindVisualFormat            XRenderFindVisualFormat
+#define pXRenderFreeGlyphSet                XRenderFreeGlyphSet
+#define pXRenderFreePicture                 XRenderFreePicture
+#define pXRenderSetPictureClipRectangles    XRenderSetPictureClipRectangles
 #ifdef HAVE_XRENDERCREATELINEARGRADIENT
-MAKE_FUNCPTR(XRenderCreateLinearGradient)
+#define pXRenderCreateLinearGradient        XRenderCreateLinearGradient
 #endif
 #ifdef HAVE_XRENDERSETPICTURETRANSFORM
-MAKE_FUNCPTR(XRenderSetPictureTransform)
+#define pXRenderSetPictureTransform         XRenderSetPictureTransform
 #endif
-MAKE_FUNCPTR(XRenderQueryExtension)
-
-#undef MAKE_FUNCPTR
+#define pXRenderQueryExtension              XRenderQueryExtension
 
 static CRITICAL_SECTION xrender_cs;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -326,31 +321,6 @@ const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
     int event_base, i;
 
     if (!client_side_with_render) return NULL;
-    if (!(xrender_handle = dlopen(SONAME_LIBXRENDER, RTLD_NOW))) return NULL;
-
-#define LOAD_FUNCPTR(f) if((p##f = dlsym(xrender_handle, #f)) == NULL) return NULL
-#define LOAD_OPTIONAL_FUNCPTR(f) p##f = dlsym(xrender_handle, #f)
-    LOAD_FUNCPTR(XRenderAddGlyphs);
-    LOAD_FUNCPTR(XRenderChangePicture);
-    LOAD_FUNCPTR(XRenderComposite);
-    LOAD_FUNCPTR(XRenderCompositeText16);
-    LOAD_FUNCPTR(XRenderCreateGlyphSet);
-    LOAD_FUNCPTR(XRenderCreatePicture);
-    LOAD_FUNCPTR(XRenderFillRectangle);
-    LOAD_FUNCPTR(XRenderFindFormat);
-    LOAD_FUNCPTR(XRenderFindVisualFormat);
-    LOAD_FUNCPTR(XRenderFreeGlyphSet);
-    LOAD_FUNCPTR(XRenderFreePicture);
-    LOAD_FUNCPTR(XRenderSetPictureClipRectangles);
-    LOAD_FUNCPTR(XRenderQueryExtension);
-#ifdef HAVE_XRENDERCREATELINEARGRADIENT
-    LOAD_OPTIONAL_FUNCPTR(XRenderCreateLinearGradient);
-#endif
-#ifdef HAVE_XRENDERSETPICTURETRANSFORM
-    LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform);
-#endif
-#undef LOAD_OPTIONAL_FUNCPTR
-#undef LOAD_FUNCPTR
 
     if (!pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base)) return NULL;
 
@@ -2250,7 +2220,7 @@ static const struct gdi_dc_funcs xrender_funcs =
     GDI_PRIORITY_GRAPHICS_DRV + 10      /* priority */
 };
 
-#else /* SONAME_LIBXRENDER */
+#else /* HAVE_LIBXRENDER */
 
 const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
 {
@@ -2258,4 +2228,4 @@ const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
     return NULL;
 }
 
-#endif /* SONAME_LIBXRENDER */
+#endif /* HAVE_LIBXRENDER */

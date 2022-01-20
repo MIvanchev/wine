@@ -24,20 +24,18 @@
 # error You must include config.h to use this header
 #endif
 
-#ifdef SONAME_LIBXCOMPOSITE
+#ifdef HAVE_LIBXCOMPOSITE
 
 #include <X11/extensions/Xcomposite.h>
-#define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
-MAKE_FUNCPTR(XCompositeQueryExtension)
-MAKE_FUNCPTR(XCompositeQueryVersion)
-MAKE_FUNCPTR(XCompositeVersion)
-MAKE_FUNCPTR(XCompositeRedirectWindow)
-MAKE_FUNCPTR(XCompositeRedirectSubwindows)
-MAKE_FUNCPTR(XCompositeUnredirectWindow)
-MAKE_FUNCPTR(XCompositeUnredirectSubwindows)
-MAKE_FUNCPTR(XCompositeCreateRegionFromBorderClip)
-MAKE_FUNCPTR(XCompositeNameWindowPixmap)
-#undef MAKE_FUNCPTR
+#define pXCompositeQueryExtension             XCompositeQueryExtension
+#define pXCompositeQueryVersion               XCompositeQueryVersion
+#define pXCompositeVersion                    XCompositeVersion
+#define pXCompositeRedirectWindow             XCompositeRedirectWindow
+#define pXCompositeRedirectSubwindows         XCompositeRedirectSubwindows
+#define pXCompositeUnredirectWindow           XCompositeUnredirectWindow
+#define pXCompositeUnredirectSubwindows       XCompositeUnredirectSubwindows
+#define pXCompositeCreateRegionFromBorderClip XCompositeCreateRegionFromBorderClip
+#define pXCompositeNameWindowPixmap           XCompositeNameWindowPixmap
 
-#endif /* defined(SONAME_LIBXCOMPOSITE) */
+#endif /* defined(HAVE_LIBXCOMPOSITE) */
 #endif /* __WINE_XCOMPOSITE_H */

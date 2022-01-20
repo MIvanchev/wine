@@ -573,8 +573,11 @@ extern BOOL X11DRV_MappingNotify( HWND hWnd, XEvent *event ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
 
 extern int xinput2_opcode DECLSPEC_HIDDEN;
-extern Bool (*pXGetEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
-extern void (*pXFreeEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
+
+#ifdef HAVE_LIBX11
+#define pXGetEventData XGetEventData
+#define pXFreeEventData XFreeEventData
+#endif
 
 extern DWORD EVENT_x11_time_to_win32_time(Time time) DECLSPEC_HIDDEN;
 

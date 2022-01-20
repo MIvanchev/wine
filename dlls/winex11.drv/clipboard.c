@@ -1955,7 +1955,7 @@ static BOOL wait_clipboard_mutex(void)
  *
  * Called when x11 clipboard content changes
  */
-#ifdef SONAME_LIBXFIXES
+#ifdef HAVE_LIBXFIXES
 static BOOL selection_notify_event( HWND hwnd, XEvent *event )
 {
     XFixesSelectionNotifyEvent *req = (XFixesSelectionNotifyEvent*)event;
@@ -1974,24 +1974,13 @@ static BOOL selection_notify_event( HWND hwnd, XEvent *event )
  */
 static void xfixes_init(void)
 {
-#ifdef SONAME_LIBXFIXES
-    typeof(XFixesSelectSelectionInput) *pXFixesSelectSelectionInput;
-    typeof(XFixesQueryExtension) *pXFixesQueryExtension;
-    typeof(XFixesQueryVersion) *pXFixesQueryVersion;
+#ifdef HAVE_LIBXFIXES
+#define pXFixesSelectSelectionInput XFixesSelectSelectionInput
+#define pXFixesQueryExtension XFixesQueryExtension
+#define pXFixesQueryVersion XFixesQueryVersion
 
     int event_base, error_base;
     int major = 3, minor = 0;
-    void *handle;
-
-    handle = dlopen(SONAME_LIBXFIXES, RTLD_NOW);
-    if (!handle) return;
-
-    pXFixesQueryExtension = dlsym(handle, "XFixesQueryExtension");
-    if (!pXFixesQueryExtension) return;
-    pXFixesQueryVersion = dlsym(handle, "XFixesQueryVersion");
-    if (!pXFixesQueryVersion) return;
-    pXFixesSelectSelectionInput = dlsym(handle, "XFixesSelectSelectionInput");
-    if (!pXFixesSelectSelectionInput) return;
 
     if (!pXFixesQueryExtension(clipboard_display, &event_base, &error_base))
         return;
@@ -2013,6 +2002,10 @@ static void xfixes_init(void)
     X11DRV_register_event_handler(event_base + XFixesSelectionNotify,
             selection_notify_event, "XFixesSelectionNotify");
     TRACE("xfixes succesully initialized\n");
+
+#undef pXFixesSelectSelectionInput
+#undef pXFixesQueryExtension
+#undef pXFixesQueryVersion
 #else
     WARN("xfixes not supported\n");
 #endif

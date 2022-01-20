@@ -80,8 +80,10 @@ extern BOOL ximInComposeMode;
 #define XEMBED_UNREGISTER_ACCELERATOR 13
 #define XEMBED_ACTIVATE_ACCELERATOR   14
 
+#if !defined HAVE_LIBX11
 Bool (*pXGetEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) = NULL;
 void (*pXFreeEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) = NULL;
+#endif
 
   /* Event handlers */
 static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *event );

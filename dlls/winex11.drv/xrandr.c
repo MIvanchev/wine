@@ -32,7 +32,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 #endif
 
-#ifdef SONAME_LIBXRANDR
+#ifdef HAVE_LIBXRANDR
 
 #include <assert.h>
 #include <X11/Xlib.h>
@@ -48,92 +48,48 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 #include "wine/vulkan.h"
 #include "wine/vulkan_driver.h"
 
-static void *xrandr_handle;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f;
-MAKE_FUNCPTR(XRRConfigCurrentConfiguration)
-MAKE_FUNCPTR(XRRConfigCurrentRate)
-MAKE_FUNCPTR(XRRFreeScreenConfigInfo)
-MAKE_FUNCPTR(XRRGetScreenInfo)
-MAKE_FUNCPTR(XRRQueryExtension)
-MAKE_FUNCPTR(XRRQueryVersion)
-MAKE_FUNCPTR(XRRRates)
-MAKE_FUNCPTR(XRRSetScreenConfig)
-MAKE_FUNCPTR(XRRSetScreenConfigAndRate)
-MAKE_FUNCPTR(XRRSizes)
+#define pXRRConfigCurrentConfiguration  XRRConfigCurrentConfiguration
+#define pXRRConfigCurrentRate           XRRConfigCurrentRate
+#define pXRRFreeScreenConfigInfo        XRRFreeScreenConfigInfo
+#define pXRRGetScreenInfo               XRRGetScreenInfo
+#define pXRRQueryExtension              XRRQueryExtension
+#define pXRRQueryVersion                XRRQueryVersion
+#define pXRRRates                       XRRRates
+#define pXRRSetScreenConfig             XRRSetScreenConfig
+#define pXRRSetScreenConfigAndRate      XRRSetScreenConfigAndRate
+#define pXRRSizes                       XRRSizes
 
 #ifdef HAVE_XRRGETPROVIDERRESOURCES
-MAKE_FUNCPTR(XRRFreeCrtcInfo)
-MAKE_FUNCPTR(XRRFreeOutputInfo)
-MAKE_FUNCPTR(XRRFreeScreenResources)
-MAKE_FUNCPTR(XRRGetCrtcInfo)
-MAKE_FUNCPTR(XRRGetOutputInfo)
-MAKE_FUNCPTR(XRRGetOutputProperty)
-MAKE_FUNCPTR(XRRGetScreenResources)
-MAKE_FUNCPTR(XRRGetScreenResourcesCurrent)
-MAKE_FUNCPTR(XRRGetScreenSizeRange)
-MAKE_FUNCPTR(XRRSetCrtcConfig)
-MAKE_FUNCPTR(XRRSetScreenSize)
-MAKE_FUNCPTR(XRRSelectInput)
-MAKE_FUNCPTR(XRRGetOutputPrimary)
-MAKE_FUNCPTR(XRRGetProviderResources)
-MAKE_FUNCPTR(XRRFreeProviderResources)
-MAKE_FUNCPTR(XRRGetProviderInfo)
-MAKE_FUNCPTR(XRRFreeProviderInfo)
+#define pXRRFreeCrtcInfo                XRRFreeCrtcInfo
+#define pXRRFreeOutputInfo              XRRFreeOutputInfo
+#define pXRRFreeScreenResources         XRRFreeScreenResources
+#define pXRRGetCrtcInfo                 XRRGetCrtcInfo
+#define pXRRGetOutputInfo               XRRGetOutputInfo
+#define pXRRGetOutputProperty           XRRGetOutputProperty
+#define pXRRGetScreenResources          XRRGetScreenResources
+#define pXRRGetScreenResourcesCurrent   XRRGetScreenResourcesCurrent
+#define pXRRGetScreenSizeRange          XRRGetScreenSizeRange
+#define pXRRSetCrtcConfig               XRRSetCrtcConfig
+#define pXRRSetScreenSize               XRRSetScreenSize
+#define pXRRSelectInput                 XRRSelectInput
+#define pXRRGetOutputPrimary            XRRGetOutputPrimary
+#define pXRRGetProviderResources        XRRGetProviderResources
+#define pXRRFreeProviderResources       XRRFreeProviderResources
+#define pXRRGetProviderInfo             XRRGetProviderInfo
+#define pXRRFreeProviderInfo            XRRFreeProviderInfo
 #endif
-
-#undef MAKE_FUNCPTR
 
 static int load_xrandr(void)
 {
     int r = 0;
 
-    if (dlopen(SONAME_LIBXRENDER, RTLD_NOW|RTLD_GLOBAL) &&
-        (xrandr_handle = dlopen(SONAME_LIBXRANDR, RTLD_NOW)))
-    {
-
-#define LOAD_FUNCPTR(f) \
-        if((p##f = dlsym(xrandr_handle, #f)) == NULL) goto sym_not_found
-
-        LOAD_FUNCPTR(XRRConfigCurrentConfiguration);
-        LOAD_FUNCPTR(XRRConfigCurrentRate);
-        LOAD_FUNCPTR(XRRFreeScreenConfigInfo);
-        LOAD_FUNCPTR(XRRGetScreenInfo);
-        LOAD_FUNCPTR(XRRQueryExtension);
-        LOAD_FUNCPTR(XRRQueryVersion);
-        LOAD_FUNCPTR(XRRRates);
-        LOAD_FUNCPTR(XRRSetScreenConfig);
-        LOAD_FUNCPTR(XRRSetScreenConfigAndRate);
-        LOAD_FUNCPTR(XRRSizes);
-        r = 1;
+    r = 1;
 
 #ifdef HAVE_XRRGETPROVIDERRESOURCES
-        LOAD_FUNCPTR(XRRFreeCrtcInfo);
-        LOAD_FUNCPTR(XRRFreeOutputInfo);
-        LOAD_FUNCPTR(XRRFreeScreenResources);
-        LOAD_FUNCPTR(XRRGetCrtcInfo);
-        LOAD_FUNCPTR(XRRGetOutputInfo);
-        LOAD_FUNCPTR(XRRGetOutputProperty);
-        LOAD_FUNCPTR(XRRGetScreenResources);
-        LOAD_FUNCPTR(XRRGetScreenResourcesCurrent);
-        LOAD_FUNCPTR(XRRGetScreenSizeRange);
-        LOAD_FUNCPTR(XRRSetCrtcConfig);
-        LOAD_FUNCPTR(XRRSetScreenSize);
-        LOAD_FUNCPTR(XRRSelectInput);
-        LOAD_FUNCPTR(XRRGetOutputPrimary);
-        LOAD_FUNCPTR(XRRGetProviderResources);
-        LOAD_FUNCPTR(XRRFreeProviderResources);
-        LOAD_FUNCPTR(XRRGetProviderInfo);
-        LOAD_FUNCPTR(XRRFreeProviderInfo);
-        r = 4;
+    r = 4;
 #endif
 
-#undef LOAD_FUNCPTR
-
-sym_not_found:
-        if (!r)  TRACE("Unable to load function ptrs from XRandR library\n");
-    }
-    return r;
+   return r;
 }
 
 static int XRandRErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
@@ -1738,11 +1694,11 @@ void X11DRV_XRandR_Init(void)
 #endif
 }
 
-#else /* SONAME_LIBXRANDR */
+#else /* HAVE_LIBXRANDR */
 
 void X11DRV_XRandR_Init(void)
 {
     TRACE("XRandR support not compiled in.\n");
 }
 
-#endif /* SONAME_LIBXRANDR */
+#endif /* HAVE_LIBXRANDR */

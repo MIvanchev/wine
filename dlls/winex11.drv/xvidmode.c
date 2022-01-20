@@ -46,7 +46,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(xvidmode);
 
-#ifdef SONAME_LIBXXF86VM
+#ifdef HAVE_LIBXXF86VM
 
 extern BOOL usexvidmode;
 
@@ -57,24 +57,22 @@ static int xf86vm_gammaramp_size;
 static BOOL xf86vm_use_gammaramp;
 #endif /* X_XF86VidModeSetGammaRamp */
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f;
-MAKE_FUNCPTR(XF86VidModeGetAllModeLines)
-MAKE_FUNCPTR(XF86VidModeGetModeLine)
-MAKE_FUNCPTR(XF86VidModeLockModeSwitch)
-MAKE_FUNCPTR(XF86VidModeQueryExtension)
-MAKE_FUNCPTR(XF86VidModeQueryVersion)
-MAKE_FUNCPTR(XF86VidModeSetViewPort)
-MAKE_FUNCPTR(XF86VidModeSwitchToMode)
+#define pXF86VidModeGetAllModeLines     XF86VidModeGetAllModeLines
+#define pXF86VidModeGetModeLine         XF86VidModeGetModeLine
+#define pXF86VidModeLockModeSwitch      XF86VidModeLockModeSwitch
+#define pXF86VidModeQueryExtension      XF86VidModeQueryExtension
+#define pXF86VidModeQueryVersion        XF86VidModeQueryVersion
+#define pXF86VidModeSetViewPort         XF86VidModeSetViewPort
+#define pXF86VidModeSwitchToMode        XF86VidModeSwitchToMode
 #ifdef X_XF86VidModeSetGamma
-MAKE_FUNCPTR(XF86VidModeGetGamma)
-MAKE_FUNCPTR(XF86VidModeSetGamma)
+#define pXF86VidModeGetGamma            XF86VidModeGetGamma
+#define pXF86VidModeSetGamma            XF86VidModeSetGamma
 #endif
 #ifdef X_XF86VidModeSetGammaRamp
-MAKE_FUNCPTR(XF86VidModeGetGammaRamp)
-MAKE_FUNCPTR(XF86VidModeGetGammaRampSize)
-MAKE_FUNCPTR(XF86VidModeSetGammaRamp)
+#define pXF86VidModeGetGammaRamp        XF86VidModeGetGammaRamp
+#define pXF86VidModeGetGammaRampSize    XF86VidModeGetGammaRampSize
+#define pXF86VidModeSetGammaRamp        XF86VidModeSetGammaRamp
 #endif
-#undef MAKE_FUNCPTR
 
 static int XVidModeErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 {
@@ -250,38 +248,9 @@ static LONG xf86vm_set_current_mode(ULONG_PTR id, DEVMODEW *mode)
 void X11DRV_XF86VM_Init(void)
 {
   struct x11drv_settings_handler xf86vm_handler;
-  void *xvidmode_handle;
   Bool ok;
 
   if (xf86vm_major) return; /* already initialized? */
-
-  xvidmode_handle = dlopen(SONAME_LIBXXF86VM, RTLD_NOW);
-  if (!xvidmode_handle)
-  {
-    TRACE("Unable to open %s, XVidMode disabled\n", SONAME_LIBXXF86VM);
-    usexvidmode = FALSE;
-    return;
-  }
-
-#define LOAD_FUNCPTR(f) \
-    if((p##f = dlsym(xvidmode_handle, #f)) == NULL) goto sym_not_found
-    LOAD_FUNCPTR(XF86VidModeGetAllModeLines);
-    LOAD_FUNCPTR(XF86VidModeGetModeLine);
-    LOAD_FUNCPTR(XF86VidModeLockModeSwitch);
-    LOAD_FUNCPTR(XF86VidModeQueryExtension);
-    LOAD_FUNCPTR(XF86VidModeQueryVersion);
-    LOAD_FUNCPTR(XF86VidModeSetViewPort);
-    LOAD_FUNCPTR(XF86VidModeSwitchToMode);
-#ifdef X_XF86VidModeSetGamma
-    LOAD_FUNCPTR(XF86VidModeGetGamma);
-    LOAD_FUNCPTR(XF86VidModeSetGamma);
-#endif
-#ifdef X_XF86VidModeSetGammaRamp
-    LOAD_FUNCPTR(XF86VidModeGetGammaRamp);
-    LOAD_FUNCPTR(XF86VidModeGetGammaRampSize);
-    LOAD_FUNCPTR(XF86VidModeSetGammaRamp);
-#endif
-#undef LOAD_FUNCPTR
 
   /* see if XVidMode is available */
   if (!pXF86VidModeQueryExtension(gdi_display, &xf86vm_event, &xf86vm_error)) return;
@@ -314,13 +283,6 @@ void X11DRV_XF86VM_Init(void)
   xf86vm_handler.get_current_mode = xf86vm_get_current_mode;
   xf86vm_handler.set_current_mode = xf86vm_set_current_mode;
   X11DRV_Settings_SetHandler(&xf86vm_handler);
-  return;
-
-sym_not_found:
-    TRACE("Unable to load function pointers from %s, XVidMode disabled\n", SONAME_LIBXXF86VM);
-    dlclose(xvidmode_handle);
-    xvidmode_handle = NULL;
-    usexvidmode = FALSE;
 }
 
 /***** GAMMA CONTROL *****/
@@ -544,14 +506,14 @@ static BOOL X11DRV_XF86VM_SetGammaRamp(struct x11drv_gamma_ramp *ramp)
 #endif /* X_XF86VidModeSetGamma */
 }
 
-#else /* SONAME_LIBXXF86VM */
+#else /* HAVE_LIBXXF86VM */
 
 void X11DRV_XF86VM_Init(void)
 {
     TRACE("XVidMode support not compiled in.\n");
 }
 
-#endif /* SONAME_LIBXXF86VM */
+#endif /* HAVE_LIBXXF86VM */
 
 /***********************************************************************
  *		GetDeviceGammaRamp (X11DRV.@)
@@ -562,7 +524,7 @@ void X11DRV_XF86VM_Init(void)
  */
 BOOL CDECL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
-#ifdef SONAME_LIBXXF86VM
+#ifdef HAVE_LIBXXF86VM
   return X11DRV_XF86VM_GetGammaRamp(ramp);
 #else
   return FALSE;
@@ -578,7 +540,7 @@ BOOL CDECL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
  */
 BOOL CDECL X11DRV_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
-#ifdef SONAME_LIBXXF86VM
+#ifdef HAVE_LIBXXF86VM
   return X11DRV_XF86VM_SetGammaRamp(ramp);
 #else
   return FALSE;
