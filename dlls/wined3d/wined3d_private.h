@@ -447,6 +447,16 @@ static inline unsigned int wined3d_popcount(unsigned int x)
 #endif
 }
 
+static inline int wined3d_uint32_compare(uint32_t x, uint32_t y)
+{
+    return (x > y) - (x < y);
+}
+
+static inline int wined3d_uint64_compare(uint64_t x, uint64_t y)
+{
+    return (x > y) - (x < y);
+}
+
 #define ORM_BACKBUFFER  0
 #define ORM_FBO         1
 
@@ -4306,6 +4316,7 @@ void wined3d_resource_update_draw_binding(struct wined3d_resource *resource) DEC
 
 #define WINED3D_LOCATION_DISCARDED      0x00000001
 #define WINED3D_LOCATION_SYSMEM         0x00000002
+#define WINED3D_LOCATION_CLEARED        0x00000004
 #define WINED3D_LOCATION_BUFFER         0x00000008
 #define WINED3D_LOCATION_TEXTURE_RGB    0x00000010
 #define WINED3D_LOCATION_TEXTURE_SRGB   0x00000020
@@ -4869,11 +4880,6 @@ struct wined3d_device_context_ops
     void (*flush)(struct wined3d_device_context *context);
     void (*acquire_resource)(struct wined3d_device_context *context, struct wined3d_resource *resource);
     void (*acquire_command_list)(struct wined3d_device_context *context, struct wined3d_command_list *list);
-    void (*acquire_blend_state)(struct wined3d_device_context *context, struct wined3d_blend_state *blend_state);
-    void (*acquire_rasterizer_state)(struct wined3d_device_context *context,
-            struct wined3d_rasterizer_state *rasterizer_state);
-    void (*acquire_depth_stencil_state)(struct wined3d_device_context *context,
-            struct wined3d_depth_stencil_state *depth_stencil_state);
 };
 
 struct wined3d_device_context
@@ -5754,8 +5760,8 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
         BOOL position_transformed, struct ps_compile_args *args,
         const struct wined3d_context *context) DECLSPEC_HIDDEN;
 
-BOOL vshader_get_input(const struct wined3d_shader *shader,
-        BYTE usage_req, BYTE usage_idx_req, unsigned int *regnum) DECLSPEC_HIDDEN;
+bool vshader_get_input(const struct wined3d_shader *shader,
+        uint8_t usage_req, uint8_t usage_idx_req, unsigned int *regnum) DECLSPEC_HIDDEN;
 void find_vs_compile_args(const struct wined3d_state *state, const struct wined3d_shader *shader,
         struct vs_compile_args *args, const struct wined3d_context *context) DECLSPEC_HIDDEN;
 
@@ -5950,6 +5956,7 @@ extern enum wined3d_format_id pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN
 #define WINED3DFMT_FLAG_BLIT                        0x02000000
 #define WINED3DFMT_FLAG_MAPPABLE                    0x04000000
 #define WINED3DFMT_FLAG_CAST_TO_BLOCK               0x08000000
+#define WINED3DFMT_FLAG_INDEX_BUFFER                0x10000000
 
 struct wined3d_rational
 {

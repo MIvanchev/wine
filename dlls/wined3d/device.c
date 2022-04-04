@@ -1182,10 +1182,10 @@ void wined3d_device_uninit_3d(struct wined3d_device *device)
     wined3d_device_context_emit_reset_state(&device->cs->c, true);
     state_cleanup(state);
 
-    wine_rb_clear(&device->samplers, device_free_sampler, NULL);
-    wine_rb_clear(&device->rasterizer_states, device_free_rasterizer_state, NULL);
-    wine_rb_clear(&device->blend_states, device_free_blend_state, NULL);
-    wine_rb_clear(&device->depth_stencil_states, device_free_depth_stencil_state, NULL);
+    wine_rb_destroy(&device->samplers, device_free_sampler, NULL);
+    wine_rb_destroy(&device->rasterizer_states, device_free_rasterizer_state, NULL);
+    wine_rb_destroy(&device->blend_states, device_free_blend_state, NULL);
+    wine_rb_destroy(&device->depth_stencil_states, device_free_depth_stencil_state, NULL);
 
     LIST_FOR_EACH_ENTRY_SAFE(resource, cursor, &device->resources, struct wined3d_resource, resource_list_entry)
     {
@@ -3509,8 +3509,8 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     struct wined3d_box box = {0};
     struct wined3d_shader *vs;
     unsigned int i, j;
+    uint32_t map;
     HRESULT hr;
-    WORD map;
 
     TRACE("device %p, src_start_idx %u, dst_idx %u, vertex_count %u, "
             "dst_buffer %p, declaration %p, flags %#x, dst_fvf %#x.\n",
@@ -3530,14 +3530,13 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
      * VBOs in those buffers and fix up the stream_info structure.
      *
      * Also apply the start index. */
-    for (i = 0, map = stream_info.use_map; map; map >>= 1, ++i)
+    map = stream_info.use_map;
+    while (map)
     {
         struct wined3d_stream_info_element *e;
         struct wined3d_map_desc map_desc;
 
-        if (!(map & 1))
-            continue;
-
+        i = wined3d_bit_scan(&map);
         e = &stream_info.elements[i];
         resource = &state->streams[e->stream_idx].buffer->resource;
         box.left = src_start_idx * e->stride;
@@ -3545,10 +3544,12 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
         if (FAILED(wined3d_resource_map(resource, 0, &map_desc, &box, WINED3D_MAP_READ)))
         {
             ERR("Failed to map resource.\n");
-            for (j = 0, map = stream_info.use_map; map && j < i; map >>= 1, ++j)
+            map = stream_info.use_map;
+            while (map)
             {
-                if (!(map & 1))
-                    continue;
+                j = wined3d_bit_scan(&map);
+                if (j >= i)
+                    break;
 
                 e = &stream_info.elements[j];
                 resource = &state->streams[e->stream_idx].buffer->resource;
@@ -3564,11 +3565,10 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     hr = process_vertices_strided(device, dst_idx, vertex_count,
             &stream_info, dst_buffer, flags, dst_fvf);
 
-    for (i = 0, map = stream_info.use_map; map; map >>= 1, ++i)
+    map = stream_info.use_map;
+    while (map)
     {
-        if (!(map & 1))
-            continue;
-
+        i = wined3d_bit_scan(&map);
         resource = &state->streams[stream_info.elements[i].stream_idx].buffer->resource;
         if (FAILED(wined3d_resource_unmap(resource, 0)))
             ERR("Failed to unmap resource.\n");
@@ -5556,10 +5556,10 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         }
     }
 
-    wine_rb_clear(&device->samplers, device_free_sampler, NULL);
-    wine_rb_clear(&device->rasterizer_states, device_free_rasterizer_state, NULL);
-    wine_rb_clear(&device->blend_states, device_free_blend_state, NULL);
-    wine_rb_clear(&device->depth_stencil_states, device_free_depth_stencil_state, NULL);
+    wine_rb_destroy(&device->samplers, device_free_sampler, NULL);
+    wine_rb_destroy(&device->rasterizer_states, device_free_rasterizer_state, NULL);
+    wine_rb_destroy(&device->blend_states, device_free_blend_state, NULL);
+    wine_rb_destroy(&device->depth_stencil_states, device_free_depth_stencil_state, NULL);
 
     if (reset_state)
     {
@@ -5733,11 +5733,11 @@ static int wined3d_so_desc_compare(const void *key, const struct wine_rb_entry *
     unsigned int i;
     int ret;
 
-    if ((ret = (k->element_count - desc->element_count)))
+    if ((ret = wined3d_uint32_compare(k->element_count, desc->element_count)))
         return ret;
-    if ((ret = (k->buffer_stride_count - desc->buffer_stride_count)))
+    if ((ret = wined3d_uint32_compare(k->buffer_stride_count, desc->buffer_stride_count)))
         return ret;
-    if ((ret = (k->rasterizer_stream_idx - desc->rasterizer_stream_idx)))
+    if ((ret = wined3d_uint32_compare(k->rasterizer_stream_idx, desc->rasterizer_stream_idx)))
         return ret;
 
     for (i = 0; i < k->element_count; ++i)
@@ -5745,25 +5745,25 @@ static int wined3d_so_desc_compare(const void *key, const struct wine_rb_entry *
         const struct wined3d_stream_output_element *b = &desc->elements[i];
         const struct wined3d_stream_output_element *a = &k->elements[i];
 
-        if ((ret = (a->stream_idx - b->stream_idx)))
+        if ((ret = wined3d_uint32_compare(a->stream_idx, b->stream_idx)))
             return ret;
         if ((ret = (!a->semantic_name - !b->semantic_name)))
             return ret;
         if (a->semantic_name && (ret = strcmp(a->semantic_name, b->semantic_name)))
             return ret;
-        if ((ret = (a->semantic_idx - b->semantic_idx)))
+        if ((ret = wined3d_uint32_compare(a->semantic_idx, b->semantic_idx)))
             return ret;
-        if ((ret = (a->component_idx - b->component_idx)))
+        if ((ret = wined3d_uint32_compare(a->component_idx, b->component_idx)))
             return ret;
-        if ((ret = (a->component_count - b->component_count)))
+        if ((ret = wined3d_uint32_compare(a->component_count, b->component_count)))
             return ret;
-        if ((ret = (a->output_slot - b->output_slot)))
+        if ((ret = wined3d_uint32_compare(a->output_slot, b->output_slot)))
             return ret;
     }
 
     for (i = 0; i < k->buffer_stride_count; ++i)
     {
-        if ((ret = (k->buffer_strides[i] - desc->buffer_strides[i])))
+        if ((ret = wined3d_uint32_compare(k->buffer_strides[i], desc->buffer_strides[i])))
             return ret;
     }
 

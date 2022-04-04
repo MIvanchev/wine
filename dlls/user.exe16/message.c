@@ -161,6 +161,7 @@ static WNDPROC16 alloc_win16_thunk( WNDPROC handle )
         if (!(thunk_selector = GlobalAlloc16( GMEM_FIXED | GMEM_ZEROINIT,
                                               MAX_WINPROCS16 * sizeof(WINPROC_THUNK) )))
             return NULL;
+        FarSetOwner16( thunk_selector, 0 );
         PrestoChangoSelector16( thunk_selector, thunk_selector );
         thunk_array = GlobalLock16( thunk_selector );
         relay = GetProcAddress16( GetModuleHandle16("user"), "__wine_call_wndproc" );
@@ -610,6 +611,7 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
             CREATESTRUCT16 *cs16 = MapSL(lParam);
             CREATESTRUCTA cs;
             MDICREATESTRUCTA mdi_cs;
+            SEGPTR mdi_cs_segptr = 0;
 
             CREATESTRUCT16to32A( cs16, &cs );
             if (GetWindowLongW(hwnd32, GWL_EXSTYLE) & WS_EX_MDICHILD)
@@ -617,9 +619,15 @@ LRESULT WINPROC_CallProc16To32A( winproc_callback_t callback, HWND16 hwnd, UINT1
                 MDICREATESTRUCT16 *mdi_cs16 = MapSL(cs16->lpCreateParams);
                 MDICREATESTRUCT16to32A(mdi_cs16, &mdi_cs);
                 cs.lpCreateParams = &mdi_cs;
+                mdi_cs_segptr = cs16->lpCreateParams;
             }
             ret = callback( hwnd32, msg, wParam, (LPARAM)&cs, result, arg );
             CREATESTRUCT32Ato16( &cs, cs16 );
+            if (mdi_cs_segptr)
+            {
+                MDICREATESTRUCT32Ato16( &mdi_cs, MapSL( mdi_cs_segptr ) );
+                cs16->lpCreateParams = mdi_cs_segptr;
+            }
         }
         break;
     case WM_MDICREATE:

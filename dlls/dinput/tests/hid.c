@@ -339,7 +339,7 @@ static const char inf_text[] =
     "ServiceType=1\n"
     "StartType=3\n"
     "ErrorControl=1\n"
-    "LoadOrderGroup=Extended Base\n"
+    "LoadOrderGroup=WinePlugPlay\n"
     "DisplayName=\"winetest bus driver\"\n"
     "; they don't sleep anymore, on the beach\n";
 
@@ -2110,6 +2110,16 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
                 .ret_status = STATUS_SUCCESS,
             },
         };
+        struct hid_expect expect_small[] =
+        {
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = report_id ? 2 : caps.InputReportByteLength - 1,
+                .report_buf = {report_id ? report_id + 1 : 0x5a,0x5a,0x5a},
+                .ret_length = report_id ? 2 : caps.InputReportByteLength - 1,
+                .ret_status = STATUS_SUCCESS,
+            },
+        };
 
         send_hid_input( file, expect, sizeof(expect) );
 
@@ -2190,6 +2200,21 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
             value, (report_id ? 3 : 4) );
         ok( !memcmp( report, buffer, caps.InputReportByteLength ), "expected identical reports\n" );
 
+        send_hid_input( file, expect_small, sizeof(expect_small) );
+
+        Sleep( 600 );
+
+        SetLastError( 0xdeadbeef );
+        memset( report, 0, sizeof(report) );
+        ret = ReadFile( async_file, report, caps.InputReportByteLength, NULL, &overlapped );
+        ok( !ret, "ReadFile succeeded\n" );
+        ok( GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError() );
+
+        ret = GetOverlappedResult( async_file, &overlapped, &value, TRUE );
+        ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
+        ok( value == report_id ? 2 : caps.InputReportByteLength - 1,
+            "got length %u, expected %u\n", value, report_id ? 2 : caps.InputReportByteLength - 1 );
+
         CloseHandle( overlapped.hEvent );
         CloseHandle( overlapped2.hEvent );
     }
@@ -2209,6 +2234,16 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
                 .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
                 .report_buf = {report_id ? report_id : 0xa5,0xa5,0xa5,0xa5,0xa5},
                 .ret_length = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .ret_status = STATUS_SUCCESS,
+            },
+        };
+        struct hid_expect expect_small[] =
+        {
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = report_id ? 2 : caps.InputReportByteLength - 1,
+                .report_buf = {report_id ? report_id + 1 : 0x5a,0x5a,0x5a},
+                .ret_length = report_id ? 2 : caps.InputReportByteLength - 1,
                 .ret_status = STATUS_SUCCESS,
             },
         };
@@ -2268,6 +2303,18 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
             "expected identical reports\n" );
         ok( !memcmp( buffer + off, buffer + caps.InputReportByteLength, caps.InputReportByteLength - off ),
             "expected identical reports\n" );
+
+        SetLastError( 0xdeadbeef );
+        memset( report, 0, sizeof(report) );
+        ret = ReadFile( async_file, report, caps.InputReportByteLength, NULL, &overlapped );
+        ok( !ret, "ReadFile succeeded\n" );
+        ok( GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError() );
+
+        send_hid_input( file, expect_small, sizeof(expect_small) );
+
+        ret = GetOverlappedResult( async_file, &overlapped, &value, TRUE );
+        ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
+        ok( value == caps.InputReportByteLength, "got length %u, expected %u\n", value, caps.InputReportByteLength );
 
         CloseHandle( overlapped.hEvent );
         CloseHandle( overlapped2.hEvent );
@@ -3429,6 +3476,92 @@ HRESULT dinput_test_create_device( DWORD version, DIDEVICEINSTANCEW *devinst, ID
     }
 
     return DI_OK;
+}
+
+DWORD WINAPI dinput_test_device_thread( void *stop_event )
+{
+#include "psh_hid_macros.h"
+    static const unsigned char gamepad_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+            COLLECTION(1, Physical),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 6),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+    static const HID_DEVICE_ATTRIBUTES attributes =
+    {
+        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
+        .VendorID = LOWORD(EXPECT_VIDPID),
+        .ProductID = HIWORD(EXPECT_VIDPID),
+        .VersionNumber = 0x0100,
+    };
+    static const HIDP_CAPS caps =
+    {
+        .InputReportByteLength = 3,
+    };
+
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    DWORD report_id = 1, polled = 0;
+    char context[64];
+    LSTATUS status;
+    HKEY hkey;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
+                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
+    ok( !status, "RegCreateKeyExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)gamepad_desc, sizeof(gamepad_desc) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&caps, sizeof(caps) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, (void *)NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    fill_context( __LINE__, context, ARRAY_SIZE(context) );
+    status = RegSetValueExW( hkey, L"Context", 0, REG_BINARY, (void *)context, sizeof(context) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    pnp_driver_start( L"driver_hid.dll" );
+    WaitForSingleObject( stop_event, INFINITE );
+    pnp_driver_stop();
+
+    SetCurrentDirectoryW( cwd );
+
+    return 0;
 }
 
 START_TEST( hid )

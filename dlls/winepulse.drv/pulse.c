@@ -56,11 +56,10 @@ struct pulse_stream
     AUDCLNT_SHAREMODE share;
     HANDLE event;
     float vol[PA_CHANNELS_MAX];
-    BOOL mute;
 
     INT32 locked;
     BOOL started;
-    SIZE_T bufsize_frames, alloc_size, real_bufsize_bytes, period_bytes;
+    SIZE_T bufsize_frames, real_bufsize_bytes, period_bytes;
     SIZE_T peek_ofs, read_offs_bytes, lcl_offs_bytes, pa_offs_bytes;
     SIZE_T tmp_buffer_bytes, held_bytes, peek_len, peek_buffer_len, pa_held_bytes;
     BYTE *local_buffer, *tmp_buffer, *peek_buffer;
@@ -869,14 +868,16 @@ static NTSTATUS pulse_create_stream(void *args)
     if (SUCCEEDED(hr)) {
         UINT32 unalign;
         const pa_buffer_attr *attr = pa_stream_get_buffer_attr(stream->stream);
+        SIZE_T size;
+
         stream->attr = *attr;
         /* Update frames according to new size */
         dump_attr(attr);
         if (stream->dataflow == eRender) {
-            stream->alloc_size = stream->real_bufsize_bytes =
+            size = stream->real_bufsize_bytes =
                 stream->bufsize_frames * 2 * pa_frame_size(&stream->ss);
             if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                                        0, &stream->alloc_size, MEM_COMMIT, PAGE_READWRITE))
+                                        0, &size, MEM_COMMIT, PAGE_READWRITE))
                 hr = E_OUTOFMEMORY;
         } else {
             UINT32 i, capture_packets;
@@ -888,9 +889,9 @@ static NTSTATUS pulse_create_stream(void *args)
 
             capture_packets = stream->real_bufsize_bytes / stream->period_bytes;
 
-            stream->alloc_size = stream->real_bufsize_bytes + capture_packets * sizeof(ACPacket);
+            size = stream->real_bufsize_bytes + capture_packets * sizeof(ACPacket);
             if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                                        0, &stream->alloc_size, MEM_COMMIT, PAGE_READWRITE))
+                                        0, &size, MEM_COMMIT, PAGE_READWRITE))
                 hr = E_OUTOFMEMORY;
             else {
                 ACPacket *cur_packet = (ACPacket*)((char*)stream->local_buffer + stream->real_bufsize_bytes);
@@ -928,6 +929,7 @@ static NTSTATUS pulse_release_stream(void *args)
 {
     struct release_stream_params *params = args;
     struct pulse_stream *stream = params->stream;
+    SIZE_T size;
 
     if(params->timer) {
         stream->please_quit = TRUE;
@@ -944,12 +946,16 @@ static NTSTATUS pulse_release_stream(void *args)
     pa_stream_unref(stream->stream);
     pulse_unlock();
 
-    if (stream->tmp_buffer)
+    if (stream->tmp_buffer) {
+        size = 0;
         NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
-                            &stream->tmp_buffer_bytes, MEM_RELEASE);
-    if (stream->local_buffer)
+                            &size, MEM_RELEASE);
+    }
+    if (stream->local_buffer) {
+        size = 0;
         NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer,
-                            &stream->alloc_size, MEM_RELEASE);
+                            &size, MEM_RELEASE);
+    }
     free(stream->peek_buffer);
     free(stream);
     return STATUS_SUCCESS;
@@ -1514,13 +1520,16 @@ static NTSTATUS pulse_reset(void *args)
 
 static BOOL alloc_tmp_buffer(struct pulse_stream *stream, SIZE_T bytes)
 {
+    SIZE_T size;
+
     if (stream->tmp_buffer_bytes >= bytes)
         return TRUE;
 
     if (stream->tmp_buffer)
     {
+        size = 0;
         NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
-                            &stream->tmp_buffer_bytes, MEM_RELEASE);
+                            &size, MEM_RELEASE);
         stream->tmp_buffer = NULL;
         stream->tmp_buffer_bytes = 0;
     }
