@@ -23,7 +23,6 @@
 
 #include <limits.h>
 #include <math.h>
-#include <stdlib.h>
 #include "win32u_private.h"
 
 /* extra stock object: default 1x1 bitmap for memory DCs */
@@ -55,10 +54,10 @@ typedef struct tagDC
     LONG         dirty;            /* dirty flag */
     DC_ATTR     *attr;             /* DC attributes accessible by client */
     struct tagDC *saved_dc;
-    DWORD_PTR    dwHookData;
-    DCHOOKPROC   hookProc;         /* DC hook */
+    struct dce  *dce;              /* associated dce, if any */
     BOOL         bounds_enabled:1; /* bounds tracking is enabled */
     BOOL         path_open:1;      /* path is currently open (only for saved DCs) */
+    BOOL         is_display:1;     /* DC is for display device */
 
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
@@ -89,9 +88,14 @@ typedef struct tagDC
     RECT          bounds;            /* Current bounding rect */
 } DC;
 
-/* Certain functions will do no further processing if the driver returns this.
-   Used by mfdrv for example. */
-#define GDI_NO_MORE_WORK 2
+/* dce flags */
+#define DCHC_INVALIDVISRGN      0x0001
+#define DCHC_DELETEDC           0x0002
+#define DCHF_INVALIDATEVISRGN   0x0001
+#define DCHF_VALIDATEVISRGN     0x0002
+#define DCHF_RESETDC            0x0004
+#define DCHF_DISABLEDC          0x0008
+#define DCHF_ENABLEDC           0x0010
 
 /* Rounds a floating point number to integer. The world-to-viewport
  * transformation process is done in floating point internally. This function
@@ -155,6 +159,8 @@ extern void free_brush_pattern( struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 /* clipping.c */
 extern BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
 extern BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
+extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
+                                const RECT *device_rect, struct window_surface *surface );
 extern void update_dc_clipping( DC * dc ) DECLSPEC_HIDDEN;
 
 /* Return the total DC region (if any) */
@@ -171,7 +177,10 @@ extern DC *alloc_dc_ptr( DWORD magic ) DECLSPEC_HIDDEN;
 extern void free_dc_ptr( DC *dc ) DECLSPEC_HIDDEN;
 extern DC *get_dc_ptr( HDC hdc ) DECLSPEC_HIDDEN;
 extern void release_dc_ptr( DC *dc ) DECLSPEC_HIDDEN;
-extern void update_dc( DC *dc ) DECLSPEC_HIDDEN;
+extern struct dce *get_dc_dce( HDC hdc ) DECLSPEC_HIDDEN;
+extern void set_dc_dce( HDC hdc, struct dce *dce ) DECLSPEC_HIDDEN;
+extern WORD set_dce_flags( HDC hdc, WORD flags ) DECLSPEC_HIDDEN;
+extern DWORD set_stretch_blt_mode( HDC hdc, DWORD mode ) DECLSPEC_HIDDEN;
 extern void DC_InitDC( DC * dc ) DECLSPEC_HIDDEN;
 extern void DC_UpdateXforms( DC * dc ) DECLSPEC_HIDDEN;
 
@@ -206,6 +215,7 @@ extern UINT get_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
 extern UINT set_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
                                     const RGBQUAD *colors ) DECLSPEC_HIDDEN;
 extern void dibdrv_set_window_surface( DC *dc, struct window_surface *surface ) DECLSPEC_HIDDEN;
+extern struct opengl_funcs *dibdrv_get_wgl_driver(void) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern const struct gdi_dc_funcs null_driver DECLSPEC_HIDDEN;
@@ -414,6 +424,10 @@ extern BOOL mirror_window_region( HWND hwnd, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern BOOL REGION_FrameRgn( HRGN dest, HRGN src, INT x, INT y ) DECLSPEC_HIDDEN;
 extern HRGN create_polypolygon_region( const POINT *pts, const INT *count, INT nbpolygons,
                                        INT mode, const RECT *clip_rect ) DECLSPEC_HIDDEN;
+
+/* dce.c */
+extern BOOL delete_dce( struct dce *dce ) DECLSPEC_HIDDEN;
+extern void update_dc( DC *dc ) DECLSPEC_HIDDEN;
 
 #define RGN_DEFAULT_RECTS 4
 typedef struct

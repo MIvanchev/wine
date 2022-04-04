@@ -89,6 +89,7 @@ SOURCES = \
 	cordebug.idl \
 	corerror.h \
 	corhdr.h \
+	corsym.idl \
 	cpl.h \
 	crtrow.idl \
 	cryptdlg.h \
@@ -101,6 +102,7 @@ SOURCES = \
 	d2d1.idl \
 	d2d1_1.idl \
 	d2d1_2.idl \
+	d2d1_3.idl \
 	d2d1effects.idl \
 	d2dbasetypes.h \
 	d2derr.h \
@@ -754,6 +756,7 @@ SOURCES = \
 	wbemdisp.idl \
 	wbemprov.idl \
 	wct.h \
+	weakreference.idl \
 	webservices.h \
 	werapi.h \
 	wfext.h \
@@ -775,17 +778,22 @@ SOURCES = \
 	windns.h \
 	windot11.h \
 	windows.devices.enumeration.idl \
+	windows.devices.haptics.idl \
+	windows.devices.power.idl \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
+	windows.gaming.input.custom.idl \
 	windows.gaming.input.forcefeedback.idl \
 	windows.gaming.input.idl \
 	windows.globalization.idl \
 	windows.h \
 	windows.media.devices.idl \
 	windows.media.idl \
+	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
 	windows.storage.streams.idl \
 	windows.system.idl \
+	windows.system.power.idl \
 	windows.system.userprofile.idl \
 	windowscontracts.idl \
 	windowsx.h \

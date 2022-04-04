@@ -25,7 +25,6 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 #include "sock.h"
@@ -132,7 +131,7 @@ static void CALLBACK queue_runner( TP_CALLBACK_INSTANCE *instance, void *ctx )
             while ((task = dequeue_task( queue )))
             {
                 task->proc( task );
-                heap_free( task );
+                free( task );
             }
             break;
         }
@@ -142,7 +141,7 @@ static void CALLBACK queue_runner( TP_CALLBACK_INSTANCE *instance, void *ctx )
             return;
 
         default:
-            ERR( "wait failed %u\n", err );
+            ERR( "wait failed %lu\n", err );
             return;
         }
     }
@@ -249,7 +248,7 @@ static struct channel *alloc_channel(void)
     struct channel *ret;
     ULONG size = sizeof(*ret) + prop_size( channel_props, count );
 
-    if (!(ret = heap_alloc_zero( size ))) return NULL;
+    if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = CHANNEL_MAGIC;
     InitializeCriticalSection( &ret->cs );
@@ -266,7 +265,7 @@ static struct channel *alloc_channel(void)
 
 static void clear_addr( WS_ENDPOINT_ADDRESS *addr )
 {
-    heap_free( addr->url.chars );
+    free( addr->url.chars );
     addr->url.chars  = NULL;
     addr->url.length = 0;
 }
@@ -282,7 +281,7 @@ static void clear_queue( struct queue *queue )
     {
         struct task *task = LIST_ENTRY( ptr, struct task, entry );
         list_remove( &task->entry );
-        heap_free( task );
+        free( task );
     }
 
     CloseHandle( queue->wait );
@@ -342,7 +341,7 @@ static void reset_channel( struct channel *channel )
         channel->u.http.connect = NULL;
         WinHttpCloseHandle( channel->u.http.session );
         channel->u.http.session = NULL;
-        heap_free( channel->u.http.path );
+        free( channel->u.http.path );
         channel->u.http.path    = NULL;
         channel->u.http.flags   = 0;
         break;
@@ -364,8 +363,8 @@ static void reset_channel( struct channel *channel )
 static void free_header_mappings( WS_HTTP_HEADER_MAPPING **mappings, ULONG count )
 {
     ULONG i;
-    for (i = 0; i < count; i++) heap_free( mappings[i] );
-    heap_free( mappings );
+    for (i = 0; i < count; i++) free( mappings[i] );
+    free( mappings );
 }
 
 static void free_message_mapping( const WS_HTTP_MESSAGE_MAPPING *mapping )
@@ -389,8 +388,8 @@ static void free_channel( struct channel *channel )
     WsFreeWriter( channel->writer );
     WsFreeReader( channel->reader );
 
-    heap_free( channel->read_buf );
-    heap_free( channel->send_buf );
+    free( channel->read_buf );
+    free( channel->send_buf );
     free_props( channel );
 
     channel->send_q.cs.DebugInfo->Spare[0] = 0;
@@ -399,14 +398,14 @@ static void free_channel( struct channel *channel )
     DeleteCriticalSection( &channel->send_q.cs );
     DeleteCriticalSection( &channel->recv_q.cs );
     DeleteCriticalSection( &channel->cs );
-    heap_free( channel );
+    free( channel );
 }
 
 static WS_HTTP_HEADER_MAPPING *dup_header_mapping( const WS_HTTP_HEADER_MAPPING *src )
 {
     WS_HTTP_HEADER_MAPPING *dst;
 
-    if (!(dst = heap_alloc( sizeof(*dst) + src->headerName.length ))) return NULL;
+    if (!(dst = malloc( sizeof(*dst) + src->headerName.length ))) return NULL;
 
     dst->headerName.bytes     = (BYTE *)(dst + 1);
     memcpy( dst->headerName.bytes, src->headerName.bytes, src->headerName.length );
@@ -420,7 +419,7 @@ static HRESULT dup_message_mapping( const WS_HTTP_MESSAGE_MAPPING *src, WS_HTTP_
     ULONG i, size;
 
     size = src->requestHeaderMappingCount * sizeof(*dst->responseHeaderMappings);
-    if (!(dst->requestHeaderMappings = heap_alloc( size ))) return E_OUTOFMEMORY;
+    if (!(dst->requestHeaderMappings = malloc( size ))) return E_OUTOFMEMORY;
 
     for (i = 0; i < src->requestHeaderMappingCount; i++)
     {
@@ -432,9 +431,9 @@ static HRESULT dup_message_mapping( const WS_HTTP_MESSAGE_MAPPING *src, WS_HTTP_
     }
 
     size = src->responseHeaderMappingCount * sizeof(*dst->responseHeaderMappings);
-    if (!(dst->responseHeaderMappings = heap_alloc( size )))
+    if (!(dst->responseHeaderMappings = malloc( size )))
     {
-        heap_free( dst->responseHeaderMappings );
+        free( dst->responseHeaderMappings );
         return E_OUTOFMEMORY;
     }
 
@@ -498,8 +497,8 @@ static HRESULT create_channel( WS_CHANNEL_TYPE type, WS_CHANNEL_BINDING binding,
     {
         const WS_CHANNEL_PROPERTY *prop = &properties[i];
 
-        TRACE( "property id %u value %p size %u\n", prop->id, prop->value, prop->valueSize );
-        if (prop->valueSize == sizeof(ULONG) && prop->value) TRACE( " value %08x\n", *(ULONG *)prop->value );
+        TRACE( "property id %u value %p size %lu\n", prop->id, prop->value, prop->valueSize );
+        if (prop->valueSize == sizeof(ULONG) && prop->value) TRACE( " value %#lx\n", *(ULONG *)prop->value );
 
         switch (prop->id)
         {
@@ -560,7 +559,7 @@ HRESULT WINAPI WsCreateChannel( WS_CHANNEL_TYPE type, WS_CHANNEL_BINDING binding
     struct channel *channel;
     HRESULT hr;
 
-    TRACE( "%u %u %p %u %p %p %p\n", type, binding, properties, count, desc, handle, error );
+    TRACE( "%u %u %p %lu %p %p %p\n", type, binding, properties, count, desc, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
     if (desc) FIXME( "ignoring security description\n" );
 
@@ -597,7 +596,7 @@ HRESULT WINAPI WsCreateChannelForListener( WS_LISTENER *listener_handle, const W
     WS_CHANNEL_BINDING binding;
     HRESULT hr;
 
-    TRACE( "%p %p %u %p %p\n", listener_handle, properties, count, handle, error );
+    TRACE( "%p %p %lu %p %p\n", listener_handle, properties, count, handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!listener_handle || !handle) return E_INVALIDARG;
@@ -670,7 +669,7 @@ HRESULT WINAPI WsResetChannel( WS_CHANNEL *handle, WS_ERROR *error )
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -683,7 +682,7 @@ HRESULT WINAPI WsGetChannelProperty( WS_CHANNEL *handle, WS_CHANNEL_PROPERTY_ID 
     struct channel *channel = (struct channel *)handle;
     HRESULT hr = S_OK;
 
-    TRACE( "%p %u %p %u %p\n", handle, id, buf, size, error );
+    TRACE( "%p %u %p %lu %p\n", handle, id, buf, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!channel) return E_INVALIDARG;
@@ -718,7 +717,7 @@ HRESULT WINAPI WsGetChannelProperty( WS_CHANNEL *handle, WS_CHANNEL_PROPERTY_ID 
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -731,7 +730,7 @@ HRESULT WINAPI WsSetChannelProperty( WS_CHANNEL *handle, WS_CHANNEL_PROPERTY_ID 
     struct channel *channel = (struct channel *)handle;
     HRESULT hr;
 
-    TRACE( "%p %u %p %u\n", handle, id, value, size );
+    TRACE( "%p %u %p %lu %p\n", handle, id, value, size, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!channel) return E_INVALIDARG;
@@ -747,7 +746,7 @@ HRESULT WINAPI WsSetChannelProperty( WS_CHANNEL *handle, WS_CHANNEL_PROPERTY_ID 
     hr = prop_set( channel->prop, channel->prop_count, id, value, size );
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -839,7 +838,7 @@ static void shutdown_session_proc( struct task *task )
 
     hr = shutdown_session( s->channel );
 
-    TRACE( "calling %p(%08x)\n", s->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", s->ctx.callback, hr );
     s->ctx.callback( hr, WS_LONG_CALLBACK, s->ctx.callbackState );
     TRACE( "%p returned\n", s->ctx.callback );
 }
@@ -848,7 +847,7 @@ static HRESULT queue_shutdown_session( struct channel *channel, const WS_ASYNC_C
 {
     struct shutdown_session *s;
 
-    if (!(s = heap_alloc( sizeof(*s) ))) return E_OUTOFMEMORY;
+    if (!(s = malloc( sizeof(*s) ))) return E_OUTOFMEMORY;
     s->task.proc = shutdown_session_proc;
     s->channel   = channel;
     s->ctx       = *ctx;
@@ -889,7 +888,7 @@ HRESULT WINAPI WsShutdownSessionChannel( WS_CHANNEL *handle, const WS_ASYNC_CONT
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -921,7 +920,7 @@ static HRESULT queue_close_channel( struct channel *channel, const WS_ASYNC_CONT
 {
     struct close_channel *c;
 
-    if (!(c = heap_alloc( sizeof(*c) ))) return E_OUTOFMEMORY;
+    if (!(c = malloc( sizeof(*c) ))) return E_OUTOFMEMORY;
     c->task.proc = close_channel_proc;
     c->channel   = channel;
     c->ctx       = *ctx;
@@ -960,7 +959,7 @@ HRESULT WINAPI WsCloseChannel( WS_CHANNEL *handle, const WS_ASYNC_CONTEXT *ctx, 
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -973,11 +972,11 @@ static HRESULT parse_http_url( const WCHAR *url, ULONG len, URL_COMPONENTS *uc )
     memset( uc, 0, sizeof(*uc) );
     uc->dwStructSize      = sizeof(*uc);
     uc->dwHostNameLength  = 128;
-    uc->lpszHostName      = heap_alloc( uc->dwHostNameLength * sizeof(WCHAR) );
+    uc->lpszHostName      = malloc( uc->dwHostNameLength * sizeof(WCHAR) );
     uc->dwUrlPathLength   = 128;
-    uc->lpszUrlPath       = heap_alloc( uc->dwUrlPathLength * sizeof(WCHAR) );
+    uc->lpszUrlPath       = malloc( uc->dwUrlPathLength * sizeof(WCHAR) );
     uc->dwExtraInfoLength = 128;
-    uc->lpszExtraInfo     = heap_alloc( uc->dwExtraInfoLength * sizeof(WCHAR) );
+    uc->lpszExtraInfo     = malloc( uc->dwExtraInfoLength * sizeof(WCHAR) );
     if (!uc->lpszHostName || !uc->lpszUrlPath || !uc->lpszExtraInfo) goto error;
 
     if (!WinHttpCrackUrl( url, len, ICU_DECODE, uc ))
@@ -987,11 +986,11 @@ static HRESULT parse_http_url( const WCHAR *url, ULONG len, URL_COMPONENTS *uc )
             hr = HRESULT_FROM_WIN32( err );
             goto error;
         }
-        if (!(tmp = heap_realloc( uc->lpszHostName, uc->dwHostNameLength * sizeof(WCHAR) ))) goto error;
+        if (!(tmp = realloc( uc->lpszHostName, uc->dwHostNameLength * sizeof(WCHAR) ))) goto error;
         uc->lpszHostName = tmp;
-        if (!(tmp = heap_realloc( uc->lpszUrlPath, uc->dwUrlPathLength * sizeof(WCHAR) ))) goto error;
+        if (!(tmp = realloc( uc->lpszUrlPath, uc->dwUrlPathLength * sizeof(WCHAR) ))) goto error;
         uc->lpszUrlPath = tmp;
-        if (!(tmp = heap_realloc( uc->lpszExtraInfo, uc->dwExtraInfoLength * sizeof(WCHAR) ))) goto error;
+        if (!(tmp = realloc( uc->lpszExtraInfo, uc->dwExtraInfoLength * sizeof(WCHAR) ))) goto error;
         uc->lpszExtraInfo = tmp;
         WinHttpCrackUrl( url, len, ICU_DECODE, uc );
     }
@@ -999,9 +998,9 @@ static HRESULT parse_http_url( const WCHAR *url, ULONG len, URL_COMPONENTS *uc )
     return S_OK;
 
 error:
-    heap_free( uc->lpszHostName );
-    heap_free( uc->lpszUrlPath );
-    heap_free( uc->lpszExtraInfo );
+    free( uc->lpszHostName );
+    free( uc->lpszUrlPath );
+    free( uc->lpszExtraInfo );
     return hr;
 }
 
@@ -1014,7 +1013,7 @@ static HRESULT open_channel_http( struct channel *channel )
     if (channel->u.http.connect) return S_OK;
 
     if ((hr = parse_http_url( channel->addr.url.chars, channel->addr.url.length, &uc )) != S_OK) return hr;
-    if (!(channel->u.http.path = heap_alloc( (uc.dwUrlPathLength + uc.dwExtraInfoLength + 1) * sizeof(WCHAR) )))
+    if (!(channel->u.http.path = malloc( (uc.dwUrlPathLength + uc.dwExtraInfoLength + 1) * sizeof(WCHAR) )))
     {
         hr = E_OUTOFMEMORY;
         goto done;
@@ -1058,9 +1057,9 @@ done:
         WinHttpCloseHandle( con );
         WinHttpCloseHandle( ses );
     }
-    heap_free( uc.lpszHostName );
-    heap_free( uc.lpszUrlPath );
-    heap_free( uc.lpszExtraInfo );
+    free( uc.lpszHostName );
+    free( uc.lpszUrlPath );
+    free( uc.lpszExtraInfo );
     return hr;
 }
 
@@ -1080,14 +1079,14 @@ static HRESULT open_channel_tcp( struct channel *channel )
     if ((hr = parse_url( &channel->addr.url, &scheme, &host, &port )) != S_OK) return hr;
     if (scheme != WS_URL_NETTCP_SCHEME_TYPE)
     {
-        heap_free( host );
+        free( host );
         return WS_E_INVALID_ENDPOINT_URL;
     }
 
     winsock_init();
 
     hr = resolve_hostname( host, port, addr, &addr_len, 0 );
-    heap_free( host );
+    free( host );
     if (hr != S_OK) return hr;
 
     if ((channel->u.tcp.socket = socket( addr->sa_family, SOCK_STREAM, 0 )) == -1)
@@ -1120,14 +1119,14 @@ static HRESULT open_channel_udp( struct channel *channel )
     if ((hr = parse_url( &channel->addr.url, &scheme, &host, &port )) != S_OK) return hr;
     if (scheme != WS_URL_SOAPUDP_SCHEME_TYPE)
     {
-        heap_free( host );
+        free( host );
         return WS_E_INVALID_ENDPOINT_URL;
     }
 
     winsock_init();
 
     hr = resolve_hostname( host, port, addr, &addr_len, 0 );
-    heap_free( host );
+    free( host );
     if (hr != S_OK) return hr;
 
     if ((channel->u.udp.socket = socket( addr->sa_family, SOCK_DGRAM, 0 )) == -1)
@@ -1155,7 +1154,7 @@ static HRESULT open_channel( struct channel *channel, const WS_ENDPOINT_ADDRESS 
 
     TRACE( "endpoint %s\n", debugstr_wn(endpoint->url.chars, endpoint->url.length) );
 
-    if (!(channel->addr.url.chars = heap_alloc( endpoint->url.length * sizeof(WCHAR) ))) return E_OUTOFMEMORY;
+    if (!(channel->addr.url.chars = malloc( endpoint->url.length * sizeof(WCHAR) ))) return E_OUTOFMEMORY;
     memcpy( channel->addr.url.chars, endpoint->url.chars, endpoint->url.length * sizeof(WCHAR) );
     channel->addr.url.length = endpoint->url.length;
 
@@ -1197,7 +1196,7 @@ static void open_channel_proc( struct task *task )
 
     hr = open_channel( o->channel, o->endpoint );
 
-    TRACE( "calling %p(%08x)\n", o->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", o->ctx.callback, hr );
     o->ctx.callback( hr, WS_LONG_CALLBACK, o->ctx.callbackState );
     TRACE( "%p returned\n", o->ctx.callback );
 }
@@ -1207,7 +1206,7 @@ static HRESULT queue_open_channel( struct channel *channel, const WS_ENDPOINT_AD
 {
     struct open_channel *o;
 
-    if (!(o = heap_alloc( sizeof(*o) ))) return E_OUTOFMEMORY;
+    if (!(o = malloc( sizeof(*o) ))) return E_OUTOFMEMORY;
     o->task.proc = open_channel_proc;
     o->channel   = channel;
     o->endpoint  = endpoint;
@@ -1253,7 +1252,7 @@ HRESULT WINAPI WsOpenChannel( WS_CHANNEL *handle, const WS_ENDPOINT_ADDRESS *end
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1279,7 +1278,7 @@ static HRESULT write_bytes( struct channel *channel, BYTE *bytes, ULONG len )
     if (!channel->send_buf)
     {
         channel->send_buflen = get_max_buffer_size( channel );
-        if (!(channel->send_buf = heap_alloc( channel->send_buflen ))) return E_OUTOFMEMORY;
+        if (!(channel->send_buf = malloc( channel->send_buflen ))) return E_OUTOFMEMORY;
     }
     if (channel->send_size + len >= channel->send_buflen) return WS_E_QUOTA_EXCEEDED;
 
@@ -1344,7 +1343,7 @@ static HRESULT write_string_table( struct channel *channel, const struct diction
 static HRESULT string_to_utf8( const WS_STRING *str, unsigned char **ret, int *len )
 {
     *len = WideCharToMultiByte( CP_UTF8, 0, str->chars, str->length, NULL, 0, NULL, NULL );
-    if (!(*ret = heap_alloc( *len ))) return E_OUTOFMEMORY;
+    if (!(*ret = malloc( *len ))) return E_OUTOFMEMORY;
     WideCharToMultiByte( CP_UTF8, 0, str->chars, str->length, (char *)*ret, *len, NULL, NULL );
     return S_OK;
 }
@@ -1363,7 +1362,7 @@ static enum session_mode map_channel_type( struct channel *channel )
     {
     case WS_CHANNEL_TYPE_DUPLEX_SESSION: return SESSION_MODE_DUPLEX;
     default:
-        FIXME( "unhandled channel type %08x\n", channel->type );
+        FIXME( "unhandled channel type %#x\n", channel->type );
         return SESSION_MODE_INVALID;
     }
 }
@@ -1441,7 +1440,7 @@ static HRESULT write_preamble( struct channel *channel )
     hr = write_byte( channel, FRAME_RECORD_TYPE_PREAMBLE_END );
 
 done:
-    heap_free( url );
+    free( url );
     return hr;
 }
 
@@ -1597,14 +1596,14 @@ static HRESULT CALLBACK dict_cb( void *state, const WS_XML_STRING *str, BOOL *fo
         return S_OK;
     }
 
-    if (!(bytes = heap_alloc( str->length ))) return E_OUTOFMEMORY;
+    if (!(bytes = malloc( str->length ))) return E_OUTOFMEMORY;
     memcpy( bytes, str->bytes, str->length );
     if ((hr = insert_string( dict, bytes, str->length, index, id )) == S_OK)
     {
         *found = TRUE;
         return S_OK;
     }
-    heap_free( bytes );
+    free( bytes );
 
     *found = FALSE;
     return hr;
@@ -1713,7 +1712,7 @@ static void send_message_proc( struct task *task )
 
     hr = send_message( s->channel, s->msg, s->desc, s->option, s->body, s->size );
 
-    TRACE( "calling %p(%08x)\n", s->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", s->ctx.callback, hr );
     s->ctx.callback( hr, WS_LONG_CALLBACK, s->ctx.callbackState );
     TRACE( "%p returned\n", s->ctx.callback );
 }
@@ -1723,7 +1722,7 @@ static HRESULT queue_send_message( struct channel *channel, WS_MESSAGE *msg, con
 {
     struct send_message *s;
 
-    if (!(s = heap_alloc( sizeof(*s) ))) return E_OUTOFMEMORY;
+    if (!(s = malloc( sizeof(*s) ))) return E_OUTOFMEMORY;
     s->task.proc = send_message_proc;
     s->channel   = channel;
     s->msg       = msg;
@@ -1747,7 +1746,7 @@ HRESULT WINAPI WsSendMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_MESS
     struct async async;
     HRESULT hr;
 
-    TRACE( "%p %p %p %08x %p %u %p %p\n", handle, msg, desc, option, body, size, ctx, error );
+    TRACE( "%p %p %p %u %p %lu %p %p\n", handle, msg, desc, option, body, size, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!channel || !msg || !desc) return E_INVALIDARG;
@@ -1776,7 +1775,7 @@ HRESULT WINAPI WsSendMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_MESS
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1793,7 +1792,7 @@ HRESULT WINAPI WsSendReplyMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS
     GUID id;
     HRESULT hr;
 
-    TRACE( "%p %p %p %08x %p %u %p %p %p\n", handle, msg, desc, option, body, size, request, ctx, error );
+    TRACE( "%p %p %p %u %p %lu %p %p %p\n", handle, msg, desc, option, body, size, request, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
     if (!channel || !msg || !desc || !request) return E_INVALIDARG;
@@ -1825,7 +1824,7 @@ HRESULT WINAPI WsSendReplyMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS
 
 done:
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -1833,7 +1832,7 @@ static HRESULT resize_read_buffer( struct channel *channel, ULONG size )
 {
     if (!channel->read_buf)
     {
-        if (!(channel->read_buf = heap_alloc( size ))) return E_OUTOFMEMORY;
+        if (!(channel->read_buf = malloc( size ))) return E_OUTOFMEMORY;
         channel->read_buflen = size;
         return S_OK;
     }
@@ -1841,7 +1840,7 @@ static HRESULT resize_read_buffer( struct channel *channel, ULONG size )
     {
         char *tmp;
         ULONG new_size = max( size, channel->read_buflen * 2 );
-        if (!(tmp = heap_realloc( channel->read_buf, new_size ))) return E_OUTOFMEMORY;
+        if (!(tmp = realloc( channel->read_buf, new_size ))) return E_OUTOFMEMORY;
         channel->read_buf = tmp;
         channel->read_buflen = new_size;
     }
@@ -2064,14 +2063,14 @@ static HRESULT receive_preamble( struct channel *channel )
             unsigned char *url;
 
             if ((hr = receive_size( channel, &size )) != S_OK) return hr;
-            if (!(url = heap_alloc( size ))) return E_OUTOFMEMORY;
+            if (!(url = malloc( size ))) return E_OUTOFMEMORY;
             if ((hr = receive_bytes( channel, url, size )) != S_OK)
             {
-                heap_free( url );
+                free( url );
                 return hr;
             }
             TRACE( "transport URL %s\n", debugstr_an((char *)url, size) );
-            heap_free( url ); /* FIXME: verify */
+            free( url ); /* FIXME: verify */
             break;
         }
         case FRAME_RECORD_TYPE_KNOWN_ENCODING:
@@ -2175,7 +2174,7 @@ static HRESULT build_dict( const BYTE *buf, ULONG buflen, struct dictionary *dic
             return WS_E_INVALID_FORMAT;
         }
         buflen -= size;
-        if (!(bytes = heap_alloc( size )))
+        if (!(bytes = malloc( size )))
         {
             hr = E_OUTOFMEMORY;
             goto error;
@@ -2183,13 +2182,13 @@ static HRESULT build_dict( const BYTE *buf, ULONG buflen, struct dictionary *dic
         memcpy( bytes, ptr, size );
         if ((index = find_string( dict, bytes, size, NULL )) == -1) /* duplicate */
         {
-            heap_free( bytes );
+            free( bytes );
             ptr += size;
             continue;
         }
         if ((hr = insert_string( dict, bytes, size, index, NULL )) != S_OK)
         {
-            heap_free( bytes );
+            free( bytes );
             clear_dict( dict );
             return hr;
         }
@@ -2363,7 +2362,7 @@ static void receive_message_proc( struct task *task )
     hr = receive_message( r->channel, r->msg, r->desc, r->count, r->option, r->read_option, r->heap, r->value,
                           r->size, r->index );
 
-    TRACE( "calling %p(%08x)\n", r->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", r->ctx.callback, hr );
     r->ctx.callback( hr, WS_LONG_CALLBACK, r->ctx.callbackState );
     TRACE( "%p returned\n", r->ctx.callback );
 }
@@ -2375,7 +2374,7 @@ static HRESULT queue_receive_message( struct channel *channel, WS_MESSAGE *msg, 
 {
     struct receive_message *r;
 
-    if (!(r = heap_alloc( sizeof(*r) ))) return E_OUTOFMEMORY;
+    if (!(r = malloc( sizeof(*r) ))) return E_OUTOFMEMORY;
     r->task.proc   = receive_message_proc;
     r->channel     = channel;
     r->msg         = msg;
@@ -2403,7 +2402,7 @@ HRESULT WINAPI WsReceiveMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_M
     struct async async;
     HRESULT hr;
 
-    TRACE( "%p %p %p %u %08x %08x %p %p %u %p %p %p\n", handle, msg, desc, count, option, read_option, heap,
+    TRACE( "%p %p %p %lu %u %u %p %p %lu %p %p %p\n", handle, msg, desc, count, option, read_option, heap,
            value, size, index, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -2427,7 +2426,7 @@ HRESULT WINAPI WsReceiveMessage( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_M
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2472,7 +2471,7 @@ static void request_reply_proc( struct task *task )
     hr = request_reply( r->channel, r->request, r->request_desc, r->write_option, r->request_body, r->request_size,
                         r->reply, r->reply_desc, r->read_option, r->heap, r->value, r->size );
 
-    TRACE( "calling %p(%08x)\n", r->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", r->ctx.callback, hr );
     r->ctx.callback( hr, WS_LONG_CALLBACK, r->ctx.callbackState );
     TRACE( "%p returned\n", r->ctx.callback );
 }
@@ -2485,7 +2484,7 @@ static HRESULT queue_request_reply( struct channel *channel, WS_MESSAGE *request
 {
     struct request_reply *r;
 
-    if (!(r = heap_alloc( sizeof(*r) ))) return E_OUTOFMEMORY;
+    if (!(r = malloc( sizeof(*r) ))) return E_OUTOFMEMORY;
     r->task.proc    = request_reply_proc;
     r->channel      = channel;
     r->request      = request;
@@ -2516,7 +2515,7 @@ HRESULT WINAPI WsRequestReply( WS_CHANNEL *handle, WS_MESSAGE *request, const WS
     struct async async;
     HRESULT hr;
 
-    TRACE( "%p %p %p %08x %p %u %p %p %08x %p %p %u %p %p\n", handle, request, request_desc, write_option,
+    TRACE( "%p %p %p %u %p %lu %p %p %u %p %p %lu %p %p\n", handle, request, request_desc, write_option,
            request_body, request_size, reply, reply_desc, read_option, heap, value, size, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
 
@@ -2547,7 +2546,7 @@ HRESULT WINAPI WsRequestReply( WS_CHANNEL *handle, WS_MESSAGE *request, const WS
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2574,7 +2573,7 @@ static void read_message_start_proc( struct task *task )
 
     hr = read_message_start( r->channel, r->msg );
 
-    TRACE( "calling %p(%08x)\n", r->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", r->ctx.callback, hr );
     r->ctx.callback( hr, WS_LONG_CALLBACK, r->ctx.callbackState );
     TRACE( "%p returned\n", r->ctx.callback );
 }
@@ -2583,7 +2582,7 @@ static HRESULT queue_read_message_start( struct channel *channel, WS_MESSAGE *ms
 {
     struct read_message_start *r;
 
-    if (!(r = heap_alloc( sizeof(*r) ))) return E_OUTOFMEMORY;
+    if (!(r = malloc( sizeof(*r) ))) return E_OUTOFMEMORY;
     r->task.proc = read_message_start_proc;
     r->channel   = channel;
     r->msg       = msg;
@@ -2628,7 +2627,7 @@ HRESULT WINAPI WsReadMessageStart( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2651,7 +2650,7 @@ static void read_message_end_proc( struct task *task )
 
     hr = read_message_end( r->msg );
 
-    TRACE( "calling %p(%08x)\n", r->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", r->ctx.callback, hr );
     r->ctx.callback( hr, WS_LONG_CALLBACK, r->ctx.callbackState );
     TRACE( "%p returned\n", r->ctx.callback );
 }
@@ -2660,7 +2659,7 @@ static HRESULT queue_read_message_end( struct channel *channel, WS_MESSAGE *msg,
 {
     struct read_message_end *r;
 
-    if (!(r = heap_alloc( sizeof(*r) ))) return E_OUTOFMEMORY;
+    if (!(r = malloc( sizeof(*r) ))) return E_OUTOFMEMORY;
     r->task.proc = read_message_end_proc;
     r->msg       = msg;
     r->ctx       = *ctx;
@@ -2699,7 +2698,7 @@ HRESULT WINAPI WsReadMessageEnd( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_A
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2726,7 +2725,7 @@ static void write_message_start_proc( struct task *task )
 
     hr = write_message_start( w->channel, w->msg );
 
-    TRACE( "calling %p(%08x)\n", w->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", w->ctx.callback, hr );
     w->ctx.callback( hr, WS_LONG_CALLBACK, w->ctx.callbackState );
     TRACE( "%p returned\n", w->ctx.callback );
 }
@@ -2735,7 +2734,7 @@ static HRESULT queue_write_message_start( struct channel *channel, WS_MESSAGE *m
 {
     struct write_message_start *w;
 
-    if (!(w = heap_alloc( sizeof(*w) ))) return E_OUTOFMEMORY;
+    if (!(w = malloc( sizeof(*w) ))) return E_OUTOFMEMORY;
     w->task.proc = write_message_start_proc;
     w->channel   = channel;
     w->msg       = msg;
@@ -2780,7 +2779,7 @@ HRESULT WINAPI WsWriteMessageStart( WS_CHANNEL *handle, WS_MESSAGE *msg, const W
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 
@@ -2806,7 +2805,7 @@ static void write_message_end_proc( struct task *task )
 
     hr = write_message_end( w->channel, w->msg );
 
-    TRACE( "calling %p(%08x)\n", w->ctx.callback, hr );
+    TRACE( "calling %p(%#lx)\n", w->ctx.callback, hr );
     w->ctx.callback( hr, WS_LONG_CALLBACK, w->ctx.callbackState );
     TRACE( "%p returned\n", w->ctx.callback );
 }
@@ -2815,7 +2814,7 @@ static HRESULT queue_write_message_end( struct channel *channel, WS_MESSAGE *msg
 {
     struct write_message_start *w;
 
-    if (!(w = heap_alloc( sizeof(*w) ))) return E_OUTOFMEMORY;
+    if (!(w = malloc( sizeof(*w) ))) return E_OUTOFMEMORY;
     w->task.proc = write_message_end_proc;
     w->channel   = channel;
     w->msg       = msg;
@@ -2860,7 +2859,7 @@ HRESULT WINAPI WsWriteMessageEnd( WS_CHANNEL *handle, WS_MESSAGE *msg, const WS_
     }
 
     LeaveCriticalSection( &channel->cs );
-    TRACE( "returning %08x\n", hr );
+    TRACE( "returning %#lx\n", hr );
     return hr;
 }
 

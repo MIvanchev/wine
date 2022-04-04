@@ -53,157 +53,7 @@ WINE_DECLARE_DEBUG_CHANNEL(key);
 
 #define MAX_PACK_COUNT 4
 
-/* the various structures that can be sent in messages, in platform-independent layout */
-struct packed_CREATESTRUCTW
-{
-    ULONGLONG     lpCreateParams;
-    ULONGLONG     hInstance;
-    user_handle_t hMenu;
-    DWORD         __pad1;
-    user_handle_t hwndParent;
-    DWORD         __pad2;
-    INT           cy;
-    INT           cx;
-    INT           y;
-    INT           x;
-    LONG          style;
-    ULONGLONG     lpszName;
-    ULONGLONG     lpszClass;
-    DWORD         dwExStyle;
-    DWORD         __pad3;
-};
-
-struct packed_DRAWITEMSTRUCT
-{
-    UINT          CtlType;
-    UINT          CtlID;
-    UINT          itemID;
-    UINT          itemAction;
-    UINT          itemState;
-    user_handle_t hwndItem;
-    DWORD         __pad1;
-    user_handle_t hDC;
-    DWORD         __pad2;
-    RECT          rcItem;
-    ULONGLONG     itemData;
-};
-
-struct packed_MEASUREITEMSTRUCT
-{
-    UINT          CtlType;
-    UINT          CtlID;
-    UINT          itemID;
-    UINT          itemWidth;
-    UINT          itemHeight;
-    ULONGLONG     itemData;
-};
-
-struct packed_DELETEITEMSTRUCT
-{
-    UINT          CtlType;
-    UINT          CtlID;
-    UINT          itemID;
-    user_handle_t hwndItem;
-    DWORD         __pad;
-    ULONGLONG     itemData;
-};
-
-struct packed_COMPAREITEMSTRUCT
-{
-    UINT          CtlType;
-    UINT          CtlID;
-    user_handle_t hwndItem;
-    DWORD         __pad1;
-    UINT          itemID1;
-    ULONGLONG     itemData1;
-    UINT          itemID2;
-    ULONGLONG     itemData2;
-    DWORD         dwLocaleId;
-    DWORD         __pad2;
-};
-
-struct packed_WINDOWPOS
-{
-    user_handle_t hwnd;
-    DWORD         __pad1;
-    user_handle_t hwndInsertAfter;
-    DWORD         __pad2;
-    INT           x;
-    INT           y;
-    INT           cx;
-    INT           cy;
-    UINT          flags;
-    DWORD         __pad3;
-};
-
-struct packed_COPYDATASTRUCT
-{
-    ULONGLONG dwData;
-    DWORD     cbData;
-    ULONGLONG lpData;
-};
-
-struct packed_HELPINFO
-{
-    UINT          cbSize;
-    INT           iContextType;
-    INT           iCtrlId;
-    user_handle_t hItemHandle;
-    DWORD         __pad;
-    ULONGLONG     dwContextId;
-    POINT         MousePos;
-};
-
-struct packed_NCCALCSIZE_PARAMS
-{
-    RECT          rgrc[3];
-    ULONGLONG     __pad1;
-    user_handle_t hwnd;
-    DWORD         __pad2;
-    user_handle_t hwndInsertAfter;
-    DWORD         __pad3;
-    INT           x;
-    INT           y;
-    INT           cx;
-    INT           cy;
-    UINT          flags;
-    DWORD         __pad4;
-};
-
-struct packed_MSG
-{
-    user_handle_t hwnd;
-    DWORD         __pad1;
-    UINT          message;
-    ULONGLONG     wParam;
-    ULONGLONG     lParam;
-    DWORD         time;
-    POINT         pt;
-    DWORD         __pad2;
-};
-
-struct packed_MDINEXTMENU
-{
-    user_handle_t hmenuIn;
-    DWORD         __pad1;
-    user_handle_t hmenuNext;
-    DWORD         __pad2;
-    user_handle_t hwndNext;
-    DWORD         __pad3;
-};
-
-struct packed_MDICREATESTRUCTW
-{
-    ULONGLONG szClass;
-    ULONGLONG szTitle;
-    ULONGLONG hOwner;
-    INT       x;
-    INT       y;
-    INT       cx;
-    INT       cy;
-    DWORD     style;
-    ULONGLONG lParam;
-};
+#define MAX_WINPROC_RECURSION  64
 
 struct packed_hook_extra_info
 {
@@ -251,14 +101,6 @@ struct packed_message
     int                  count;
     const void          *data[MAX_PACK_COUNT];
     size_t               size[MAX_PACK_COUNT];
-};
-
-/* info about the message currently being received by the current thread */
-struct received_message_info
-{
-    enum message_type type;
-    MSG               msg;
-    UINT              flags;  /* InSendMessageEx return flags */
 };
 
 /* structure to group all parameters for sent messages of the various kinds */
@@ -448,14 +290,6 @@ static inline void push_string( struct packed_message *data, LPCWSTR str )
     push_data( data, str, (lstrlenW(str) + 1) * sizeof(WCHAR) );
 }
 
-/* make sure that the buffer contains a valid null-terminated Unicode string */
-static inline BOOL check_string( LPCWSTR str, size_t size )
-{
-    for (size /= sizeof(WCHAR); size; size--, str++)
-        if (!*str) return TRUE;
-    return FALSE;
-}
-
 /* pack a pointer into a 32/64 portable format */
 static inline ULONGLONG pack_ptr( const void *ptr )
 {
@@ -467,22 +301,6 @@ static inline void *unpack_ptr( ULONGLONG ptr64 )
 {
     if ((ULONG_PTR)ptr64 != ptr64) return 0;
     return (void *)(ULONG_PTR)ptr64;
-}
-
-/* make sure that there is space for 'size' bytes in buffer, growing it if needed */
-static inline void *get_buffer_space( void **buffer, size_t size )
-{
-    void *ret;
-
-    if (*buffer)
-    {
-        if (!(ret = HeapReAlloc( GetProcessHeap(), 0, *buffer, size )))
-            HeapFree( GetProcessHeap(), 0, *buffer );
-    }
-    else ret = HeapAlloc( GetProcessHeap(), 0, size );
-
-    *buffer = ret;
-    return ret;
 }
 
 /* check whether a combobox expects strings or ids in CB_ADDSTRING/CB_INSERTSTRING */
@@ -1096,566 +914,6 @@ static size_t pack_message( HWND hwnd, UINT message, WPARAM wparam, LPARAM lpara
 
 
 /***********************************************************************
- *		unpack_message
- *
- * Unpack a message received from another process.
- */
-static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
-                            void **buffer, size_t size )
-{
-    size_t minsize = 0;
-    union packed_structs *ps = *buffer;
-
-    switch(message)
-    {
-    case WM_NCCREATE:
-    case WM_CREATE:
-    {
-        CREATESTRUCTW cs;
-        WCHAR *str = (WCHAR *)(&ps->cs + 1);
-        if (size < sizeof(ps->cs)) return FALSE;
-        size -= sizeof(ps->cs);
-        cs.lpCreateParams = unpack_ptr( ps->cs.lpCreateParams );
-        cs.hInstance      = unpack_ptr( ps->cs.hInstance );
-        cs.hMenu          = wine_server_ptr_handle( ps->cs.hMenu );
-        cs.hwndParent     = wine_server_ptr_handle( ps->cs.hwndParent );
-        cs.cy             = ps->cs.cy;
-        cs.cx             = ps->cs.cx;
-        cs.y              = ps->cs.y;
-        cs.x              = ps->cs.x;
-        cs.style          = ps->cs.style;
-        cs.dwExStyle      = ps->cs.dwExStyle;
-        cs.lpszName       = unpack_ptr( ps->cs.lpszName );
-        cs.lpszClass      = unpack_ptr( ps->cs.lpszClass );
-        if (ps->cs.lpszName >> 16)
-        {
-            if (!check_string( str, size )) return FALSE;
-            cs.lpszName = str;
-            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
-            str += lstrlenW(str) + 1;
-        }
-        if (ps->cs.lpszClass >> 16)
-        {
-            if (!check_string( str, size )) return FALSE;
-            cs.lpszClass = str;
-        }
-        memcpy( &ps->cs, &cs, sizeof(cs) );
-        break;
-    }
-    case WM_GETTEXT:
-    case WM_ASKCBFORMATNAME:
-        if (!get_buffer_space( buffer, (*wparam * sizeof(WCHAR)) )) return FALSE;
-        break;
-    case WM_WININICHANGE:
-        if (!*lparam) return TRUE;
-        /* fall through */
-    case WM_SETTEXT:
-    case WM_DEVMODECHANGE:
-    case CB_DIR:
-    case LB_DIR:
-    case LB_ADDFILE:
-    case EM_REPLACESEL:
-        if (!check_string( *buffer, size )) return FALSE;
-        break;
-    case WM_GETMINMAXINFO:
-        minsize = sizeof(MINMAXINFO);
-        break;
-    case WM_DRAWITEM:
-    {
-        DRAWITEMSTRUCT dis;
-        if (size < sizeof(ps->dis)) return FALSE;
-        dis.CtlType    = ps->dis.CtlType;
-        dis.CtlID      = ps->dis.CtlID;
-        dis.itemID     = ps->dis.itemID;
-        dis.itemAction = ps->dis.itemAction;
-        dis.itemState  = ps->dis.itemState;
-        dis.hwndItem   = wine_server_ptr_handle( ps->dis.hwndItem );
-        dis.hDC        = wine_server_ptr_handle( ps->dis.hDC );
-        dis.rcItem     = ps->dis.rcItem;
-        dis.itemData   = (ULONG_PTR)unpack_ptr( ps->dis.itemData );
-        memcpy( &ps->dis, &dis, sizeof(dis) );
-        break;
-    }
-    case WM_MEASUREITEM:
-    {
-        MEASUREITEMSTRUCT mis;
-        if (size < sizeof(ps->mis)) return FALSE;
-        mis.CtlType    = ps->mis.CtlType;
-        mis.CtlID      = ps->mis.CtlID;
-        mis.itemID     = ps->mis.itemID;
-        mis.itemWidth  = ps->mis.itemWidth;
-        mis.itemHeight = ps->mis.itemHeight;
-        mis.itemData   = (ULONG_PTR)unpack_ptr( ps->mis.itemData );
-        memcpy( &ps->mis, &mis, sizeof(mis) );
-        break;
-    }
-    case WM_DELETEITEM:
-    {
-        DELETEITEMSTRUCT dls;
-        if (size < sizeof(ps->dls)) return FALSE;
-        dls.CtlType    = ps->dls.CtlType;
-        dls.CtlID      = ps->dls.CtlID;
-        dls.itemID     = ps->dls.itemID;
-        dls.hwndItem   = wine_server_ptr_handle( ps->dls.hwndItem );
-        dls.itemData   = (ULONG_PTR)unpack_ptr( ps->dls.itemData );
-        memcpy( &ps->dls, &dls, sizeof(dls) );
-        break;
-    }
-    case WM_COMPAREITEM:
-    {
-        COMPAREITEMSTRUCT cis;
-        if (size < sizeof(ps->cis)) return FALSE;
-        cis.CtlType    = ps->cis.CtlType;
-        cis.CtlID      = ps->cis.CtlID;
-        cis.hwndItem   = wine_server_ptr_handle( ps->cis.hwndItem );
-        cis.itemID1    = ps->cis.itemID1;
-        cis.itemData1  = (ULONG_PTR)unpack_ptr( ps->cis.itemData1 );
-        cis.itemID2    = ps->cis.itemID2;
-        cis.itemData2  = (ULONG_PTR)unpack_ptr( ps->cis.itemData2 );
-        cis.dwLocaleId = ps->cis.dwLocaleId;
-        memcpy( &ps->cis, &cis, sizeof(cis) );
-        break;
-    }
-    case WM_WINDOWPOSCHANGING:
-    case WM_WINDOWPOSCHANGED:
-    case WM_WINE_SETWINDOWPOS:
-    {
-        WINDOWPOS wp;
-        if (size < sizeof(ps->wp)) return FALSE;
-        wp.hwnd            = wine_server_ptr_handle( ps->wp.hwnd );
-        wp.hwndInsertAfter = wine_server_ptr_handle( ps->wp.hwndInsertAfter );
-        wp.x               = ps->wp.x;
-        wp.y               = ps->wp.y;
-        wp.cx              = ps->wp.cx;
-        wp.cy              = ps->wp.cy;
-        wp.flags           = ps->wp.flags;
-        memcpy( &ps->wp, &wp, sizeof(wp) );
-        break;
-    }
-    case WM_COPYDATA:
-    {
-        COPYDATASTRUCT cds;
-        if (size < sizeof(ps->cds)) return FALSE;
-        cds.dwData = (ULONG_PTR)unpack_ptr( ps->cds.dwData );
-        if (ps->cds.lpData)
-        {
-            cds.cbData = ps->cds.cbData;
-            cds.lpData = &ps->cds + 1;
-            minsize = sizeof(ps->cds) + cds.cbData;
-        }
-        else
-        {
-            cds.cbData = 0;
-            cds.lpData = 0;
-        }
-        memcpy( &ps->cds, &cds, sizeof(cds) );
-        break;
-    }
-    case WM_NOTIFY:
-        /* WM_NOTIFY cannot be sent across processes (MSDN) */
-        return FALSE;
-    case WM_HELP:
-    {
-        HELPINFO hi;
-        if (size < sizeof(ps->hi)) return FALSE;
-        hi.cbSize       = sizeof(hi);
-        hi.iContextType = ps->hi.iContextType;
-        hi.iCtrlId      = ps->hi.iCtrlId;
-        hi.hItemHandle  = wine_server_ptr_handle( ps->hi.hItemHandle );
-        hi.dwContextId  = (ULONG_PTR)unpack_ptr( ps->hi.dwContextId );
-        hi.MousePos     = ps->hi.MousePos;
-        memcpy( &ps->hi, &hi, sizeof(hi) );
-        break;
-    }
-    case WM_STYLECHANGING:
-    case WM_STYLECHANGED:
-        minsize = sizeof(STYLESTRUCT);
-        break;
-    case WM_NCCALCSIZE:
-        if (!*wparam) minsize = sizeof(RECT);
-        else
-        {
-            NCCALCSIZE_PARAMS ncp;
-            WINDOWPOS wp;
-            if (size < sizeof(ps->ncp)) return FALSE;
-            ncp.rgrc[0]        = ps->ncp.rgrc[0];
-            ncp.rgrc[1]        = ps->ncp.rgrc[1];
-            ncp.rgrc[2]        = ps->ncp.rgrc[2];
-            wp.hwnd            = wine_server_ptr_handle( ps->ncp.hwnd );
-            wp.hwndInsertAfter = wine_server_ptr_handle( ps->ncp.hwndInsertAfter );
-            wp.x               = ps->ncp.x;
-            wp.y               = ps->ncp.y;
-            wp.cx              = ps->ncp.cx;
-            wp.cy              = ps->ncp.cy;
-            wp.flags           = ps->ncp.flags;
-            ncp.lppos = (WINDOWPOS *)((NCCALCSIZE_PARAMS *)&ps->ncp + 1);
-            memcpy( &ps->ncp, &ncp, sizeof(ncp) );
-            *ncp.lppos = wp;
-        }
-        break;
-    case WM_GETDLGCODE:
-        if (*lparam)
-        {
-            MSG msg;
-            if (size < sizeof(ps->msg)) return FALSE;
-            msg.hwnd    = wine_server_ptr_handle( ps->msg.hwnd );
-            msg.message = ps->msg.message;
-            msg.wParam  = (ULONG_PTR)unpack_ptr( ps->msg.wParam );
-            msg.lParam  = (ULONG_PTR)unpack_ptr( ps->msg.lParam );
-            msg.time    = ps->msg.time;
-            msg.pt      = ps->msg.pt;
-            memcpy( &ps->msg, &msg, sizeof(msg) );
-            break;
-        }
-        return TRUE;
-    case SBM_SETSCROLLINFO:
-        minsize = sizeof(SCROLLINFO);
-        break;
-    case SBM_GETSCROLLINFO:
-        if (!get_buffer_space( buffer, sizeof(SCROLLINFO ))) return FALSE;
-        break;
-    case SBM_GETSCROLLBARINFO:
-        if (!get_buffer_space( buffer, sizeof(SCROLLBARINFO ))) return FALSE;
-        break;
-    case EM_GETSEL:
-    case SBM_GETRANGE:
-    case CB_GETEDITSEL:
-        if (*wparam || *lparam)
-        {
-            if (!get_buffer_space( buffer, 2*sizeof(DWORD) )) return FALSE;
-            if (*wparam) *wparam = (WPARAM)*buffer;
-            if (*lparam) *lparam = (LPARAM)((DWORD *)*buffer + 1);
-        }
-        return TRUE;
-    case EM_GETRECT:
-    case LB_GETITEMRECT:
-    case CB_GETDROPPEDCONTROLRECT:
-        if (!get_buffer_space( buffer, sizeof(RECT) )) return FALSE;
-        break;
-    case EM_SETRECT:
-    case EM_SETRECTNP:
-        minsize = sizeof(RECT);
-        break;
-    case EM_GETLINE:
-    {
-        WORD len;
-        if (size < sizeof(WORD)) return FALSE;
-        len = *(WORD *)*buffer;
-        if (!get_buffer_space( buffer, (len + 1) * sizeof(WCHAR) )) return FALSE;
-        *lparam = (LPARAM)*buffer + sizeof(WORD);  /* don't erase WORD at start of buffer */
-        return TRUE;
-    }
-    case EM_SETTABSTOPS:
-    case LB_SETTABSTOPS:
-        if (!*wparam) return TRUE;
-        minsize = *wparam * sizeof(UINT);
-        break;
-    case CB_ADDSTRING:
-    case CB_INSERTSTRING:
-    case CB_FINDSTRING:
-    case CB_FINDSTRINGEXACT:
-    case CB_SELECTSTRING:
-    case LB_ADDSTRING:
-    case LB_INSERTSTRING:
-    case LB_FINDSTRING:
-    case LB_FINDSTRINGEXACT:
-    case LB_SELECTSTRING:
-        if (!*buffer) return TRUE;
-        if (!check_string( *buffer, size )) return FALSE;
-        break;
-    case CB_GETLBTEXT:
-    {
-        size = sizeof(ULONG_PTR);
-        if (combobox_has_strings( hwnd ))
-            size = (SendMessageW( hwnd, CB_GETLBTEXTLEN, *wparam, 0 ) + 1) * sizeof(WCHAR);
-        if (!get_buffer_space( buffer, size )) return FALSE;
-        break;
-    }
-    case LB_GETTEXT:
-    {
-        size = sizeof(ULONG_PTR);
-        if (listbox_has_strings( hwnd ))
-            size = (SendMessageW( hwnd, LB_GETTEXTLEN, *wparam, 0 ) + 1) * sizeof(WCHAR);
-        if (!get_buffer_space( buffer, size )) return FALSE;
-        break;
-    }
-    case LB_GETSELITEMS:
-        if (!get_buffer_space( buffer, *wparam * sizeof(UINT) )) return FALSE;
-        break;
-    case WM_NEXTMENU:
-    {
-        MDINEXTMENU mnm;
-        if (size < sizeof(ps->mnm)) return FALSE;
-        mnm.hmenuIn   = wine_server_ptr_handle( ps->mnm.hmenuIn );
-        mnm.hmenuNext = wine_server_ptr_handle( ps->mnm.hmenuNext );
-        mnm.hwndNext  = wine_server_ptr_handle( ps->mnm.hwndNext );
-        memcpy( &ps->mnm, &mnm, sizeof(mnm) );
-        break;
-    }
-    case WM_SIZING:
-    case WM_MOVING:
-        minsize = sizeof(RECT);
-        if (!get_buffer_space( buffer, sizeof(RECT) )) return FALSE;
-        break;
-    case WM_MDICREATE:
-    {
-        MDICREATESTRUCTW mcs;
-        WCHAR *str = (WCHAR *)(&ps->mcs + 1);
-        if (size < sizeof(ps->mcs)) return FALSE;
-        size -= sizeof(ps->mcs);
-
-        mcs.szClass = unpack_ptr( ps->mcs.szClass );
-        mcs.szTitle = unpack_ptr( ps->mcs.szTitle );
-        mcs.hOwner  = unpack_ptr( ps->mcs.hOwner );
-        mcs.x       = ps->mcs.x;
-        mcs.y       = ps->mcs.y;
-        mcs.cx      = ps->mcs.cx;
-        mcs.cy      = ps->mcs.cy;
-        mcs.style   = ps->mcs.style;
-        mcs.lParam  = (LPARAM)unpack_ptr( ps->mcs.lParam );
-        if (ps->mcs.szClass >> 16)
-        {
-            if (!check_string( str, size )) return FALSE;
-            mcs.szClass = str;
-            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
-            str += lstrlenW(str) + 1;
-        }
-        if (ps->mcs.szTitle >> 16)
-        {
-            if (!check_string( str, size )) return FALSE;
-            mcs.szTitle = str;
-        }
-        memcpy( &ps->mcs, &mcs, sizeof(mcs) );
-        break;
-    }
-    case WM_MDIGETACTIVE:
-        if (!*lparam) return TRUE;
-        if (!get_buffer_space( buffer, sizeof(BOOL) )) return FALSE;
-        break;
-    case WM_DEVICECHANGE:
-        if (!(*wparam & 0x8000)) return TRUE;
-        minsize = sizeof(DEV_BROADCAST_HDR);
-        break;
-    case WM_WINE_KEYBOARD_LL_HOOK:
-    case WM_WINE_MOUSE_LL_HOOK:
-    {
-        struct hook_extra_info h_extra;
-        minsize = sizeof(ps->hook) +
-                  (message == WM_WINE_KEYBOARD_LL_HOOK ? sizeof(KBDLLHOOKSTRUCT)
-                                                       : sizeof(MSLLHOOKSTRUCT));
-        if (size < minsize) return FALSE;
-        h_extra.handle = wine_server_ptr_handle( ps->hook.handle );
-        h_extra.lparam = (LPARAM)(&ps->hook + 1);
-        memcpy( &ps->hook, &h_extra, sizeof(h_extra) );
-        break;
-    }
-    case WM_NCPAINT:
-        if (*wparam <= 1) return TRUE;
-        FIXME( "WM_NCPAINT hdc unpacking not supported\n" );
-        return FALSE;
-    case WM_PAINT:
-        if (!*wparam) return TRUE;
-        /* fall through */
-
-    /* these contain an HFONT */
-    case WM_SETFONT:
-    case WM_GETFONT:
-    /* these contain an HDC */
-    case WM_ERASEBKGND:
-    case WM_ICONERASEBKGND:
-    case WM_CTLCOLORMSGBOX:
-    case WM_CTLCOLOREDIT:
-    case WM_CTLCOLORLISTBOX:
-    case WM_CTLCOLORBTN:
-    case WM_CTLCOLORDLG:
-    case WM_CTLCOLORSCROLLBAR:
-    case WM_CTLCOLORSTATIC:
-    case WM_PRINT:
-    case WM_PRINTCLIENT:
-    /* these contain an HGLOBAL */
-    case WM_PAINTCLIPBOARD:
-    case WM_SIZECLIPBOARD:
-    /* these contain HICON */
-    case WM_GETICON:
-    case WM_SETICON:
-    case WM_QUERYDRAGICON:
-    case WM_QUERYPARKICON:
-    /* these contain pointers */
-    case WM_DROPOBJECT:
-    case WM_QUERYDROPOBJECT:
-    case WM_DRAGLOOP:
-    case WM_DRAGSELECT:
-    case WM_DRAGMOVE:
-        FIXME( "msg %x (%s) not supported yet\n", message, SPY_GetMsgName(message, hwnd) );
-        return FALSE;
-
-    default:
-        return TRUE; /* message doesn't need any unpacking */
-    }
-
-    /* default exit for most messages: check minsize and store buffer in lparam */
-    if (size < minsize) return FALSE;
-    *lparam = (LPARAM)*buffer;
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		pack_reply
- *
- * Pack a reply to a message for sending to another process.
- */
-static void pack_reply( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
-                        LRESULT res, struct packed_message *data )
-{
-    data->count = 0;
-    switch(message)
-    {
-    case WM_NCCREATE:
-    case WM_CREATE:
-    {
-        CREATESTRUCTW *cs = (CREATESTRUCTW *)lparam;
-        data->ps.cs.lpCreateParams = (ULONG_PTR)cs->lpCreateParams;
-        data->ps.cs.hInstance      = (ULONG_PTR)cs->hInstance;
-        data->ps.cs.hMenu          = wine_server_user_handle( cs->hMenu );
-        data->ps.cs.hwndParent     = wine_server_user_handle( cs->hwndParent );
-        data->ps.cs.cy             = cs->cy;
-        data->ps.cs.cx             = cs->cx;
-        data->ps.cs.y              = cs->y;
-        data->ps.cs.x              = cs->x;
-        data->ps.cs.style          = cs->style;
-        data->ps.cs.dwExStyle      = cs->dwExStyle;
-        data->ps.cs.lpszName       = (ULONG_PTR)cs->lpszName;
-        data->ps.cs.lpszClass      = (ULONG_PTR)cs->lpszClass;
-        push_data( data, &data->ps.cs, sizeof(data->ps.cs) );
-        break;
-    }
-    case WM_GETTEXT:
-    case CB_GETLBTEXT:
-    case LB_GETTEXT:
-        push_data( data, (WCHAR *)lparam, (res + 1) * sizeof(WCHAR) );
-        break;
-    case WM_GETMINMAXINFO:
-        push_data( data, (MINMAXINFO *)lparam, sizeof(MINMAXINFO) );
-        break;
-    case WM_MEASUREITEM:
-    {
-        MEASUREITEMSTRUCT *mis = (MEASUREITEMSTRUCT *)lparam;
-        data->ps.mis.CtlType    = mis->CtlType;
-        data->ps.mis.CtlID      = mis->CtlID;
-        data->ps.mis.itemID     = mis->itemID;
-        data->ps.mis.itemWidth  = mis->itemWidth;
-        data->ps.mis.itemHeight = mis->itemHeight;
-        data->ps.mis.itemData   = mis->itemData;
-        push_data( data, &data->ps.mis, sizeof(data->ps.mis) );
-        break;
-    }
-    case WM_WINDOWPOSCHANGING:
-    case WM_WINDOWPOSCHANGED:
-    {
-        WINDOWPOS *wp = (WINDOWPOS *)lparam;
-        data->ps.wp.hwnd            = wine_server_user_handle( wp->hwnd );
-        data->ps.wp.hwndInsertAfter = wine_server_user_handle( wp->hwndInsertAfter );
-        data->ps.wp.x               = wp->x;
-        data->ps.wp.y               = wp->y;
-        data->ps.wp.cx              = wp->cx;
-        data->ps.wp.cy              = wp->cy;
-        data->ps.wp.flags           = wp->flags;
-        push_data( data, &data->ps.wp, sizeof(data->ps.wp) );
-        break;
-    }
-    case WM_GETDLGCODE:
-        if (lparam)
-        {
-            MSG *msg = (MSG *)lparam;
-            data->ps.msg.hwnd    = wine_server_user_handle( msg->hwnd );
-            data->ps.msg.message = msg->message;
-            data->ps.msg.wParam  = msg->wParam;
-            data->ps.msg.lParam  = msg->lParam;
-            data->ps.msg.time    = msg->time;
-            data->ps.msg.pt      = msg->pt;
-            push_data( data, &data->ps.msg, sizeof(data->ps.msg) );
-        }
-        break;
-    case SBM_GETSCROLLINFO:
-        push_data( data, (SCROLLINFO *)lparam, sizeof(SCROLLINFO) );
-        break;
-    case EM_GETRECT:
-    case LB_GETITEMRECT:
-    case CB_GETDROPPEDCONTROLRECT:
-    case WM_SIZING:
-    case WM_MOVING:
-        push_data( data, (RECT *)lparam, sizeof(RECT) );
-        break;
-    case EM_GETLINE:
-    {
-        WORD *ptr = (WORD *)lparam;
-        push_data( data, ptr, ptr[-1] * sizeof(WCHAR) );
-        break;
-    }
-    case LB_GETSELITEMS:
-        push_data( data, (UINT *)lparam, wparam * sizeof(UINT) );
-        break;
-    case WM_MDIGETACTIVE:
-        if (lparam) push_data( data, (BOOL *)lparam, sizeof(BOOL) );
-        break;
-    case WM_NCCALCSIZE:
-        if (!wparam)
-            push_data( data, (RECT *)lparam, sizeof(RECT) );
-        else
-        {
-            NCCALCSIZE_PARAMS *ncp = (NCCALCSIZE_PARAMS *)lparam;
-            data->ps.ncp.rgrc[0]         = ncp->rgrc[0];
-            data->ps.ncp.rgrc[1]         = ncp->rgrc[1];
-            data->ps.ncp.rgrc[2]         = ncp->rgrc[2];
-            data->ps.ncp.hwnd            = wine_server_user_handle( ncp->lppos->hwnd );
-            data->ps.ncp.hwndInsertAfter = wine_server_user_handle( ncp->lppos->hwndInsertAfter );
-            data->ps.ncp.x               = ncp->lppos->x;
-            data->ps.ncp.y               = ncp->lppos->y;
-            data->ps.ncp.cx              = ncp->lppos->cx;
-            data->ps.ncp.cy              = ncp->lppos->cy;
-            data->ps.ncp.flags           = ncp->lppos->flags;
-            push_data( data, &data->ps.ncp, sizeof(data->ps.ncp) );
-        }
-        break;
-    case EM_GETSEL:
-    case SBM_GETRANGE:
-    case CB_GETEDITSEL:
-        if (wparam) push_data( data, (DWORD *)wparam, sizeof(DWORD) );
-        if (lparam) push_data( data, (DWORD *)lparam, sizeof(DWORD) );
-        break;
-    case WM_NEXTMENU:
-    {
-        MDINEXTMENU *mnm = (MDINEXTMENU *)lparam;
-        data->ps.mnm.hmenuIn   = wine_server_user_handle( mnm->hmenuIn );
-        data->ps.mnm.hmenuNext = wine_server_user_handle( mnm->hmenuNext );
-        data->ps.mnm.hwndNext  = wine_server_user_handle( mnm->hwndNext );
-        push_data( data, &data->ps.mnm, sizeof(data->ps.mnm) );
-        break;
-    }
-    case WM_MDICREATE:
-    {
-        MDICREATESTRUCTW *mcs = (MDICREATESTRUCTW *)lparam;
-        data->ps.mcs.szClass = pack_ptr( mcs->szClass );
-        data->ps.mcs.szTitle = pack_ptr( mcs->szTitle );
-        data->ps.mcs.hOwner  = pack_ptr( mcs->hOwner );
-        data->ps.mcs.x       = mcs->x;
-        data->ps.mcs.y       = mcs->y;
-        data->ps.mcs.cx      = mcs->cx;
-        data->ps.mcs.cy      = mcs->cy;
-        data->ps.mcs.style   = mcs->style;
-        data->ps.mcs.lParam  = mcs->lParam;
-        push_data( data, &data->ps.mcs, sizeof(data->ps.mcs) );
-        break;
-    }
-    case WM_ASKCBFORMATNAME:
-        push_data( data, (WCHAR *)lparam, (lstrlenW((WCHAR *)lparam) + 1) * sizeof(WCHAR) );
-        break;
-    }
-}
-
-
-/***********************************************************************
  *		unpack_reply
  *
  * Unpack a message reply received from another process.
@@ -1818,90 +1076,18 @@ static void unpack_reply( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
 
 
 /***********************************************************************
- *           reply_message
- *
- * Send a reply to a sent message.
- */
-static void reply_message( struct received_message_info *info, LRESULT result, BOOL remove )
-{
-    struct packed_message data;
-    int i, replied = info->flags & ISMEX_REPLIED;
-
-    if (info->flags & ISMEX_NOTIFY) return;  /* notify messages don't get replies */
-    if (!remove && replied) return;  /* replied already */
-
-    memset( &data, 0, sizeof(data) );
-    info->flags |= ISMEX_REPLIED;
-
-    if (info->type == MSG_OTHER_PROCESS && !replied)
-    {
-        pack_reply( info->msg.hwnd, info->msg.message, info->msg.wParam,
-                    info->msg.lParam, result, &data );
-    }
-
-    SERVER_START_REQ( reply_message )
-    {
-        req->result = result;
-        req->remove = remove;
-        for (i = 0; i < data.count; i++) wine_server_add_data( req, data.data[i], data.size[i] );
-        wine_server_call( req );
-    }
-    SERVER_END_REQ;
-}
-
-
-/***********************************************************************
  *           handle_internal_message
  *
  * Handle an internal Wine message instead of calling the window proc.
  */
-static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    switch(msg)
-    {
-    case WM_WINE_DESTROYWINDOW:
-        return WIN_DestroyWindow( hwnd );
-    case WM_WINE_SETWINDOWPOS:
-        if (is_desktop_window( hwnd )) return 0;
-        return USER_SetWindowPos( (WINDOWPOS *)lparam, 0, 0 );
-    case WM_WINE_SHOWWINDOW:
-        if (is_desktop_window( hwnd )) return 0;
-        return ShowWindow( hwnd, wparam );
-    case WM_WINE_SETPARENT:
-        if (is_desktop_window( hwnd )) return 0;
-        return (LRESULT)SetParent( hwnd, (HWND)wparam );
-    case WM_WINE_SETWINDOWLONG:
-        return WIN_SetWindowLong( hwnd, (short)LOWORD(wparam), HIWORD(wparam), lparam, TRUE );
-    case WM_WINE_SETSTYLE:
-        if (is_desktop_window( hwnd )) return 0;
-        return WIN_SetStyle(hwnd, wparam, lparam);
-    case WM_WINE_SETACTIVEWINDOW:
-        if (!wparam && GetForegroundWindow() == hwnd) return 0;
-        return (LRESULT)SetActiveWindow( (HWND)wparam );
-    case WM_WINE_KEYBOARD_LL_HOOK:
-    case WM_WINE_MOUSE_LL_HOOK:
-    {
-        struct hook_extra_info *h_extra = (struct hook_extra_info *)lparam;
-
-        return call_current_hook( h_extra->handle, HC_ACTION, wparam, h_extra->lparam );
-    }
-    case WM_WINE_CLIPCURSOR:
-        if (wparam)
-        {
-            RECT rect;
-            GetClipCursor( &rect );
-            return USER_Driver->pClipCursor( &rect );
-        }
-        return USER_Driver->pClipCursor( NULL );
-    case WM_WINE_UPDATEWINDOWSTATE:
-        update_window_state( hwnd );
-        return 0;
-    default:
-        if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
-            return USER_Driver->pWindowMessage( hwnd, msg, wparam, lparam );
-        FIXME( "unknown internal message %x\n", msg );
-        return 0;
-    }
+    MSG m;
+    m.hwnd    = hwnd;
+    m.message = msg;
+    m.wParam  = wparam;
+    m.lParam  = lparam;
+    return NtUserCallOneParam( (UINT_PTR)&m, NtUserHandleInternalMessage );
 }
 
 /* since the WM_DDE_ACK response to a WM_DDE_EXECUTE message should contain the handle
@@ -1998,22 +1184,21 @@ static HGLOBAL dde_get_pair(HGLOBAL shm)
  *
  * Post a DDE message
  */
-static BOOL post_dde_message( struct packed_message *data, const struct send_message_info *info )
+BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid, DWORD type )
 {
     void*       ptr = NULL;
     int         size = 0;
     UINT_PTR    uiLo, uiHi;
     LPARAM      lp;
     HGLOBAL     hunlock = 0;
-    int         i;
     DWORD       res;
     ULONGLONG   hpack;
 
-    if (!UnpackDDElParam( info->msg, info->lparam, &uiLo, &uiHi ))
+    if (!UnpackDDElParam( msg, lparam, &uiLo, &uiHi ))
         return FALSE;
 
-    lp = info->lparam;
-    switch (info->msg)
+    lp = lparam;
+    switch (msg)
     {
         /* DDE messages which don't require packing are:
          * WM_DDE_INITIATE
@@ -2030,7 +1215,8 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
             {
                 hpack = pack_ptr( h );
                 /* send back the value of h on the other side */
-                push_data( data, &hpack, sizeof(hpack) );
+                ptr = &hpack;
+                size = sizeof(hpack);
                 lp = uiLo;
                 TRACE( "send dde-ack %lx %08lx => %p\n", uiLo, uiHi, h );
             }
@@ -2045,17 +1231,15 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
     case WM_DDE_ADVISE:
     case WM_DDE_DATA:
     case WM_DDE_POKE:
-        size = 0;
         if (uiLo)
         {
             size = GlobalSize( (HGLOBAL)uiLo ) ;
-            if ((info->msg == WM_DDE_ADVISE && size < sizeof(DDEADVISE)) ||
-                (info->msg == WM_DDE_DATA   && size < FIELD_OFFSET(DDEDATA, Value)) ||
-                (info->msg == WM_DDE_POKE   && size < FIELD_OFFSET(DDEPOKE, Value))
-                )
-            return FALSE;
+            if ((msg == WM_DDE_ADVISE && size < sizeof(DDEADVISE)) ||
+                (msg == WM_DDE_DATA   && size < FIELD_OFFSET(DDEDATA, Value)) ||
+                (msg == WM_DDE_POKE   && size < FIELD_OFFSET(DDEPOKE, Value)))
+                return FALSE;
         }
-        else if (info->msg != WM_DDE_DATA) return FALSE;
+        else if (msg != WM_DDE_DATA) return FALSE;
 
         lp = uiHi;
         if (uiLo)
@@ -2066,37 +1250,35 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
                 TRACE("unused %d, fResponse %d, fRelease %d, fDeferUpd %d, fAckReq %d, cfFormat %d\n",
                        dde_data->unused, dde_data->fResponse, dde_data->fRelease,
                        dde_data->reserved, dde_data->fAckReq, dde_data->cfFormat);
-                push_data( data, ptr, size );
                 hunlock = (HGLOBAL)uiLo;
             }
         }
         TRACE( "send ddepack %u %lx\n", size, uiHi );
         break;
     case WM_DDE_EXECUTE:
-        if (info->lparam)
+        if (lparam)
         {
-            if ((ptr = GlobalLock( (HGLOBAL)info->lparam) ))
+            if ((ptr = GlobalLock( (HGLOBAL)lparam) ))
             {
-                push_data(data, ptr, GlobalSize( (HGLOBAL)info->lparam ));
+                size = GlobalSize( (HGLOBAL)lparam );
                 /* so that the other side can send it back on ACK */
-                lp = info->lparam;
-                hunlock = (HGLOBAL)info->lparam;
+                lp = lparam;
+                hunlock = (HGLOBAL)lparam;
             }
         }
         break;
     }
     SERVER_START_REQ( send_message )
     {
-        req->id      = info->dest_tid;
-        req->type    = info->type;
+        req->id      = dest_tid;
+        req->type    = type;
         req->flags   = 0;
-        req->win     = wine_server_user_handle( info->hwnd );
-        req->msg     = info->msg;
-        req->wparam  = info->wparam;
+        req->win     = wine_server_user_handle( hwnd );
+        req->msg     = msg;
+        req->wparam  = wparam;
         req->lparam  = lp;
         req->timeout = TIMEOUT_INFINITE;
-        for (i = 0; i < data->count; i++)
-            wine_server_add_data( req, data->data[i], data->size[i] );
+        if (size) wine_server_add_data( req, ptr, size );
         if ((res = wine_server_call( req )))
         {
             if (res == STATUS_INVALID_PARAMETER)
@@ -2106,7 +1288,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
                 SetLastError( RtlNtStatusToDosError(res) );
         }
         else
-            FreeDDElParam(info->msg, info->lparam);
+            FreeDDElParam( msg, lparam );
     }
     SERVER_END_REQ;
     if (hunlock) GlobalUnlock(hunlock);
@@ -2119,8 +1301,8 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
  *
  * Unpack a posted DDE message received from another process.
  */
-static BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
-                                void **buffer, size_t size )
+BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
+                         void **buffer, size_t size )
 {
     UINT_PTR	uiLo, uiHi;
     HGLOBAL	hMem = 0;
@@ -2201,43 +1383,94 @@ static BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM 
     return TRUE;
 }
 
+static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, UINT msg, WPARAM wParam,
+                                     LPARAM lParam, LRESULT *result, BOOL ansi,
+                                     enum wm_char_mapping mapping )
+{
+    WND *win;
+
+    USER_CheckNotLock();
+
+    if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
+    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP) return FALSE;
+    if (win->tid != GetCurrentThreadId())
+    {
+        WIN_ReleasePtr( win );
+        return FALSE;
+    }
+    params->func = win->winproc;
+    params->ansi_dst = !(win->flags & WIN_ISUNICODE);
+    params->is_dialog = win->dlgInfo != NULL;
+    WIN_ReleasePtr( win );
+
+    params->hwnd = WIN_GetFullHandle( hwnd );
+    get_winproc_params( params );
+    params->msg = msg;
+    params->wparam = wParam;
+    params->lparam = lParam;
+    params->result = result;
+    params->ansi = ansi;
+    params->mapping = mapping;
+    params->dpi_awareness = GetWindowDpiAwarenessContext( params->hwnd );
+    return TRUE;
+}
+
 /***********************************************************************
  *           call_window_proc
  *
  * Call a window procedure and the corresponding hooks.
  */
 static LRESULT call_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-                                 BOOL unicode, BOOL same_thread, enum wm_char_mapping mapping )
+                                 BOOL unicode, BOOL same_thread, enum wm_char_mapping mapping,
+                                 BOOL needs_unpack, void *buffer, size_t size )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct win_proc_params p, *params = &p;
     LRESULT result = 0;
     CWPSTRUCT cwp;
     CWPRETSTRUCT cwpret;
 
     if (msg & 0x80000000)
+        return handle_internal_message( hwnd, msg, wparam, lparam );
+
+    if (!needs_unpack) size = 0;
+    if (!WIN_IsCurrentThread( hwnd )) return 0;
+    if (size && !(params = HeapAlloc( GetProcessHeap(), 0, sizeof(*params) + size ))) return 0;
+    if (!init_window_call_params( params, hwnd, msg, wparam, lparam, &result, !unicode, mapping ))
     {
-        result = handle_internal_message( hwnd, msg, wparam, lparam );
-        goto done;
+        if (params != &p) HeapFree( GetProcessHeap(), 0, params );
+        return 0;
     }
 
+    params->needs_unpack = needs_unpack;
+    if (size) memcpy( params + 1, buffer, size );
+
     /* first the WH_CALLWNDPROC hook */
-    hwnd = WIN_GetFullHandle( hwnd );
     cwp.lParam  = lparam;
     cwp.wParam  = wparam;
     cwp.message = msg;
-    cwp.hwnd    = hwnd;
+    cwp.hwnd    = params->hwnd;
     HOOK_CallHooks( WH_CALLWNDPROC, HC_ACTION, same_thread, (LPARAM)&cwp, unicode );
 
-    /* now call the window procedure */
-    if (!WINPROC_call_window( hwnd, msg, wparam, lparam, &result, unicode, mapping )) goto done;
+    if (thread_info->recursion_count <= MAX_WINPROC_RECURSION)
+    {
+        thread_info->recursion_count++;
+
+        /* now call the window procedure */
+        User32CallWindowProc( params, sizeof(*params) + size );
+
+        thread_info->recursion_count--;
+    }
+
+    if (params != &p) HeapFree( GetProcessHeap(), 0, params );
 
     /* and finally the WH_CALLWNDPROCRET hook */
     cwpret.lResult = result;
     cwpret.lParam  = lparam;
     cwpret.wParam  = wparam;
     cwpret.message = msg;
-    cwpret.hwnd    = hwnd;
+    cwpret.hwnd    = params->hwnd;
     HOOK_CallHooks( WH_CALLWNDPROCRET, HC_ACTION, same_thread, (LPARAM)&cwpret, unicode );
- done:
     return result;
 }
 
@@ -2408,7 +1641,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     /* find the window to dispatch this mouse message to */
 
     info.cbSize = sizeof(info);
-    GetGUIThreadInfo( GetCurrentThreadId(), &info );
+    NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info );
     if (info.hwndCapture)
     {
         hittest = HTCLIENT;
@@ -2563,7 +1796,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
         if (msg->hwnd != info.hwndActive)
         {
-            HWND hwndTop = GetAncestor( msg->hwnd, GA_ROOT );
+            HWND hwndTop = NtUserGetAncestor( msg->hwnd, GA_ROOT );
 
             if ((GetWindowLongW( hwndTop, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
             {
@@ -2607,8 +1840,8 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
  *
  * Process a hardware message; return TRUE if message should be passed on to the app
  */
-static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
-                                      HWND hwnd_filter, UINT first, UINT last, BOOL remove )
+BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
+                               HWND hwnd_filter, UINT first, UINT last, BOOL remove )
 {
     DPI_AWARENESS_CONTEXT context;
     BOOL ret = FALSE;
@@ -2651,265 +1884,13 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
 
 
 /***********************************************************************
- *           peek_message
- *
- * Peek for a message matching the given parameters. Return 0 if none are
- * available; -1 on error.
- * All pending sent messages are processed before returning.
- */
-static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, UINT changed_mask )
-{
-    LRESULT result;
-    struct user_thread_info *thread_info = get_user_thread_info();
-    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
-    struct received_message_info info, *old_info;
-    unsigned int hw_id = 0;  /* id of previous hardware message */
-    void *buffer;
-    size_t buffer_size = 1024;
-
-    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return -1;
-
-    if (!first && !last) last = ~0;
-    if (hwnd == HWND_BROADCAST) hwnd = HWND_TOPMOST;
-
-    for (;;)
-    {
-        NTSTATUS res;
-        size_t size = 0;
-        const message_data_t *msg_data = buffer;
-
-        thread_info->msg_source = prev_source;
-
-        SERVER_START_REQ( get_message )
-        {
-            req->flags     = flags;
-            req->get_win   = wine_server_user_handle( hwnd );
-            req->get_first = first;
-            req->get_last  = last;
-            req->hw_id     = hw_id;
-            req->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
-            req->changed_mask = changed_mask;
-            wine_server_set_reply( req, buffer, buffer_size );
-            if (!(res = wine_server_call( req )))
-            {
-                size = wine_server_reply_size( reply );
-                info.type        = reply->type;
-                info.msg.hwnd    = wine_server_ptr_handle( reply->win );
-                info.msg.message = reply->msg;
-                info.msg.wParam  = reply->wparam;
-                info.msg.lParam  = reply->lparam;
-                info.msg.time    = reply->time;
-                info.msg.pt.x    = reply->x;
-                info.msg.pt.y    = reply->y;
-                hw_id            = 0;
-                thread_info->active_hooks = reply->active_hooks;
-            }
-            else buffer_size = reply->total;
-        }
-        SERVER_END_REQ;
-
-        if (res)
-        {
-            HeapFree( GetProcessHeap(), 0, buffer );
-            if (res == STATUS_PENDING)
-            {
-                thread_info->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
-                thread_info->changed_mask = changed_mask;
-                return 0;
-            }
-            if (res != STATUS_BUFFER_OVERFLOW)
-            {
-                SetLastError( RtlNtStatusToDosError(res) );
-                return -1;
-            }
-            if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return -1;
-            continue;
-        }
-
-        TRACE( "got type %d msg %x (%s) hwnd %p wp %lx lp %lx\n",
-               info.type, info.msg.message,
-               (info.type == MSG_WINEVENT) ? "MSG_WINEVENT" : SPY_GetMsgName(info.msg.message, info.msg.hwnd),
-               info.msg.hwnd, info.msg.wParam, info.msg.lParam );
-
-        switch(info.type)
-        {
-        case MSG_ASCII:
-        case MSG_UNICODE:
-            info.flags = ISMEX_SEND;
-            break;
-        case MSG_NOTIFY:
-            info.flags = ISMEX_NOTIFY;
-            if (!unpack_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
-                                 &info.msg.lParam, &buffer, size ))
-                continue;
-            break;
-        case MSG_CALLBACK:
-            info.flags = ISMEX_CALLBACK;
-            break;
-        case MSG_CALLBACK_RESULT:
-            if (size >= sizeof(msg_data->callback))
-                call_sendmsg_callback( wine_server_get_ptr(msg_data->callback.callback),
-                                       info.msg.hwnd, info.msg.message,
-                                       msg_data->callback.data, msg_data->callback.result );
-            continue;
-        case MSG_WINEVENT:
-            if (size >= sizeof(msg_data->winevent))
-            {
-                WINEVENTPROC hook_proc;
-                HMODULE free_module = 0;
-
-                hook_proc = wine_server_get_ptr( msg_data->winevent.hook_proc );
-                size -= sizeof(msg_data->winevent);
-                if (size)
-                {
-                    WCHAR module[MAX_PATH];
-
-                    size = min( size, (MAX_PATH - 1) * sizeof(WCHAR) );
-                    memcpy( module, &msg_data->winevent + 1, size );
-                    module[size / sizeof(WCHAR)] = 0;
-                    if (!(hook_proc = get_hook_proc( hook_proc, module, &free_module )))
-                    {
-                        ERR( "invalid winevent hook module name %s\n", debugstr_w(module) );
-                        continue;
-                    }
-                }
-
-                TRACE_(relay)( "\1Call winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
-                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
-
-                hook_proc( wine_server_ptr_handle( msg_data->winevent.hook ), info.msg.message,
-                           info.msg.hwnd, info.msg.wParam, info.msg.lParam,
-                           msg_data->winevent.tid, info.msg.time );
-
-                TRACE_(relay)( "\1Ret  winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
-                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
-
-                if (free_module) FreeLibrary(free_module);
-            }
-            continue;
-        case MSG_HOOK_LL:
-            info.flags = ISMEX_SEND;
-            result = 0;
-            if (info.msg.message == WH_KEYBOARD_LL && size >= sizeof(msg_data->hardware))
-            {
-                KBDLLHOOKSTRUCT hook;
-
-                hook.vkCode      = LOWORD( info.msg.lParam );
-                hook.scanCode    = HIWORD( info.msg.lParam );
-                hook.flags       = msg_data->hardware.flags;
-                hook.time        = info.msg.time;
-                hook.dwExtraInfo = msg_data->hardware.info;
-                TRACE( "calling keyboard LL hook vk %x scan %x flags %x time %u info %lx\n",
-                       hook.vkCode, hook.scanCode, hook.flags, hook.time, hook.dwExtraInfo );
-                result = HOOK_CallHooks( WH_KEYBOARD_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
-            }
-            else if (info.msg.message == WH_MOUSE_LL && size >= sizeof(msg_data->hardware))
-            {
-                MSLLHOOKSTRUCT hook;
-
-                hook.pt          = info.msg.pt;
-                hook.mouseData   = info.msg.lParam;
-                hook.flags       = msg_data->hardware.flags;
-                hook.time        = info.msg.time;
-                hook.dwExtraInfo = msg_data->hardware.info;
-                TRACE( "calling mouse LL hook pos %d,%d data %x flags %x time %u info %lx\n",
-                       hook.pt.x, hook.pt.y, hook.mouseData, hook.flags, hook.time, hook.dwExtraInfo );
-                result = HOOK_CallHooks( WH_MOUSE_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
-            }
-            reply_message( &info, result, TRUE );
-            continue;
-        case MSG_OTHER_PROCESS:
-            info.flags = ISMEX_SEND;
-            if (!unpack_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
-                                 &info.msg.lParam, &buffer, size ))
-            {
-                /* ignore it */
-                reply_message( &info, 0, TRUE );
-                continue;
-            }
-            break;
-        case MSG_HARDWARE:
-            if (size >= sizeof(msg_data->hardware))
-            {
-                hw_id = msg_data->hardware.hw_id;
-                if (!process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
-                                               hwnd, first, last, flags & PM_REMOVE ))
-                {
-                    TRACE("dropping msg %x\n", info.msg.message );
-                    continue;  /* ignore it */
-                }
-                *msg = info.msg;
-                thread_info->GetMessagePosVal = MAKELONG( info.msg.pt.x, info.msg.pt.y );
-                thread_info->GetMessageTimeVal = info.msg.time;
-                thread_info->GetMessageExtraInfoVal = msg_data->hardware.info;
-                HeapFree( GetProcessHeap(), 0, buffer );
-                HOOK_CallHooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
-                return 1;
-            }
-            continue;
-        case MSG_POSTED:
-            if (info.msg.message & 0x80000000)  /* internal message */
-            {
-                if (flags & PM_REMOVE)
-                {
-                    handle_internal_message( info.msg.hwnd, info.msg.message,
-                                             info.msg.wParam, info.msg.lParam );
-                    /* if this is a nested call return right away */
-                    if (first == info.msg.message && last == info.msg.message)
-                    {
-                        HeapFree( GetProcessHeap(), 0, buffer );
-                        return 0;
-                    }
-                }
-                else
-                    peek_message( msg, info.msg.hwnd, info.msg.message,
-                                  info.msg.message, flags | PM_REMOVE, changed_mask );
-                continue;
-            }
-	    if (info.msg.message >= WM_DDE_FIRST && info.msg.message <= WM_DDE_LAST)
-	    {
-		if (!unpack_dde_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
-                                         &info.msg.lParam, &buffer, size ))
-                    continue;  /* ignore it */
-	    }
-            *msg = info.msg;
-            msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
-            thread_info->GetMessagePosVal = MAKELONG( msg->pt.x, msg->pt.y );
-            thread_info->GetMessageTimeVal = info.msg.time;
-            thread_info->GetMessageExtraInfoVal = 0;
-            thread_info->msg_source = msg_source_unavailable;
-            HeapFree( GetProcessHeap(), 0, buffer );
-            HOOK_CallHooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
-            return 1;
-        }
-
-        /* if we get here, we have a sent message; call the window procedure */
-        old_info = thread_info->receive_info;
-        thread_info->receive_info = &info;
-        thread_info->msg_source = msg_source_unavailable;
-        result = call_window_proc( info.msg.hwnd, info.msg.message, info.msg.wParam,
-                                   info.msg.lParam, (info.type != MSG_ASCII), FALSE,
-                                   WMCHAR_MAP_RECVMESSAGE );
-        reply_message( &info, result, TRUE );
-        thread_info->receive_info = old_info;
-
-        /* if some PM_QS* flags were specified, only handle sent messages from now on */
-        if (HIWORD(flags) && !changed_mask) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
-    }
-}
-
-
-/***********************************************************************
  *           process_sent_messages
  *
  * Process all pending sent messages.
  */
 static inline void process_sent_messages(void)
 {
-    MSG msg;
-    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0 );
+    NtUserCallNoParam( NtUserProcessSentMessages );
 }
 
 
@@ -2978,42 +1959,6 @@ static void wait_message_reply( UINT flags )
 
 
 /***********************************************************************
- *           wait_objects
- *
- * Wait for multiple objects including the server queue, with specific queue masks.
- */
-static DWORD wait_objects( DWORD count, const HANDLE *handles, DWORD timeout,
-                           DWORD wake_mask, DWORD changed_mask, DWORD flags )
-{
-    struct user_thread_info *thread_info = get_user_thread_info();
-    DWORD ret;
-
-    assert( count );  /* we must have at least the server queue */
-
-    flush_window_surfaces( TRUE );
-
-    if (thread_info->wake_mask != wake_mask || thread_info->changed_mask != changed_mask)
-    {
-        SERVER_START_REQ( set_queue_mask )
-        {
-            req->wake_mask    = wake_mask;
-            req->changed_mask = changed_mask;
-            req->skip_wait    = 0;
-            wine_server_call( req );
-        }
-        SERVER_END_REQ;
-        thread_info->wake_mask = wake_mask;
-        thread_info->changed_mask = changed_mask;
-    }
-
-    ret = wow_handlers.wait_message( count, handles, timeout, changed_mask, flags );
-
-    if (ret != WAIT_TIMEOUT) thread_info->wake_mask = thread_info->changed_mask = 0;
-    return ret;
-}
-
-
-/***********************************************************************
  *		put_message_in_queue
  *
  * Put a sent message into the destination queue.
@@ -3061,7 +2006,8 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     }
     else if (info->type == MSG_POSTED && info->msg >= WM_DDE_FIRST && info->msg <= WM_DDE_LAST)
     {
-        return post_dde_message( &data, info );
+        return post_dde_message( info->hwnd, info->msg, info->wparam, info->lparam,
+                                 info->dest_tid, info->type );
     }
 
     SERVER_START_REQ( send_message )
@@ -3205,7 +2151,7 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
     if (info->dest_tid == GetCurrentThreadId())
     {
         result = call_window_proc( info->hwnd, info->msg, info->wparam, info->lparam,
-                                   unicode, TRUE, info->wm_char );
+                                   unicode, TRUE, info->wm_char, FALSE, NULL, 0 );
         if (info->type == MSG_CALLBACK)
             call_sendmsg_callback( info->callback, info->hwnd, info->msg, info->data, result );
         ret = TRUE;
@@ -3226,164 +2172,6 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
 
     SPY_ExitMessage( SPY_RESULT_OK, info->hwnd, info->msg, result, info->wparam, info->lparam );
     thread_info->msg_source = prev_source;
-    if (ret && res_ptr) *res_ptr = result;
-    return ret;
-}
-
-
-/***********************************************************************
- *		send_hardware_message
- */
-NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput, UINT flags )
-{
-    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
-    struct send_message_info info;
-    int prev_x, prev_y, new_x, new_y;
-    INT counter = global_key_state_counter;
-    USAGE hid_usage_page, hid_usage;
-    NTSTATUS ret;
-    BOOL wait;
-
-    info.type     = MSG_HARDWARE;
-    info.dest_tid = 0;
-    info.hwnd     = hwnd;
-    info.flags    = 0;
-    info.timeout  = 0;
-
-    if (input->type == INPUT_HARDWARE && rawinput->header.dwType == RIM_TYPEHID)
-    {
-        if (input->u.hi.uMsg == WM_INPUT_DEVICE_CHANGE)
-        {
-            hid_usage_page = ((USAGE *)rawinput->data.hid.bRawData)[0];
-            hid_usage = ((USAGE *)rawinput->data.hid.bRawData)[1];
-        }
-        if (input->u.hi.uMsg == WM_INPUT)
-        {
-            if (!rawinput_device_get_usages( rawinput->header.hDevice, &hid_usage_page, &hid_usage ))
-            {
-                WARN( "unable to get HID usages for device %p\n", rawinput->header.hDevice );
-                return STATUS_INVALID_HANDLE;
-            }
-        }
-    }
-
-    SERVER_START_REQ( send_hardware_message )
-    {
-        req->win        = wine_server_user_handle( hwnd );
-        req->flags      = flags;
-        req->input.type = input->type;
-        switch (input->type)
-        {
-        case INPUT_MOUSE:
-            req->input.mouse.x     = input->u.mi.dx;
-            req->input.mouse.y     = input->u.mi.dy;
-            req->input.mouse.data  = input->u.mi.mouseData;
-            req->input.mouse.flags = input->u.mi.dwFlags;
-            req->input.mouse.time  = input->u.mi.time;
-            req->input.mouse.info  = input->u.mi.dwExtraInfo;
-            break;
-        case INPUT_KEYBOARD:
-            req->input.kbd.vkey  = input->u.ki.wVk;
-            req->input.kbd.scan  = input->u.ki.wScan;
-            req->input.kbd.flags = input->u.ki.dwFlags;
-            req->input.kbd.time  = input->u.ki.time;
-            req->input.kbd.info  = input->u.ki.dwExtraInfo;
-            break;
-        case INPUT_HARDWARE:
-            req->input.hw.msg    = input->u.hi.uMsg;
-            req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
-            switch (input->u.hi.uMsg)
-            {
-            case WM_INPUT:
-            case WM_INPUT_DEVICE_CHANGE:
-                req->input.hw.rawinput.type = rawinput->header.dwType;
-                switch (rawinput->header.dwType)
-                {
-                case RIM_TYPEHID:
-                    req->input.hw.rawinput.hid.device = HandleToUlong( rawinput->header.hDevice );
-                    req->input.hw.rawinput.hid.param = rawinput->header.wParam;
-                    req->input.hw.rawinput.hid.usage_page = hid_usage_page;
-                    req->input.hw.rawinput.hid.usage = hid_usage;
-                    req->input.hw.rawinput.hid.count = rawinput->data.hid.dwCount;
-                    req->input.hw.rawinput.hid.length = rawinput->data.hid.dwSizeHid;
-                    wine_server_add_data( req, rawinput->data.hid.bRawData,
-                                          rawinput->data.hid.dwCount * rawinput->data.hid.dwSizeHid );
-                    break;
-                default:
-                    assert( 0 );
-                    break;
-                }
-            }
-            break;
-        }
-        if (key_state_info) wine_server_set_reply( req, key_state_info->state,
-                                                   sizeof(key_state_info->state) );
-        ret = wine_server_call( req );
-        wait = reply->wait;
-        prev_x = reply->prev_x;
-        prev_y = reply->prev_y;
-        new_x  = reply->new_x;
-        new_y  = reply->new_y;
-    }
-    SERVER_END_REQ;
-
-    if (!ret)
-    {
-        if (key_state_info)
-        {
-            key_state_info->time    = GetTickCount();
-            key_state_info->counter = counter;
-        }
-        if ((flags & SEND_HWMSG_INJECTED) && (prev_x != new_x || prev_y != new_y))
-            USER_Driver->pSetCursorPos( new_x, new_y );
-    }
-
-    if (wait)
-    {
-        LRESULT ignored;
-        wait_message_reply( 0 );
-        retrieve_reply( &info, 0, &ignored );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		MSG_SendInternalMessageTimeout
- *
- * Same as SendMessageTimeoutW but sends the message to a specific thread
- * without requiring a window handle. Only works for internal Wine messages.
- */
-LRESULT MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
-                                        UINT msg, WPARAM wparam, LPARAM lparam,
-                                        UINT flags, UINT timeout, PDWORD_PTR res_ptr )
-{
-    struct send_message_info info;
-    LRESULT ret, result;
-
-    assert( msg & 0x80000000 );  /* must be an internal Wine message */
-
-    info.type     = MSG_UNICODE;
-    info.dest_tid = dest_tid;
-    info.hwnd     = 0;
-    info.msg      = msg;
-    info.wparam   = wparam;
-    info.lparam   = lparam;
-    info.flags    = flags;
-    info.timeout  = timeout;
-
-    if (USER_IsExitingThread( dest_tid )) return 0;
-
-    if (dest_tid == GetCurrentThreadId())
-    {
-        result = handle_internal_message( 0, msg, wparam, lparam );
-        ret = 1;
-    }
-    else
-    {
-        if (dest_pid != GetCurrentProcessId()) info.type = MSG_OTHER_PROCESS;
-        ret = send_inter_thread_message( &info, &result );
-    }
     if (ret && res_ptr) *res_ptr = result;
     return ret;
 }
@@ -3581,11 +2369,7 @@ BOOL WINAPI SendMessageCallbackW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
  */
 BOOL WINAPI ReplyMessage( LRESULT result )
 {
-    struct received_message_info *info = get_user_thread_info()->receive_info;
-
-    if (!info) return FALSE;
-    reply_message( info, result, FALSE );
-    return TRUE;
+    return NtUserCallTwoParam( result, 0, NtUserReplyMessage );
 }
 
 
@@ -3723,57 +2507,12 @@ void WINAPI PostQuitMessage( INT exit_code )
     SERVER_END_REQ;
 }
 
-/* check for driver events if we detect that the app is not properly consuming messages */
-static inline void check_for_driver_events( UINT msg )
-{
-    if (get_user_thread_info()->message_count > 200)
-    {
-        flush_window_surfaces( FALSE );
-        USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_ALLINPUT, 0 );
-    }
-    else if (msg == WM_TIMER || msg == WM_SYSTIMER)
-    {
-        /* driver events should have priority over timers, so make sure we'll check for them soon */
-        get_user_thread_info()->message_count += 100;
-    }
-    else get_user_thread_info()->message_count++;
-}
-
 /***********************************************************************
  *		PeekMessageW  (USER32.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
-    MSG msg;
-    int ret;
-
-    USER_CheckNotLock();
-    check_for_driver_events( 0 );
-
-    ret = peek_message( &msg, hwnd, first, last, flags, 0 );
-    if (ret < 0) return FALSE;
-
-    if (!ret)
-    {
-        flush_window_surfaces( TRUE );
-        ret = wow_handlers.wait_message( 0, NULL, 0, QS_ALLINPUT, 0 );
-        /* if we received driver events, check again for a pending message */
-        if (ret == WAIT_TIMEOUT || peek_message( &msg, hwnd, first, last, flags, 0 ) <= 0) return FALSE;
-    }
-
-    check_for_driver_events( msg.message );
-
-    /* copy back our internal safe copy of message data to msg_out.
-     * msg_out is a variable from the *program*, so it can't be used
-     * internally as it can get "corrupted" by our use of SendMessage()
-     * (back to the program) inside the message handling itself. */
-    if (!msg_out)
-    {
-        SetLastError( ERROR_NOACCESS );
-        return FALSE;
-    }
-    *msg_out = msg;
-    return TRUE;
+    return NtUserPeekMessage( msg_out, hwnd, first, last, flags );
 }
 
 
@@ -3794,33 +2533,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageA( MSG *msg, HWND hwnd, UINT first, UIN
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
-    HANDLE server_queue = get_server_queue_handle();
-    unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
-    int ret;
-
-    USER_CheckNotLock();
-    check_for_driver_events( 0 );
-
-    if (first || last)
-    {
-        if ((first <= WM_KEYLAST) && (last >= WM_KEYFIRST)) mask |= QS_KEY;
-        if ( ((first <= WM_MOUSELAST) && (last >= WM_MOUSEFIRST)) ||
-             ((first <= WM_NCMOUSELAST) && (last >= WM_NCMOUSEFIRST)) ) mask |= QS_MOUSE;
-        if ((first <= WM_TIMER) && (last >= WM_TIMER)) mask |= QS_TIMER;
-        if ((first <= WM_SYSTIMER) && (last >= WM_SYSTIMER)) mask |= QS_TIMER;
-        if ((first <= WM_PAINT) && (last >= WM_PAINT)) mask |= QS_PAINT;
-    }
-    else mask = QS_ALLINPUT;
-
-    while (!(ret = peek_message( msg, hwnd, first, last, PM_REMOVE | (mask << 16), mask )))
-    {
-        wait_objects( 1, &server_queue, INFINITE, mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
-    }
-    if (ret < 0) return -1;
-
-    check_for_driver_events( msg->message );
-
-    return (msg->message != WM_QUIT);
+    return NtUserGetMessage( msg, hwnd, first, last );
 }
 
 
@@ -3940,30 +2653,7 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageA( const MSG* msg )
             return retval;
         }
     }
-    if (!msg->hwnd) return 0;
-
-    SPY_EnterMessage( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message,
-                      msg->wParam, msg->lParam );
-
-    if (!WINPROC_call_window( msg->hwnd, msg->message, msg->wParam, msg->lParam,
-                              &retval, FALSE, WMCHAR_MAP_DISPATCHMESSAGE ))
-    {
-        if (!IsWindow( msg->hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
-        retval = 0;
-    }
-
-    SPY_ExitMessage( SPY_RESULT_OK, msg->hwnd, msg->message, retval,
-                     msg->wParam, msg->lParam );
-
-    if (msg->message == WM_PAINT)
-    {
-        /* send a WM_NCPAINT and WM_ERASEBKGND if the non-client area is still invalid */
-        HRGN hrgn = CreateRectRgn( 0, 0, 0, 0 );
-        GetUpdateRgn( msg->hwnd, hrgn, TRUE );
-        DeleteObject( hrgn );
-    }
-    return retval;
+    return NtUserCallOneParam( (UINT_PTR)msg, NtUserDispatchMessageA );
 }
 
 
@@ -4011,30 +2701,7 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageW( const MSG* msg )
             return retval;
         }
     }
-    if (!msg->hwnd) return 0;
-
-    SPY_EnterMessage( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message,
-                      msg->wParam, msg->lParam );
-
-    if (!WINPROC_call_window( msg->hwnd, msg->message, msg->wParam, msg->lParam,
-                              &retval, TRUE, WMCHAR_MAP_DISPATCHMESSAGE ))
-    {
-        if (!IsWindow( msg->hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
-        retval = 0;
-    }
-
-    SPY_ExitMessage( SPY_RESULT_OK, msg->hwnd, msg->message, retval,
-                     msg->wParam, msg->lParam );
-
-    if (msg->message == WM_PAINT)
-    {
-        /* send a WM_NCPAINT and WM_ERASEBKGND if the non-client area is still invalid */
-        HRGN hrgn = CreateRectRgn( 0, 0, 0, 0 );
-        GetUpdateRgn( msg->hwnd, hrgn, TRUE );
-        DeleteObject( hrgn );
-    }
-    return retval;
+    return NtUserDispatchMessage( msg );
 }
 
 
@@ -4128,31 +2795,7 @@ BOOL WINAPI GetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source )
  */
 BOOL WINAPI WaitMessage(void)
 {
-    return (MsgWaitForMultipleObjectsEx( 0, NULL, INFINITE, QS_ALLINPUT, 0 ) != WAIT_FAILED);
-}
-
-
-/***********************************************************************
- *		MsgWaitForMultipleObjectsEx   (USER32.@)
- */
-DWORD WINAPI MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *pHandles,
-                                          DWORD timeout, DWORD mask, DWORD flags )
-{
-    HANDLE handles[MAXIMUM_WAIT_OBJECTS];
-    DWORD i;
-
-    if (count > MAXIMUM_WAIT_OBJECTS-1)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return WAIT_FAILED;
-    }
-
-    /* add the queue to the handle list */
-    for (i = 0; i < count; i++) handles[i] = pHandles[i];
-    handles[count] = get_server_queue_handle();
-
-    return wait_objects( count+1, handles, timeout,
-                         (flags & MWMO_INPUTAVAILABLE) ? mask : 0, mask, flags );
+    return NtUserMsgWaitForMultipleObjectsEx( 0, NULL, INFINITE, QS_ALLINPUT, 0 ) != WAIT_FAILED;
 }
 
 
@@ -4162,61 +2805,17 @@ DWORD WINAPI MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *pHandles,
 DWORD WINAPI MsgWaitForMultipleObjects( DWORD count, const HANDLE *handles,
                                         BOOL wait_all, DWORD timeout, DWORD mask )
 {
-    return MsgWaitForMultipleObjectsEx( count, handles, timeout, mask,
-                                        wait_all ? MWMO_WAITALL : 0 );
+    return NtUserMsgWaitForMultipleObjectsEx( count, handles, timeout, mask,
+                                              wait_all ? MWMO_WAITALL : 0 );
 }
 
 
 /***********************************************************************
  *		WaitForInputIdle (USER32.@)
  */
-DWORD WINAPI WaitForInputIdle( HANDLE hProcess, DWORD dwTimeOut )
+DWORD WINAPI WaitForInputIdle( HANDLE process, DWORD timeout )
 {
-    DWORD start_time, elapsed, ret;
-    HANDLE handles[2];
-
-    handles[0] = hProcess;
-    SERVER_START_REQ( get_process_idle_event )
-    {
-        req->handle = wine_server_obj_handle( hProcess );
-        wine_server_call_err( req );
-        handles[1] = wine_server_ptr_handle( reply->event );
-    }
-    SERVER_END_REQ;
-    if (!handles[1]) return WAIT_FAILED;  /* no event to wait on */
-
-    start_time = GetTickCount();
-    elapsed = 0;
-
-    TRACE("waiting for %p\n", handles[1] );
-    do
-    {
-        ret = MsgWaitForMultipleObjects ( 2, handles, FALSE, dwTimeOut - elapsed, QS_SENDMESSAGE );
-        switch (ret)
-        {
-        case WAIT_OBJECT_0:
-            return 0;
-        case WAIT_OBJECT_0+2:
-            process_sent_messages();
-            break;
-        case WAIT_TIMEOUT:
-        case WAIT_FAILED:
-            TRACE("timeout or error\n");
-            return ret;
-        default:
-            TRACE("finished\n");
-            return 0;
-        }
-        if (dwTimeOut != INFINITE)
-        {
-            elapsed = GetTickCount() - start_time;
-            if (elapsed > dwTimeOut)
-                break;
-        }
-    }
-    while (1);
-
-    return WAIT_TIMEOUT;
+    return NtUserWaitForInputIdle( process, timeout, FALSE );
 }
 
 
@@ -4432,43 +3031,7 @@ BOOL WINAPI SetMessageQueue( INT size )
  */
 BOOL WINAPI MessageBeep( UINT i )
 {
-    BOOL active = TRUE;
-    SystemParametersInfoA( SPI_GETBEEP, 0, &active, FALSE );
-    if (active) USER_Driver->pBeep();
-    return TRUE;
-}
-
-
-/***********************************************************************
- *      SetCoalescableTimer (USER32.@)
- */
-UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance )
-{
-    UINT_PTR ret;
-    WNDPROC winproc = 0;
-
-    if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
-
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
-
-    SERVER_START_REQ( set_win_timer )
-    {
-        req->win    = wine_server_user_handle( hwnd );
-        req->msg    = WM_TIMER;
-        req->id     = id;
-        req->rate   = timeout;
-        req->lparam = (ULONG_PTR)winproc;
-        if (!wine_server_call_err( req ))
-        {
-            ret = reply->id;
-            if (!ret) ret = TRUE;
-        }
-        else ret = 0;
-    }
-    SERVER_END_REQ;
-
-    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
-    return ret;
+    return NtUserCallOneParam( i, NtUserMessageBeep );
 }
 
 
@@ -4477,59 +3040,7 @@ UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMER
  */
 UINT_PTR WINAPI SetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
 {
-    return SetCoalescableTimer( hwnd, id, timeout, proc, TIMERV_DEFAULT_COALESCING );
-}
-
-
-/***********************************************************************
- *		SetSystemTimer (USER32.@)
- */
-UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
-{
-    UINT_PTR ret;
-    WNDPROC winproc = 0;
-
-    if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
-
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
-
-    SERVER_START_REQ( set_win_timer )
-    {
-        req->win    = wine_server_user_handle( hwnd );
-        req->msg    = WM_SYSTIMER;
-        req->id     = id;
-        req->rate   = timeout;
-        req->lparam = (ULONG_PTR)winproc;
-        if (!wine_server_call_err( req ))
-        {
-            ret = reply->id;
-            if (!ret) ret = TRUE;
-        }
-        else ret = 0;
-    }
-    SERVER_END_REQ;
-
-    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
-    return ret;
-}
-
-
-/***********************************************************************
- *		KillTimer (USER32.@)
- */
-BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
-{
-    BOOL ret;
-
-    SERVER_START_REQ( kill_win_timer )
-    {
-        req->win = wine_server_user_handle( hwnd );
-        req->msg = WM_TIMER;
-        req->id  = id;
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserSetTimer( hwnd, id, timeout, proc, TIMERV_DEFAULT_COALESCING );
 }
 
 
@@ -4538,17 +3049,7 @@ BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
  */
 BOOL WINAPI KillSystemTimer( HWND hwnd, UINT_PTR id )
 {
-    BOOL ret;
-
-    SERVER_START_REQ( kill_win_timer )
-    {
-        req->win = wine_server_user_handle( hwnd );
-        req->msg = WM_SYSTIMER;
-        req->id  = id;
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserCallHwndParam( hwnd, id, NtUserKillSystemTimer );
 }
 
 
@@ -4559,45 +3060,6 @@ BOOL WINAPI IsGUIThread( BOOL convert )
 {
     FIXME( "%u: stub\n", convert );
     return TRUE;
-}
-
-
-/**********************************************************************
- *		GetGUIThreadInfo  (USER32.@)
- */
-BOOL WINAPI GetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
-{
-    BOOL ret;
-
-    if (info->cbSize != sizeof(*info))
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = id;
-        if ((ret = !wine_server_call_err( req )))
-        {
-            info->flags          = 0;
-            info->hwndActive     = wine_server_ptr_handle( reply->active );
-            info->hwndFocus      = wine_server_ptr_handle( reply->focus );
-            info->hwndCapture    = wine_server_ptr_handle( reply->capture );
-            info->hwndMenuOwner  = wine_server_ptr_handle( reply->menu_owner );
-            info->hwndMoveSize   = wine_server_ptr_handle( reply->move_size );
-            info->hwndCaret      = wine_server_ptr_handle( reply->caret );
-            info->rcCaret.left   = reply->rect.left;
-            info->rcCaret.top    = reply->rect.top;
-            info->rcCaret.right  = reply->rect.right;
-            info->rcCaret.bottom = reply->rect.bottom;
-            if (reply->menu_owner) info->flags |= GUI_INMENUMODE;
-            if (reply->move_size) info->flags |= GUI_INMOVESIZE;
-            if (reply->caret) info->flags |= GUI_CARETBLINKING;
-        }
-    }
-    SERVER_END_REQ;
-    return ret;
 }
 
 

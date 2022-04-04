@@ -61,7 +61,7 @@ static void DEFDLG_SetFocus( HWND hwndCtrl )
 {
     if (SendMessageW( hwndCtrl, WM_GETDLGCODE, 0, 0 ) & DLGC_HASSETSEL)
         SendMessageW( hwndCtrl, EM_SETSEL, 0, -1 );
-    SetFocus( hwndCtrl );
+    NtUserSetFocus( hwndCtrl );
 }
 
 
@@ -102,7 +102,7 @@ static void DEFDLG_RestoreFocus( HWND hwnd, BOOL justActivate )
         if (!IsWindow( infoPtr->hwndFocus )) return;
     }
     if (justActivate)
-        SetFocus( infoPtr->hwndFocus );
+        NtUserSetFocus( infoPtr->hwndFocus );
     else
         DEFDLG_SetFocus( infoPtr->hwndFocus );
     infoPtr->hwndFocus = NULL;
@@ -240,7 +240,7 @@ static LRESULT DEFDLG_Proc( HWND hwnd, UINT msg, WPARAM wParam,
                 WND *wndPtr;
 
                 if (dlgInfo->hUserFont) DeleteObject( dlgInfo->hUserFont );
-                if (dlgInfo->hMenu) DestroyMenu( dlgInfo->hMenu );
+                if (dlgInfo->hMenu) NtUserDestroyMenu( dlgInfo->hMenu );
                 HeapFree( GetProcessHeap(), 0, dlgInfo );
 
                 wndPtr = WIN_GetPtr( hwnd );

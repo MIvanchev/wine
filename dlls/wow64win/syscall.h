@@ -93,15 +93,26 @@
     SYSCALL_ENTRY( NtUserBuildHwndList ) \
     SYSCALL_ENTRY( NtUserCloseDesktop ) \
     SYSCALL_ENTRY( NtUserCloseWindowStation ) \
+    SYSCALL_ENTRY( NtUserCopyAcceleratorTable ) \
+    SYSCALL_ENTRY( NtUserCreateAcceleratorTable ) \
     SYSCALL_ENTRY( NtUserCreateDesktopEx ) \
     SYSCALL_ENTRY( NtUserCreateWindowStation ) \
+    SYSCALL_ENTRY( NtUserDestroyAcceleratorTable ) \
+    SYSCALL_ENTRY( NtUserFindExistingCursorIcon ) \
+    SYSCALL_ENTRY( NtUserGetAncestor ) \
+    SYSCALL_ENTRY( NtUserGetAtomName ) \
+    SYSCALL_ENTRY( NtUserGetClassName ) \
     SYSCALL_ENTRY( NtUserGetClipboardFormatName ) \
     SYSCALL_ENTRY( NtUserGetClipboardOwner ) \
     SYSCALL_ENTRY( NtUserGetClipboardSequenceNumber ) \
     SYSCALL_ENTRY( NtUserGetClipboardViewer ) \
     SYSCALL_ENTRY( NtUserGetCursor ) \
+    SYSCALL_ENTRY( NtUserGetCursorFrameInfo ) \
     SYSCALL_ENTRY( NtUserGetDoubleClickTime ) \
     SYSCALL_ENTRY( NtUserGetDpiForMonitor ) \
+    SYSCALL_ENTRY( NtUserGetForegroundWindow ) \
+    SYSCALL_ENTRY( NtUserGetGUIThreadInfo ) \
+    SYSCALL_ENTRY( NtUserGetIconSize ) \
     SYSCALL_ENTRY( NtUserGetKeyState ) \
     SYSCALL_ENTRY( NtUserGetKeyboardLayout ) \
     SYSCALL_ENTRY( NtUserGetKeyboardLayoutName ) \
@@ -115,6 +126,11 @@
     SYSCALL_ENTRY( NtUserGetProp ) \
     SYSCALL_ENTRY( NtUserGetSystemDpiForProcess ) \
     SYSCALL_ENTRY( NtUserGetThreadDesktop ) \
+    SYSCALL_ENTRY( NtUserGetWindowRgnEx ) \
+    SYSCALL_ENTRY( NtUserInitializeClientPfnArrays ) \
+    SYSCALL_ENTRY( NtUserInternalGetWindowText ) \
+    SYSCALL_ENTRY( NtUserKillTimer ) \
+    SYSCALL_ENTRY( NtUserNotifyWinEvent ) \
     SYSCALL_ENTRY( NtUserOpenDesktop ) \
     SYSCALL_ENTRY( NtUserOpenInputDesktop ) \
     SYSCALL_ENTRY( NtUserOpenWindowStation ) \
@@ -125,6 +141,13 @@
     SYSCALL_ENTRY( NtUserSetProcessDpiAwarenessContext ) \
     SYSCALL_ENTRY( NtUserSetProcessWindowStation ) \
     SYSCALL_ENTRY( NtUserSetProp ) \
-    SYSCALL_ENTRY( NtUserSetThreadDesktop )
+    SYSCALL_ENTRY( NtUserSetSystemTimer ) \
+    SYSCALL_ENTRY( NtUserSetThreadDesktop ) \
+    SYSCALL_ENTRY( NtUserSetTimer ) \
+    SYSCALL_ENTRY( NtUserSetWinEventHook ) \
+    SYSCALL_ENTRY( NtUserSetWindowsHookEx ) \
+    SYSCALL_ENTRY( NtUserUnhookWinEvent ) \
+    SYSCALL_ENTRY( NtUserUnhookWindowsHookEx ) \
+    SYSCALL_ENTRY( NtUserWindowFromDC )
 
 #endif /* __WOW64WIN_SYSCALL_H */

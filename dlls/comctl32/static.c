@@ -203,6 +203,17 @@ static HBITMAP create_alpha_bitmap( HBITMAP hbitmap )
             DeleteObject( alpha );
             alpha = 0;
         }
+        else
+        {
+            /* pre-multiply by alpha */
+            for (i = 0, ptr = bits; i < bm.bmWidth * bm.bmHeight; i++, ptr += 4)
+            {
+                unsigned int alpha = ptr[3];
+                ptr[0] = (ptr[0] * alpha + 127) / 255;
+                ptr[1] = (ptr[1] * alpha + 127) / 255;
+                ptr[2] = (ptr[2] * alpha + 127) / 255;
+            }
+        }
     }
 
     DeleteDC( hdc );
@@ -438,7 +449,7 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
 
         if (style < 0L || style > SS_TYPEMASK)
         {
-            ERR("Unknown style 0x%02x\n", style );
+            ERR("Unknown style %#lx\n", style );
             return -1;
         }
 
@@ -613,7 +624,7 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
             lResult = (LRESULT)STATIC_SetIcon( hwnd, (HICON)lParam, full_style );
             break;
         default:
-            FIXME("STM_SETIMAGE: Unhandled type %lx\n", wParam);
+            FIXME("STM_SETIMAGE: Unhandled type %Ix\n", wParam);
             break;
         }
         STATIC_TryPaintFcn( hwnd, full_style );

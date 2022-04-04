@@ -25,7 +25,9 @@
 #include "gst_private.h"
 #include "winternl.h"
 #include "rpcproxy.h"
+#include "dmoreg.h"
 #include "gst_guids.h"
+#include "wmcodecdsp.h"
 
 static unixlib_handle_t unix_handle;
 
@@ -92,16 +94,6 @@ HRESULT wg_parser_connect(struct wg_parser *parser, uint64_t file_size)
 void wg_parser_disconnect(struct wg_parser *parser)
 {
     __wine_unix_call(unix_handle, unix_wg_parser_disconnect, parser);
-}
-
-void wg_parser_begin_flush(struct wg_parser *parser)
-{
-    __wine_unix_call(unix_handle, unix_wg_parser_begin_flush, parser);
-}
-
-void wg_parser_end_flush(struct wg_parser *parser)
-{
-    __wine_unix_call(unix_handle, unix_wg_parser_end_flush, parser);
 }
 
 bool wg_parser_get_next_read_offset(struct wg_parser *parser, uint64_t *offset, uint32_t *size)
@@ -180,15 +172,15 @@ void wg_parser_stream_disable(struct wg_parser_stream *stream)
     __wine_unix_call(unix_handle, unix_wg_parser_stream_disable, stream);
 }
 
-bool wg_parser_stream_get_event(struct wg_parser_stream *stream, struct wg_parser_event *event)
+bool wg_parser_stream_get_buffer(struct wg_parser_stream *stream, struct wg_parser_buffer *buffer)
 {
-    struct wg_parser_stream_get_event_params params =
+    struct wg_parser_stream_get_buffer_params params =
     {
         .stream = stream,
-        .event = event,
+        .buffer = buffer,
     };
 
-    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_get_event, &params);
+    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_get_buffer, &params);
 }
 
 bool wg_parser_stream_copy_buffer(struct wg_parser_stream *stream,
@@ -250,6 +242,55 @@ void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
     };
 
     __wine_unix_call(unix_handle, unix_wg_parser_stream_seek, &params);
+}
+
+struct wg_transform *wg_transform_create(const struct wg_format *input_format,
+        const struct wg_format *output_format)
+{
+    struct wg_transform_create_params params =
+    {
+        .input_format = input_format,
+        .output_format = output_format,
+    };
+
+    if (__wine_unix_call(unix_handle, unix_wg_transform_create, &params))
+        return NULL;
+    return params.transform;
+}
+
+void wg_transform_destroy(struct wg_transform *transform)
+{
+    __wine_unix_call(unix_handle, unix_wg_transform_destroy, transform);
+}
+
+HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample *sample)
+{
+    struct wg_transform_push_data_params params =
+    {
+        .transform = transform,
+        .sample = sample,
+    };
+    NTSTATUS status;
+
+    if ((status = __wine_unix_call(unix_handle, unix_wg_transform_push_data, &params)))
+        return HRESULT_FROM_NT(status);
+
+    return params.result;
+}
+
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample)
+{
+    struct wg_transform_read_data_params params =
+    {
+        .transform = transform,
+        .sample = sample,
+    };
+    NTSTATUS status;
+
+    if ((status = __wine_unix_call(unix_handle, unix_wg_transform_read_data, &params)))
+        return HRESULT_FROM_NT(status);
+
+    return params.result;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
@@ -339,6 +380,7 @@ static struct class_factory avi_splitter_cf = {{&class_factory_vtbl}, avi_splitt
 static struct class_factory decodebin_parser_cf = {{&class_factory_vtbl}, decodebin_parser_create};
 static struct class_factory mpeg_splitter_cf = {{&class_factory_vtbl}, mpeg_splitter_create};
 static struct class_factory wave_parser_cf = {{&class_factory_vtbl}, wave_parser_create};
+static struct class_factory wma_decoder_cf = {{&class_factory_vtbl}, wma_decoder_create};
 
 HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
@@ -361,6 +403,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
         factory = &mpeg_splitter_cf;
     else if (IsEqualGUID(clsid, &CLSID_WAVEParser))
         factory = &wave_parser_cf;
+    else if (IsEqualGUID(clsid, &CLSID_WMADecMediaObject))
+        factory = &wma_decoder_cf;
     else
     {
         FIXME("%s not implemented, returning CLASS_E_CLASSNOTAVAILABLE.\n", debugstr_guid(clsid));
@@ -522,6 +566,19 @@ static const REGFILTER2 reg_decodebin_parser =
 
 HRESULT WINAPI DllRegisterServer(void)
 {
+    DMO_PARTIAL_MEDIATYPE wma_decoder_output[2] =
+    {
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_PCM},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_IEEE_FLOAT},
+    };
+    DMO_PARTIAL_MEDIATYPE wma_decoder_input[4] =
+    {
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_MSAUDIO1},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO2},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO3},
+        {.type = MEDIATYPE_Audio, .subtype = MEDIASUBTYPE_WMAUDIO_LOSSLESS},
+    };
+
     IFilterMapper2 *mapper;
     HRESULT hr;
 
@@ -542,6 +599,10 @@ HRESULT WINAPI DllRegisterServer(void)
     IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, L"Wave Parser", NULL, NULL, NULL, &reg_wave_parser);
 
     IFilterMapper2_Release(mapper);
+
+    if (FAILED(hr = DMORegister(L"WMA Decoder DMO", &CLSID_WMADecMediaObject, &DMOCATEGORY_AUDIO_DECODER,
+            0, ARRAY_SIZE(wma_decoder_input), wma_decoder_input, ARRAY_SIZE(wma_decoder_output), wma_decoder_output)))
+        return hr;
 
     return mfplat_DllRegisterServer();
 }
@@ -566,5 +627,9 @@ HRESULT WINAPI DllUnregisterServer(void)
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_WAVEParser);
 
     IFilterMapper2_Release(mapper);
+
+    if (FAILED(hr = DMOUnregister(&CLSID_WMADecMediaObject, &DMOCATEGORY_AUDIO_DECODER)))
+        return hr;
+
     return S_OK;
 }

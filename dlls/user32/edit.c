@@ -412,7 +412,7 @@ static SCRIPT_STRING_ANALYSIS EDIT_UpdateUniscribeData_linedef(EDITSTATE *es, HD
 		if (es->font)
 			SelectObject(udc, old_font);
 		if (udc != dc)
-			ReleaseDC(es->hwndSelf, udc);
+                    NtUserReleaseDC( es->hwndSelf, udc );
 	}
 
 	return line_def->ssa;
@@ -443,7 +443,7 @@ static SCRIPT_STRING_ANALYSIS EDIT_UpdateUniscribeData(EDITSTATE *es, HDC dc, IN
 			if (es->font)
 				SelectObject(udc, old_font);
 			if (udc != dc)
-				ReleaseDC(es->hwndSelf, udc);
+                            NtUserReleaseDC( es->hwndSelf, udc );
 		}
 		return es->ssa;
 	}
@@ -2923,7 +2923,7 @@ static void EDIT_EM_SetMargins(EDITSTATE *es, INT action,
                 }
             }
             SelectObject(dc, old_font);
-            ReleaseDC(es->hwndSelf, dc);
+            NtUserReleaseDC( es->hwndSelf, dc );
         }
 
 	if (action & EC_LEFTMARGIN) {
@@ -3329,7 +3329,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
         }
 
 	if (!(es->flags & EF_FOCUSED))
-            SetFocus(es->hwndSelf);
+            NtUserSetFocus(es->hwndSelf);
 
 	cmd = TrackPopupMenu(popup, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
 			     x, y, 0, es->hwndSelf, NULL);
@@ -3337,7 +3337,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	if (cmd)
 	    EDIT_ContextMenuCommand(es, cmd);
 
-	DestroyMenu(menu);
+        NtUserDestroyMenu(menu);
 }
 
 
@@ -3584,7 +3584,7 @@ static LRESULT EDIT_WM_LButtonDblClk(EDITSTATE *es)
 	INT ll;
 
 	es->bCaptureState = TRUE;
-	SetCapture(es->hwndSelf);
+	NtUserSetCapture(es->hwndSelf);
 
 	l = EDIT_EM_LineFromChar(es, e);
 	li = EDIT_EM_LineIndex(es, l);
@@ -3610,7 +3610,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 	BOOL after_wrap;
 
 	es->bCaptureState = TRUE;
-	SetCapture(es->hwndSelf);
+	NtUserSetCapture(es->hwndSelf);
 	EDIT_ConfinePoint(es, &x, &y);
 	e = EDIT_CharFromPos(es, x, y, &after_wrap);
 	EDIT_EM_SetSel(es, (keys & MK_SHIFT) ? es->selection_start : e, e, after_wrap);
@@ -3619,7 +3619,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 	SetTimer(es->hwndSelf, 0, 100, NULL);
 
 	if (!(es->flags & EF_FOCUSED))
-            SetFocus(es->hwndSelf);
+            NtUserSetFocus(es->hwndSelf);
 
 	return 0;
 }
@@ -3633,7 +3633,7 @@ static LRESULT EDIT_WM_LButtonDown(EDITSTATE *es, DWORD keys, INT x, INT y)
 static LRESULT EDIT_WM_LButtonUp(EDITSTATE *es)
 {
 	if (es->bCaptureState) {
-		KillTimer(es->hwndSelf, 0);
+		NtUserKillTimer(es->hwndSelf, 0);
 		if (GetCapture() == es->hwndSelf) ReleaseCapture();
 	}
 	es->bCaptureState = FALSE;
@@ -3706,7 +3706,7 @@ static void EDIT_WM_Paint(EDITSTATE *es, HDC hdc)
 	BOOL rev = es->bEnableState &&
 				((es->flags & EF_FOCUSED) ||
 					(es->style & ES_NOHIDESEL));
-        dc = hdc ? hdc : BeginPaint(es->hwndSelf, &ps);
+        dc = hdc ? hdc : NtUserBeginPaint( es->hwndSelf, &ps );
 
 	/* The dc we use for calculating may not be the one we paint into.
 	   This is the safest action. */
@@ -3776,7 +3776,7 @@ static void EDIT_WM_Paint(EDITSTATE *es, HDC hdc)
 		SelectObject(dc, old_font);
 
         if (!hdc)
-            EndPaint(es->hwndSelf, &ps);
+            NtUserEndPaint( es->hwndSelf, &ps );
 }
 
 
@@ -3797,7 +3797,7 @@ static void EDIT_WM_SetFocus(EDITSTATE *es)
         {
             HDC hdc = GetDC(es->hwndSelf);
             EDIT_WM_Paint(es, hdc);
-            ReleaseDC(es->hwndSelf, hdc);
+            NtUserReleaseDC( es->hwndSelf, hdc );
         }
 
 	CreateCaret(es->hwndSelf, 0, 1, es->line_height);
@@ -3865,7 +3865,7 @@ static void EDIT_WM_SetFont(EDITSTATE *es, HFONT font, BOOL redraw)
 	margins = get_font_margins(dc, &tm, es->is_unicode);
 	if (font)
 		SelectObject(dc, old_font);
-	ReleaseDC(es->hwndSelf, dc);
+	NtUserReleaseDC( es->hwndSelf, dc );
 	
 	/* Reset the format rect and the margins */
 	GetClientRect(es->hwndSelf, &clientRect);

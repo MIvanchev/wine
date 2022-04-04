@@ -19,7 +19,15 @@
 #include "wine/list.h"
 #include "wine/unixlib.h"
 
+#define MAX_PULSE_NAME_LEN 256
+
 struct pulse_stream;
+
+enum phys_device_bus_type {
+    phys_device_bus_invalid = -1,
+    phys_device_bus_pci,
+    phys_device_bus_usb
+};
 
 struct pulse_config
 {
@@ -29,7 +37,12 @@ struct pulse_config
         REFERENCE_TIME def_period;
         REFERENCE_TIME min_period;
     } modes[2];
-    unsigned int speakers_mask;
+};
+
+struct endpoint
+{
+    WCHAR *name;
+    char *pulse_name;
 };
 
 struct main_loop_params
@@ -37,9 +50,20 @@ struct main_loop_params
     HANDLE event;
 };
 
+struct get_endpoint_ids_params
+{
+    EDataFlow flow;
+    struct endpoint *endpoints;
+    unsigned int size;
+    HRESULT result;
+    unsigned int num;
+    unsigned int default_idx;
+};
+
 struct create_stream_params
 {
     const char *name;
+    const char *pulse_name;
     EDataFlow dataflow;
     AUDCLNT_SHAREMODE mode;
     DWORD flags;
@@ -186,11 +210,27 @@ struct is_started_params
     BOOL started;
 };
 
+struct get_prop_value_params
+{
+    const char *pulse_name;
+    const GUID *guid;
+    const PROPERTYKEY *prop;
+    EDataFlow flow;
+    HRESULT result;
+    VARTYPE vt;
+    union
+    {
+        WCHAR wstr[128];
+        ULONG ulVal;
+    };
+};
+
 enum unix_funcs
 {
     process_attach,
     process_detach,
     main_loop,
+    get_endpoint_ids,
     create_stream,
     release_stream,
     start,
@@ -211,4 +251,5 @@ enum unix_funcs
     set_event_handle,
     test_connect,
     is_started,
+    get_prop_value,
 };

@@ -36,6 +36,8 @@
 #include "winternl.h"
 #include "winerror.h"
 #include "ntgdi_private.h"
+#include "wine/wgl.h"
+#include "wine/wgl_driver.h"
 
 #include "wine/debug.h"
 
@@ -324,20 +326,6 @@ void release_dc_ptr( DC *dc )
 }
 
 
-/***********************************************************************
- *           update_dc
- *
- * Make sure the DC vis region is up to date.
- * This function may call up to USER so the GDI lock should _not_
- * be held when calling it.
- */
-void update_dc( DC *dc )
-{
-    if (InterlockedExchange( &dc->dirty, 0 ) && dc->hookProc)
-        dc->hookProc( dc->hSelf, DCHC_INVALIDVISRGN, dc->dwHookData, 0 );
-}
-
-
 static void set_bk_color( DC *dc, COLORREF color )
 {
     PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetBkColor );
@@ -522,7 +510,7 @@ static BOOL DC_DeleteObject( HGDIOBJ handle )
 
     /* Call hook procedure to check whether is it OK to delete this DC,
      * gdi_lock should not be locked */
-    if (dc->hookProc && !dc->hookProc( dc->hSelf, DCHC_DELETEDC, dc->dwHookData, 0 ))
+    if (dc->dce && !delete_dce( dc->dce ))
     {
         release_dc_ptr( dc );
         return TRUE;
@@ -763,9 +751,17 @@ HDC WINAPI NtGdiOpenDCW( UNICODE_STRING *device, const DEVMODEW *devmode, UNICOD
     dc->attr->vis_rect.top    = 0;
     dc->attr->vis_rect.right  = NtGdiGetDeviceCaps( hdc, DESKTOPHORZRES );
     dc->attr->vis_rect.bottom = NtGdiGetDeviceCaps( hdc, DESKTOPVERTRES );
+    dc->is_display            = !!is_display;
 
     DC_InitDC( dc );
     release_dc_ptr( dc );
+
+    if (driver_info && driver_info->cVersion == NTGDI_WIN16_DIB &&
+        !create_dib_surface( hdc, pdev ))
+    {
+        NtGdiDeleteObjectApp( hdc );
+        return 0;
+    }
     return hdc;
 }
 
@@ -888,6 +884,18 @@ static BOOL set_graphics_mode( DC *dc, int mode )
     /* font metrics depend on the graphics mode */
     NtGdiSelectFont(dc->hSelf, dc->hFont);
     return TRUE;
+}
+
+
+DWORD set_stretch_blt_mode( HDC hdc, DWORD mode )
+{
+    DWORD ret;
+    DC *dc;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
+    ret = dc->attr->stretch_blt_mode;
+    dc->attr->stretch_blt_mode = mode;
+    release_dc_ptr( dc );
+    return ret;
 }
 
 
@@ -1020,47 +1028,43 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
 
 
 /***********************************************************************
- *           SetDCHook   (win32u.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
+ *           set_dc_dce
  */
-BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
+void set_dc_dce( HDC hdc, struct dce *dce )
 {
-    DC *dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    if (!dc) return FALSE;
-
-    dc->dwHookData = dwHookData;
-    dc->hookProc = hookProc;
-    release_dc_ptr( dc );
-    return TRUE;
+    if (!(dc = get_dc_obj( hdc ))) return;
+    if (dc->attr->disabled)
+    {
+        GDI_ReleaseObj( hdc );
+        return;
+    }
+    dc->dce = dce;
+    if (dce) dc->dirty = 1;
+    GDI_ReleaseObj( hdc );
 }
 
 
 /***********************************************************************
- *           GetDCHook   (win32u.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
+ *           get_dc_dce
  */
-DWORD_PTR WINAPI GetDCHook( HDC hdc, DCHOOKPROC *proc )
+struct dce *get_dc_dce( HDC hdc )
 {
-    DC *dc = get_dc_ptr( hdc );
-    DWORD_PTR ret;
+    DC *dc = get_dc_obj( hdc );
+    struct dce *ret = NULL;
 
     if (!dc) return 0;
-    if (proc) *proc = dc->hookProc;
-    ret = dc->dwHookData;
-    release_dc_ptr( dc );
+    if (!dc->attr->disabled) ret = dc->dce;
+    GDI_ReleaseObj( hdc );
     return ret;
 }
 
 
 /***********************************************************************
- *           SetHookFlags   (win32u.@)
- *
- * Note: this doesn't exist in Win32, we add it here because user32 needs it.
+ *           set_dce_flags
  */
-WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
+WORD set_dce_flags( HDC hdc, WORD flags )
 {
     DC *dc = get_dc_obj( hdc );  /* not get_dc_ptr, this needs to work from any thread */
     LONG ret = 0;
@@ -1341,4 +1345,34 @@ BOOL CDECL __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCH
     ret = physdev->funcs->pGetICMProfile( physdev, allow_default, size, filename );
     release_dc_ptr(dc);
     return ret;
+}
+
+/***********************************************************************
+ *      __wine_get_wgl_driver  (win32u.@)
+ */
+struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version )
+{
+    BOOL is_display, is_memdc;
+    DC *dc;
+
+    if (version != WINE_WGL_DRIVER_VERSION)
+    {
+        ERR( "version mismatch, opengl32 wants %u but dibdrv has %u\n",
+             version, WINE_WGL_DRIVER_VERSION );
+        return NULL;
+    }
+
+    if (!(dc = get_dc_obj( hdc ))) return NULL;
+    if (dc->attr->disabled)
+    {
+        GDI_ReleaseObj( hdc );
+        return NULL;
+    }
+    is_display = dc->is_display;
+    is_memdc = get_gdi_object_type( hdc ) == NTGDI_OBJ_MEMDC;
+    GDI_ReleaseObj( hdc );
+
+    if (is_display) return user_driver->pwine_get_wgl_driver( version );
+    if (is_memdc) return dibdrv_get_wgl_driver();
+    return (void *)-1;
 }

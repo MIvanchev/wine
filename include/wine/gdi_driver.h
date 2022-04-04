@@ -159,14 +159,13 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pUnrealizePalette)(HPALETTE);
     NTSTATUS (CDECL *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *);
     NTSTATUS (CDECL *pD3DKMTSetVidPnSourceOwner)(const D3DKMT_SETVIDPNSOURCEOWNER *);
-    struct opengl_funcs * (CDECL *wine_get_wgl_driver)(PHYSDEV,UINT);
 
     /* priority order for the driver on the stack */
     UINT       priority;
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 74
+#define WINE_GDI_DRIVER_VERSION 76
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -196,15 +195,17 @@ static inline void push_dc_driver( PHYSDEV *dev, PHYSDEV physdev, const struct g
 
 struct window_surface;
 
+#ifndef __WINE_USE_MSVCRT
+
 struct window_surface_funcs
 {
-    void  (CDECL *lock)( struct window_surface *surface );
-    void  (CDECL *unlock)( struct window_surface *surface );
-    void* (CDECL *get_info)( struct window_surface *surface, BITMAPINFO *info );
-    RECT* (CDECL *get_bounds)( struct window_surface *surface );
-    void  (CDECL *set_region)( struct window_surface *surface, HRGN region );
-    void  (CDECL *flush)( struct window_surface *surface );
-    void  (CDECL *destroy)( struct window_surface *surface );
+    void  (*lock)( struct window_surface *surface );
+    void  (*unlock)( struct window_surface *surface );
+    void* (*get_info)( struct window_surface *surface, BITMAPINFO *info );
+    RECT* (*get_bounds)( struct window_surface *surface );
+    void  (*set_region)( struct window_surface *surface, HRGN region );
+    void  (*flush)( struct window_surface *surface );
+    void  (*destroy)( struct window_surface *surface );
 };
 
 struct window_surface
@@ -227,6 +228,8 @@ static inline ULONG window_surface_release( struct window_surface *surface )
     if (!ret) surface->funcs->destroy( surface );
     return ret;
 }
+
+#endif /* __WINE_USE_MSVCRT */
 
 /* display manager interface, used to initialize display device registry data */
 
@@ -321,30 +324,13 @@ struct user_driver_funcs
     BOOL    (CDECL *pSystemParametersInfo)(UINT,UINT,void*,UINT);
     /* vulkan support */
     const struct vulkan_funcs * (CDECL *pwine_get_vulkan_driver)(UINT);
+    /* opengl support */
+    struct opengl_funcs * (CDECL *pwine_get_wgl_driver)(UINT);
     /* thread management */
     void    (CDECL *pThreadDetach)(void);
 };
 
 extern void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
-
-/* the DC hook support is only exported on Win16, the 32-bit version is a Wine extension */
-
-#define DCHC_INVALIDVISRGN      0x0001
-#define DCHC_DELETEDC           0x0002
-#define DCHF_INVALIDATEVISRGN   0x0001
-#define DCHF_VALIDATEVISRGN     0x0002
-#define DCHF_RESETDC            0x0004  /* Wine extension */
-#define DCHF_DISABLEDC          0x0008  /* Wine extension */
-#define DCHF_ENABLEDC           0x0010  /* Wine extension */
-
-typedef BOOL (CALLBACK *DCHOOKPROC)(HDC,WORD,DWORD_PTR,LPARAM);
-
-WINGDIAPI DWORD_PTR WINAPI GetDCHook(HDC,DCHOOKPROC*);
-WINGDIAPI BOOL      WINAPI SetDCHook(HDC,DCHOOKPROC,DWORD_PTR);
-WINGDIAPI WORD      WINAPI SetHookFlags(HDC,WORD);
-
-extern void CDECL __wine_set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
-                                             const RECT *device_rect, struct window_surface *surface );
 extern void CDECL __wine_set_display_driver( struct user_driver_funcs *funcs, UINT version );
 extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );
 extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( UINT version );

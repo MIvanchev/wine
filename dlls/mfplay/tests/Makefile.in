@@ -1,6 +1,7 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = mfplay.dll
-IMPORTS   = mfplay user32 uuid mfuuid
+IMPORTS   = mfplay user32 uuid mfuuid mfplat
 
 C_SRCS = \
 	mfplay.c
+
+RC_SRCS = resource.rc

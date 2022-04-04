@@ -98,7 +98,7 @@ static void fatal_string_error(int which, DWORD error_code, const WCHAR *filenam
 	WCHAR msg[2048];
 
 	if (!LoadStringW(GetModuleHandleW(NULL), which, msg, ARRAY_SIZE(msg)))
-		WINE_ERR("LoadString failed, error %d\n", GetLastError());
+		WINE_ERR("LoadString failed, error %ld\n", GetLastError());
 
 	fatal_error(msg, error_code, filename);
 }
@@ -108,7 +108,7 @@ static void fatal_string(int which)
 	WCHAR msg[2048];
 
 	if (!LoadStringW(GetModuleHandleW(NULL), which, msg, ARRAY_SIZE(msg)))
-		WINE_ERR("LoadString failed, error %d\n", GetLastError());
+		WINE_ERR("LoadString failed, error %ld\n", GetLastError());
 
 	output(msg);
 	ExitProcess(1);
@@ -516,8 +516,11 @@ int __cdecl wmain (int argc, WCHAR *argv[])
                         break;
 		}
                 else if (is_option(argv[i], L"/exec")) {
-			creation_flags = 0;
-			sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
+                        /* If start.exe isn't attached to a console, force that no console would be created.
+                         * This is needed when target process belongs to CUI subsystem.
+                         */
+                        creation_flags = GetConsoleCP() == 0 ? DETACHED_PROCESS : 0;
+                        sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
                         i++;
                         break;
 		}

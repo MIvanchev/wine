@@ -26,7 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "winuser.h"
+#include "ntuser.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -52,7 +52,7 @@ static void CARET_DisplayCaret( HWND hwnd, const RECT *r )
     HDC hCompDC;
 
     /* do not use DCX_CACHE here, for x,y,width,height are in logical units */
-    if (!(hdc = GetDCEx( hwnd, 0, DCX_USESTYLE /*| DCX_CACHE*/ ))) return;
+    if (!(hdc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE /*| DCX_CACHE*/ ))) return;
     hCompDC = CreateCompatibleDC(hdc);
     if (hCompDC)
     {
@@ -63,7 +63,7 @@ static void CARET_DisplayCaret( HWND hwnd, const RECT *r )
 	SelectObject(hCompDC, hPrevBmp);
 	DeleteDC(hCompDC);
     }
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 }
 
 
@@ -156,7 +156,7 @@ BOOL WINAPI CreateCaret( HWND hwnd, HBITMAP bitmap, INT width, INT height )
 		}
 		DeleteDC(hMemDC);
 	    }
-	    ReleaseDC(hwnd, hdc);
+	    NtUserReleaseDC(hwnd, hdc);
 	}
     }
     if (!hBmp) return FALSE;
@@ -274,7 +274,7 @@ BOOL WINAPI SetCaretPos( INT x, INT y )
         r.left = x;
         r.top = y;
         CARET_DisplayCaret( hwnd, &r );
-        SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
+        NtUserSetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
     }
     return ret;
 }
@@ -352,7 +352,7 @@ BOOL WINAPI ShowCaret( HWND hwnd )
     if (ret && (hidden == 1))  /* hidden was 1 so it's now 0 */
     {
         CARET_DisplayCaret( hwnd, &r );
-        SetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
+        NtUserSetSystemTimer( hwnd, TIMERID, Caret.timeout, CARET_Callback );
     }
     return ret;
 }

@@ -1764,14 +1764,16 @@ struct recv_socket_request
     struct request_header __header;
     int          oob;
     async_data_t async;
-    unsigned int status;
-    unsigned int total;
+    int          force_async;
+    char __pad_60[4];
 };
 struct recv_socket_reply
 {
     struct reply_header __header;
     obj_handle_t wait;
     unsigned int options;
+    int          nonblocking;
+    char __pad_20[4];
 };
 
 
@@ -1781,14 +1783,16 @@ struct send_socket_request
     struct request_header __header;
     char __pad_12[4];
     async_data_t async;
-    unsigned int status;
-    unsigned int total;
+    int          force_async;
+    char __pad_60[4];
 };
 struct send_socket_reply
 {
     struct reply_header __header;
     obj_handle_t wait;
     unsigned int options;
+    int          nonblocking;
+    char __pad_20[4];
 };
 
 
@@ -2905,6 +2909,23 @@ struct get_async_result_reply
 
 
 
+struct set_async_direct_result_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    apc_param_t    information;
+    unsigned int   status;
+    int            mark_pending;
+};
+struct set_async_direct_result_reply
+{
+    struct reply_header __header;
+    obj_handle_t   handle;
+    char __pad_12[4];
+};
+
+
+
 struct read_request
 {
     struct request_header __header;
@@ -3112,12 +3133,12 @@ struct set_window_info_request
     user_handle_t  handle;
     unsigned int   style;
     unsigned int   ex_style;
-    unsigned int   id;
+    data_size_t    extra_size;
     mod_handle_t   instance;
     lparam_t       user_data;
-    int            extra_offset;
-    data_size_t    extra_size;
     lparam_t       extra_value;
+    int            extra_offset;
+    char __pad_60[4];
 };
 struct set_window_info_reply
 {
@@ -3127,8 +3148,7 @@ struct set_window_info_reply
     mod_handle_t   old_instance;
     lparam_t       old_user_data;
     lparam_t       old_extra_value;
-    unsigned int   old_id;
-    char __pad_44[4];
+    lparam_t       old_id;
 };
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02
@@ -5548,6 +5568,7 @@ enum request
     REQ_register_async,
     REQ_cancel_async,
     REQ_get_async_result,
+    REQ_set_async_direct_result,
     REQ_read,
     REQ_write,
     REQ_ioctl,
@@ -5829,6 +5850,7 @@ union generic_request
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
     struct get_async_result_request get_async_result_request;
+    struct set_async_direct_result_request set_async_direct_result_request;
     struct read_request read_request;
     struct write_request write_request;
     struct ioctl_request ioctl_request;
@@ -6108,6 +6130,7 @@ union generic_reply
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
     struct get_async_result_reply get_async_result_reply;
+    struct set_async_direct_result_reply set_async_direct_result_reply;
     struct read_reply read_reply;
     struct write_reply write_reply;
     struct ioctl_reply ioctl_reply;
@@ -6263,7 +6286,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 742
+#define SERVER_PROTOCOL_VERSION 749
 
 /* ### protocol_version end ### */
 

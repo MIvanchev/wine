@@ -197,6 +197,7 @@ struct makefile
     int             native_unix_lib;
     int             disabled;
     int             use_msvcrt;
+    int             data_only;
     int             is_cross;
     int             is_win16;
     int             is_exe;
@@ -1359,22 +1360,6 @@ static struct makefile *find_importlib_module( const char *name )
 
 
 /*******************************************************************
- *         has_external_import
- */
-static int has_external_import( const struct makefile *make )
-{
-    unsigned int i;
-
-    for (i = 0; i < make->imports.count; i++)
-    {
-        if (!strncmp( make->imports.str[i], "-l", 2 ))
-            return 1;
-    }
-    return 0;
-}
-
-
-/*******************************************************************
  *         open_include_file
  */
 static struct file *open_include_file( const struct makefile *make, struct incl_file *pFile )
@@ -1449,17 +1434,6 @@ static struct file *open_include_file( const struct makefile *make, struct incl_
         if (!file) continue;
         pFile->is_external = 1;
         return file;
-    }
-
-    if (pFile->type == INCL_SYSTEM && pFile->use_msvcrt &&
-        !make->extlib && !pFile->included_by->is_external)
-    {
-        if (!strcmp( pFile->name, "stdarg.h" )) return NULL;
-        if (!strcmp( pFile->name, "x86intrin.h" )) return NULL;
-        if (has_external_import( make )) return NULL;
-        fprintf( stderr, "%s:%d: error: system header %s cannot be used with msvcrt\n",
-                 pFile->included_by->file->name, pFile->included_line, pFile->name );
-        exit(1);
     }
 
     if (pFile->type == INCL_SYSTEM) return NULL;  /* ignore system files we cannot find */
@@ -2036,7 +2010,7 @@ static const char *get_native_unix_lib( const struct makefile *make, const char 
 static struct makefile *get_parent_makefile( struct makefile *make )
 {
     char *dir, *p;
-    int i;
+    unsigned int i;
 
     if (!make->obj_dir) return NULL;
     dir = xstrdup( make->obj_dir );
@@ -3139,35 +3113,45 @@ static void output_module( struct makefile *make )
     struct strarray all_libs = empty_strarray;
     struct strarray dep_libs = empty_strarray;
     struct strarray imports = make->imports;
-    char *module_name = strmake( "%s%s", make->module, make->is_cross ? "" : dll_ext );
+    const char *module_name = make->module;
     const char *debug_file;
     const char *delay_load = delay_load_flag;
     char *spec_file = NULL;
     unsigned int i;
 
     if (!make->is_exe) spec_file = src_dir_path( make, replace_extension( make->module, ".dll", ".spec" ));
-    if (!strarray_exists( &make->extradllflags, "-nodefaultlibs" ))
-        imports = add_default_imports( make, imports );
 
-    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->delayimports, 1, make->is_cross ));
-    strarray_addall( &all_libs, add_import_libs( make, &dep_libs, imports, 0, make->is_cross ));
-
-    if (!make->use_msvcrt)
+    if (!make->data_only)
     {
-        strarray_addall( &all_libs, get_expanded_make_var_array( make, "EXTRALIBS" ));
-        strarray_addall( &all_libs, libs );
-    }
+        if (*dll_ext && !make->is_cross && !make->data_only)
+            module_name = strmake( "%s%s", make->module, dll_ext );
 
-    if (!make->is_cross && *dll_ext) delay_load = "-Wl,-delayload,";
-    if (delay_load)
-    {
-        for (i = 0; i < make->delayimports.count; i++)
-            strarray_add( &all_libs, strmake( "%s%s%s", delay_load, make->delayimports.str[i],
-                                              strchr( make->delayimports.str[i], '.' ) ? "" : ".dll" ));
+        if (!strarray_exists( &make->extradllflags, "-nodefaultlibs" ))
+            imports = add_default_imports( make, imports );
+
+        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, make->delayimports, 1, make->is_cross ));
+        strarray_addall( &all_libs, add_import_libs( make, &dep_libs, imports, 0, make->is_cross ));
+
+        if (!make->use_msvcrt)
+        {
+            strarray_addall( &all_libs, get_expanded_make_var_array( make, "EXTRALIBS" ));
+            strarray_addall( &all_libs, libs );
+        }
+
+        if (!make->is_cross && *dll_ext) delay_load = "-Wl,-delayload,";
+        if (delay_load)
+        {
+            for (i = 0; i < make->delayimports.count; i++)
+                strarray_add( &all_libs, strmake( "%s%s%s", delay_load, make->delayimports.str[i],
+                                                  strchr( make->delayimports.str[i], '.' ) ? "" : ".dll" ));
+        }
     }
     strarray_add( &make->all_targets, module_name );
 
-    if (make->is_cross)
+    if (make->data_only)
+        add_install_rule( make, make->module, module_name,
+                          strmake( "d%s/%s", *dll_ext ? pe_dir : "$(dlldir)", module_name ));
+    else if (make->is_cross)
         add_install_rule( make, make->module, module_name, strmake( "c%s/%s", pe_dir, module_name ));
     else if (*dll_ext)
         add_install_rule( make, make->module, module_name, strmake( "p%s/%s", so_dir, module_name ));
@@ -3524,7 +3508,7 @@ static void output_programs( struct makefile *make )
         output_filenames_obj_dir( make, objs );
         output_filenames( deps );
         output( "\n" );
-        output( "\t%s$(CC) -o $@", cmd_prefix( "CC" ));
+        output( "\t%s$(CC) -o $@", cmd_prefix( "CCLD" ));
         output_filenames_obj_dir( make, objs );
         output_filenames( all_libs );
         output_filename( "$(LDFLAGS)" );
@@ -3713,7 +3697,7 @@ static void output_sources( struct makefile *make )
     else if (make->module)
     {
         output_module( make );
-        if (*dll_ext && !make->is_cross) output_fake_module( make );
+        if (*dll_ext && !make->is_cross && !make->data_only) output_fake_module( make );
         if (make->unixlib) output_unix_lib( make );
         if (make->importlib) output_import_lib( make );
     }
@@ -3924,7 +3908,7 @@ static void output_testlist( const struct makefile *make )
  */
 static void output_gitignore( const char *dest, struct strarray files )
 {
-    int i;
+    unsigned int i;
 
     output_file = create_temp_file( dest );
 
@@ -4026,7 +4010,8 @@ static void output_top_makefile( struct makefile *make )
 {
     char buffer[1024];
     FILE *src_file;
-    int i, found = 0;
+    unsigned int i;
+    int found = 0;
 
     output_file_name = obj_dir_path( make, output_makefile_name );
     output_file = create_temp_file( output_file_name );
@@ -4140,6 +4125,7 @@ static void load_sources( struct makefile *make )
 
     make->disabled   = make->obj_dir && strarray_exists( &disabled_dirs, make->obj_dir );
     make->is_win16   = strarray_exists( &make->extradllflags, "-m16" );
+    make->data_only  = strarray_exists( &make->extradllflags, "-Wb,--data-only" );
     make->use_msvcrt = (make->module || make->testdll || make->is_win16) &&
                        !strarray_exists( &make->extradllflags, "-mcygwin" );
     make->is_exe     = strarray_exists( &make->extradllflags, "-mconsole" ) ||

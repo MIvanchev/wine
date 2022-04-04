@@ -28,6 +28,7 @@
 #endif
 
 #include "win32u_private.h"
+#include "ntuser_private.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -168,7 +169,7 @@ INT WINAPI NtUserGetPriorityClipboardFormat( UINT *list, INT count )
  */
 INT WINAPI NtUserGetClipboardFormatName( UINT format, WCHAR *buffer, INT maxlen )
 {
-    char buf[sizeof(ATOM_BASIC_INFORMATION) + 255 * sizeof(WCHAR)];
+    char buf[sizeof(ATOM_BASIC_INFORMATION) + MAX_ATOM_LEN * sizeof(WCHAR)];
     ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)buf;
     UINT length = 0;
 
@@ -286,4 +287,29 @@ BOOL WINAPI NtUserRemoveClipboardFormatListener( HWND hwnd )
     }
     SERVER_END_REQ;
     return ret;
+}
+
+/**************************************************************************
+ *           release_clipboard_owner
+ */
+void release_clipboard_owner( HWND hwnd )
+{
+    HWND viewer = 0, owner = 0;
+
+    send_message( hwnd, WM_RENDERALLFORMATS, 0, 0 );
+
+    SERVER_START_REQ( release_clipboard )
+    {
+        req->owner = wine_server_user_handle( hwnd );
+        if (!wine_server_call( req ))
+        {
+            viewer = wine_server_ptr_handle( reply->viewer );
+            owner = wine_server_ptr_handle( reply->owner );
+        }
+    }
+    SERVER_END_REQ;
+
+    if (viewer)
+        NtUserMessageCall( viewer, WM_DRAWCLIPBOARD, (WPARAM)owner, 0,
+                           0, FNID_SENDNOTIFYMESSAGE, FALSE );
 }

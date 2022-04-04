@@ -165,7 +165,6 @@ static void test_image(HBITMAP image, BOOL is_dib, BOOL is_premult, BOOL is_alph
         ok(bm.bmBits != NULL, "bmBits is NULL\n");
         memcpy(bits, bm.bmBits, 4);
         if (is_premult)
-todo_wine
             ok(bits[0] == 0x05 &&  bits[1] == 0x09 &&  bits[2] == 0x0e && bits[3] == 0x44,
                "bits: %02x %02x %02x %02x\n", bits[0], bits[1], bits[2], bits[3]);
         else if (is_alpha)
@@ -195,7 +194,6 @@ todo_wine
     DeleteDC(hdc);
 
     if (is_premult)
-todo_wine
         ok(bits[0] == 0x05 &&  bits[1] == 0x09 &&  bits[2] == 0x0e && bits[3] == 0x44,
            "bits: %02x %02x %02x %02x\n", bits[0], bits[1], bits[2], bits[3]);
     else if (is_alpha)
@@ -283,10 +281,10 @@ static void test_STM_SETIMAGE(void)
 
     for (type = SS_LEFT; type < SS_ETCHEDFRAME; type++)
     {
-        winetest_push_context("%u", type);
+        winetest_push_context("%lu", type);
 
         hwnd = create_static(type);
-        ok(hwnd != 0, "failed to create static type %#x\n", type);
+        ok(hwnd != 0, "failed to create static type %#lx\n", type);
 
         /* set icon */
         g_nReceivedColorStatic = 0;

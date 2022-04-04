@@ -60,6 +60,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(environ);
 
 PEB *peb = NULL;
+WOW_PEB *wow_peb = NULL;
 USHORT *uctable = NULL, *lctable = NULL;
 SIZE_T startup_info_size = 0;
 BOOL is_prefix_bootstrap = FALSE;
@@ -152,22 +153,15 @@ static void *read_nls_file( ULONG type, ULONG id )
     return ret;
 }
 
-static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
+static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDLE *file )
 {
-    static const WCHAR sortdirW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
-                                     'g','l','o','b','a','l','i','z','a','t','i','o','n','\\',
-                                     's','o','r','t','i','n','g','\\',0};
-
     NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING valueW;
-    WCHAR buffer[ARRAY_SIZE(sortdirW) + 16];
-    char *p, *path = get_nls_file_path( type, id );
+    WCHAR buffer[64];
+    char *p, *ntpath;
 
-    if (!path) return STATUS_OBJECT_NAME_NOT_FOUND;
-
-    /* try to open file in system dir */
-    wcscpy( buffer, type == NLS_SECTION_SORTKEYS ? sortdirW : system_dir );
+    wcscpy( buffer, system_dir );
     p = strrchr( path, '/' ) + 1;
     ascii_to_unicode( buffer + wcslen(buffer), p, strlen(p) + 1 );
     init_unicode_string( &valueW, buffer );
@@ -175,13 +169,12 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
 
     status = open_unix_file( file, path, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
-    free( path );
     if (status != STATUS_NO_SUCH_FILE) return status;
 
-    if ((status = nt_to_unix_file_name( &attr, &path, FILE_OPEN ))) return status;
-    status = open_unix_file( file, path, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
+    if ((status = nt_to_unix_file_name( &attr, &ntpath, FILE_OPEN ))) return status;
+    status = open_unix_file( file, ntpath, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
-    free( path );
+    free( ntpath );
     return status;
 }
 
@@ -1026,6 +1019,7 @@ static WCHAR **build_wargv( const WCHAR *image )
 static BOOL unix_to_win_locale( const char *unix_name, char *win_name )
 {
     static const char sep[] = "_.@";
+    const char *extra = NULL;
     char buffer[LOCALE_NAME_MAX_LENGTH];
     char *p, *country = NULL, *modifier = NULL;
 
@@ -1069,9 +1063,23 @@ static BOOL unix_to_win_locale( const char *unix_name, char *win_name )
     strcpy( win_name, buffer );
     if (modifier)
     {
-        if (!strcmp( modifier, "latin" )) strcat( win_name, "-Latn" );
-        else if (!strcmp( modifier, "euro" )) {} /* ignore */
-        else return FALSE;
+        if (!strcmp( modifier, "arabic" )) strcat( win_name, "-Arab" );
+        else if (!strcmp( modifier, "chakma" )) strcat( win_name, "-Cakm" );
+        else if (!strcmp( modifier, "cherokee" )) strcat( win_name, "-Cher" );
+        else if (!strcmp( modifier, "cyrillic" )) strcat( win_name, "-Cyrl" );
+        else if (!strcmp( modifier, "devanagari" )) strcat( win_name, "-Deva" );
+        else if (!strcmp( modifier, "gurmukhi" )) strcat( win_name, "-Guru" );
+        else if (!strcmp( modifier, "javanese" )) strcat( win_name, "-Java" );
+        else if (!strcmp( modifier, "latin" )) strcat( win_name, "-Latn" );
+        else if (!strcmp( modifier, "mongolian" )) strcat( win_name, "-Mong" );
+        else if (!strcmp( modifier, "syriac" )) strcat( win_name, "-Syrc" );
+        else if (!strcmp( modifier, "tifinagh" )) strcat( win_name, "-Tfng" );
+        else if (!strcmp( modifier, "tibetan" )) strcat( win_name, "-Tibt" );
+        else if (!strcmp( modifier, "vai" )) strcat( win_name, "-Vaii" );
+        else if (!strcmp( modifier, "yi" )) strcat( win_name, "-Yiii" );
+        else if (!strcmp( modifier, "saaho" )) strcpy( win_name, "ssy" );
+        else if (!strcmp( modifier, "valencia" )) extra = "-valencia";
+        /* ignore unknown modifiers */
     }
     if (country)
     {
@@ -1079,6 +1087,7 @@ static BOOL unix_to_win_locale( const char *unix_name, char *win_name )
         *p++ = '-';
         strcpy( p, country );
     }
+    if (extra) strcat( win_name, extra );
     return TRUE;
 }
 
@@ -2129,37 +2138,34 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     {
         NtCurrentTeb()->WowTebOffset = teb_offset;
         NtCurrentTeb()->Tib.ExceptionList = (void *)((char *)NtCurrentTeb() + teb_offset);
+        wow_peb = (PEB32 *)((char *)peb + page_size);
         set_thread_id( NtCurrentTeb(),  GetCurrentProcessId(), GetCurrentThreadId() );
     }
 #endif
 
     load_global_options( &params->ImagePathName );
 
-    if (NtCurrentTeb()->WowTebOffset)
+    if (wow_peb)
     {
         void *wow64_params = build_wow64_parameters( params );
-#ifdef _WIN64
-        PEB32 *wow64_peb = (PEB32 *)((char *)peb + page_size);
-#else
-        PEB64 *wow64_peb = (PEB64 *)((char *)peb - page_size);
-#endif
-        wow64_peb->ImageBaseAddress                = PtrToUlong( peb->ImageBaseAddress );
-        wow64_peb->ProcessParameters               = PtrToUlong( wow64_params );
-        wow64_peb->NumberOfProcessors              = peb->NumberOfProcessors;
-        wow64_peb->NtGlobalFlag                    = peb->NtGlobalFlag;
-        wow64_peb->CriticalSectionTimeout.QuadPart = peb->CriticalSectionTimeout.QuadPart;
-        wow64_peb->HeapSegmentReserve              = peb->HeapSegmentReserve;
-        wow64_peb->HeapSegmentCommit               = peb->HeapSegmentCommit;
-        wow64_peb->HeapDeCommitTotalFreeThreshold  = peb->HeapDeCommitTotalFreeThreshold;
-        wow64_peb->HeapDeCommitFreeBlockThreshold  = peb->HeapDeCommitFreeBlockThreshold;
-        wow64_peb->OSMajorVersion                  = peb->OSMajorVersion;
-        wow64_peb->OSMinorVersion                  = peb->OSMinorVersion;
-        wow64_peb->OSBuildNumber                   = peb->OSBuildNumber;
-        wow64_peb->OSPlatformId                    = peb->OSPlatformId;
-        wow64_peb->ImageSubSystem                  = peb->ImageSubSystem;
-        wow64_peb->ImageSubSystemMajorVersion      = peb->ImageSubSystemMajorVersion;
-        wow64_peb->ImageSubSystemMinorVersion      = peb->ImageSubSystemMinorVersion;
-        wow64_peb->SessionId                       = peb->SessionId;
+
+        wow_peb->ImageBaseAddress                = PtrToUlong( peb->ImageBaseAddress );
+        wow_peb->ProcessParameters               = PtrToUlong( wow64_params );
+        wow_peb->NumberOfProcessors              = peb->NumberOfProcessors;
+        wow_peb->NtGlobalFlag                    = peb->NtGlobalFlag;
+        wow_peb->CriticalSectionTimeout.QuadPart = peb->CriticalSectionTimeout.QuadPart;
+        wow_peb->HeapSegmentReserve              = peb->HeapSegmentReserve;
+        wow_peb->HeapSegmentCommit               = peb->HeapSegmentCommit;
+        wow_peb->HeapDeCommitTotalFreeThreshold  = peb->HeapDeCommitTotalFreeThreshold;
+        wow_peb->HeapDeCommitFreeBlockThreshold  = peb->HeapDeCommitFreeBlockThreshold;
+        wow_peb->OSMajorVersion                  = peb->OSMajorVersion;
+        wow_peb->OSMinorVersion                  = peb->OSMinorVersion;
+        wow_peb->OSBuildNumber                   = peb->OSBuildNumber;
+        wow_peb->OSPlatformId                    = peb->OSPlatformId;
+        wow_peb->ImageSubSystem                  = peb->ImageSubSystem;
+        wow_peb->ImageSubSystemMajorVersion      = peb->ImageSubSystemMajorVersion;
+        wow_peb->ImageSubSystemMinorVersion      = peb->ImageSubSystemMinorVersion;
+        wow_peb->SessionId                       = peb->SessionId;
     }
 }
 
@@ -2440,6 +2446,9 @@ void *create_startup_info( const UNICODE_STRING *nt_image, const RTL_USER_PROCES
  */
 NTSTATUS WINAPI NtGetNlsSectionPtr( ULONG type, ULONG id, void *unknown, void **ptr, SIZE_T *size )
 {
+    static const WCHAR sortdirW[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
+                                     'g','l','o','b','a','l','i','z','a','t','i','o','n','\\',
+                                     's','o','r','t','i','n','g','\\',0};
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     WCHAR name[32];
@@ -2452,7 +2461,12 @@ NTSTATUS WINAPI NtGetNlsSectionPtr( ULONG type, ULONG id, void *unknown, void **
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
     if ((status = NtOpenSection( &handle, SECTION_MAP_READ, &attr )))
     {
-        if ((status = open_nls_data_file( type, id, &file ))) return status;
+        char *path = get_nls_file_path( type, id );
+
+        if (!path) return STATUS_OBJECT_NAME_NOT_FOUND;
+        status = open_nls_data_file( path, type == NLS_SECTION_SORTKEYS ? sortdirW : system_dir, &file );
+        free( path );
+        if (status) return status;
         attr.Attributes = OBJ_OPENIF | OBJ_PERMANENT;
         status = NtCreateSection( &handle, SECTION_MAP_READ, &attr, NULL, PAGE_READONLY, SEC_COMMIT, file );
         NtClose( file );
@@ -2460,12 +2474,40 @@ NTSTATUS WINAPI NtGetNlsSectionPtr( ULONG type, ULONG id, void *unknown, void **
     }
     if (!status)
     {
-        *ptr = NULL;
-        *size = 0;
-        status = NtMapViewOfSection( handle, GetCurrentProcess(), ptr, 0, 0, NULL, size,
-                                     ViewShare, 0, PAGE_READONLY );
+        status = map_section( handle, ptr, size, PAGE_READONLY );
+        NtClose( handle );
     }
-    NtClose( handle );
+    return status;
+}
+
+
+/**************************************************************************
+ *      NtInitializeNlsFiles  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtInitializeNlsFiles( void **ptr, LCID *lcid, LARGE_INTEGER *size )
+{
+    const char *dir = build_dir ? build_dir : data_dir;
+    char *path;
+    HANDLE handle, file;
+    SIZE_T mapsize;
+    NTSTATUS status;
+
+    if (!(path = malloc( strlen(dir) + sizeof("/nls/locale.nls") ))) return STATUS_NO_MEMORY;
+    strcpy( path, dir );
+    strcat( path, "/nls/locale.nls" );
+    status = open_nls_data_file( path, system_dir, &file );
+    free( path );
+    if (!status)
+    {
+        status = NtCreateSection( &handle, SECTION_MAP_READ, NULL, NULL, PAGE_READONLY, SEC_COMMIT, file );
+        NtClose( file );
+    }
+    if (!status)
+    {
+        status = map_section( handle, ptr, &mapsize, PAGE_READONLY );
+        NtClose( handle );
+    }
+    *lcid = system_lcid;
     return status;
 }
 

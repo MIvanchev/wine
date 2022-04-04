@@ -25,6 +25,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "imm.h"
 
 #include "controls.h"
 #include "user_private.h"
@@ -32,21 +33,9 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
+WINE_DECLARE_DEBUG_CHANNEL(message);
 
 HMODULE user32_module = 0;
-
-static CRITICAL_SECTION user_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &user_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": user_section") }
-};
-static CRITICAL_SECTION user_section = { &critsect_debug, -1, 0, 0, 0, 0 };
-
-static HPALETTE (WINAPI *pfnGDISelectPalette)( HDC hdc, HPALETTE hpal, WORD bkgnd );
-static UINT (WINAPI *pfnGDIRealizePalette)( HDC hdc );
-static HPALETTE hPrimaryPalette;
 
 static DWORD exiting_thread_id;
 
@@ -57,7 +46,7 @@ extern void WDML_NotifyThreadDetach(void);
  */
 void USER_Lock(void)
 {
-    EnterCriticalSection( &user_section );
+    NtUserCallOneParam( 0, NtUserLock );
 }
 
 
@@ -66,7 +55,7 @@ void USER_Lock(void)
  */
 void USER_Unlock(void)
 {
-    LeaveCriticalSection( &user_section );
+    NtUserCallOneParam( 1, NtUserLock );
 }
 
 
@@ -77,78 +66,16 @@ void USER_Unlock(void)
  */
 void USER_CheckNotLock(void)
 {
-    if (RtlIsCriticalSectionLockedByThread(&user_section))
-    {
-        ERR( "BUG: holding USER lock\n" );
-        DebugBreak();
-    }
+    NtUserCallOneParam( 2, NtUserLock );
 }
 
 
 /***********************************************************************
- *		UserSelectPalette (Not a Windows API)
+ *             UserRealizePalette (USER32.@)
  */
-static HPALETTE WINAPI UserSelectPalette( HDC hDC, HPALETTE hPal, BOOL bForceBackground )
+UINT WINAPI UserRealizePalette( HDC hdc )
 {
-    WORD wBkgPalette = 1;
-
-    if (!bForceBackground && (hPal != GetStockObject(DEFAULT_PALETTE)))
-    {
-        HWND hwnd = WindowFromDC( hDC );
-        if (hwnd)
-        {
-            HWND hForeground = GetForegroundWindow();
-            /* set primary palette if it's related to current active */
-            if (hForeground == hwnd || IsChild(hForeground,hwnd))
-            {
-                wBkgPalette = 0;
-                hPrimaryPalette = hPal;
-            }
-        }
-    }
-    return pfnGDISelectPalette( hDC, hPal, wBkgPalette);
-}
-
-
-/***********************************************************************
- *		UserRealizePalette (USER32.@)
- */
-UINT WINAPI UserRealizePalette( HDC hDC )
-{
-    UINT realized = pfnGDIRealizePalette( hDC );
-
-    /* do not send anything if no colors were changed */
-    if (realized && GetCurrentObject( hDC, OBJ_PAL ) == hPrimaryPalette)
-    {
-        /* send palette change notification */
-        HWND hWnd = WindowFromDC( hDC );
-        if (hWnd) SendMessageTimeoutW( HWND_BROADCAST, WM_PALETTECHANGED, (WPARAM)hWnd, 0,
-                                       SMTO_ABORTIFHUNG, 2000, NULL );
-    }
-    return realized;
-}
-
-
-/***********************************************************************
- *           palette_init
- *
- * Patch the function pointers in GDI for SelectPalette and RealizePalette
- */
-static void palette_init(void)
-{
-    void **ptr;
-    HMODULE module = GetModuleHandleA( "gdi32" );
-    if (!module)
-    {
-        ERR( "cannot get GDI32 handle\n" );
-        return;
-    }
-    if ((ptr = (void**)GetProcAddress( module, "pfnSelectPalette" )))
-        pfnGDISelectPalette = InterlockedExchangePointer( ptr, UserSelectPalette );
-    else ERR( "cannot find pfnSelectPalette in GDI32\n" );
-    if ((ptr = (void**)GetProcAddress( module, "pfnRealizePalette" )))
-        pfnGDIRealizePalette = InterlockedExchangePointer( ptr, UserRealizePalette );
-    else ERR( "cannot find pfnRealizePalette in GDI32\n" );
+    return NtUserCallOneParam( HandleToUlong(hdc), NtUserRealizePalette );
 }
 
 
@@ -208,10 +135,71 @@ static void dpiaware_init(void)
     }
 }
 
+static void CDECL notify_ime( HWND hwnd, UINT param )
+{
+    HWND ime_default = ImmGetDefaultIMEWnd( hwnd );
+    if (ime_default) SendMessageW( ime_default, WM_IME_INTERNAL, param, HandleToUlong(hwnd) );
+}
+
+static BOOL WINAPI register_imm( HWND hwnd )
+{
+    return imm_register_window( hwnd );
+}
+
+static void WINAPI unregister_imm( HWND hwnd )
+{
+    imm_unregister_window( hwnd );
+}
+
+static void CDECL free_win_ptr( WND *win )
+{
+    HeapFree( GetProcessHeap(), 0, win->text );
+    HeapFree( GetProcessHeap(), 0, win->pScroll );
+}
+
+static const struct user_callbacks user_funcs =
+{
+    AdjustWindowRectEx,
+    CopyImage,
+    DestroyCaret,
+    EndMenu,
+    HideCaret,
+    PostMessageW,
+    SendMessageTimeoutW,
+    SendMessageA,
+    SendMessageW,
+    SendNotifyMessageW,
+    SetSystemMenu,
+    ShowCaret,
+    free_menu_items,
+    free_win_ptr,
+    MENU_IsMenuActive,
+    notify_ime,
+    post_dde_message,
+    process_hardware_message,
+    rawinput_device_get_usages,
+    register_builtin_classes,
+    MENU_SetMenu,
+    SCROLL_SetStandardScrollPainted,
+    (void *)__wine_set_user_driver,
+    unpack_dde_message,
+    register_imm,
+    unregister_imm,
+};
+
+static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
+{
+    return LoadLibraryW( path ) != NULL;
+}
 
 static const void *kernel_callback_table[NtUserCallCount] =
 {
     User32CallEnumDisplayMonitor,
+    User32CallSendAsyncCallback,
+    User32CallWinEventHook,
+    User32CallWindowProc,
+    User32CallWindowsHook,
+    User32LoadDriver,
 };
 
 
@@ -222,14 +210,15 @@ static BOOL process_attach(void)
 {
     NtCurrentTeb()->Peb->KernelCallbackTable = kernel_callback_table;
 
+    /* FIXME: should not be needed */
+    NtUserCallOneParam( (UINT_PTR)&user_funcs, NtUserSetCallbacks );
+
     dpiaware_init();
+    winproc_init();
     register_desktop_class();
 
     /* Initialize system colors and metrics */
     SYSPARAMS_Init();
-
-    /* Setup palette function pointers */
-    palette_init();
 
     return TRUE;
 }
@@ -252,14 +241,12 @@ static void thread_detach(void)
     struct user_thread_info *thread_info = get_user_thread_info();
 
     exiting_thread_id = GetCurrentThreadId();
+    NtUserCallNoParam( NtUserExitingThread );
 
     WDML_NotifyThreadDetach();
-    USER_Driver->pThreadDetach();
 
-    destroy_thread_windows();
-    CloseHandle( thread_info->server_queue );
+    NtUserCallNoParam( NtUserThreadDetach );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
-    HeapFree( GetProcessHeap(), 0, thread_info->key_state );
     HeapFree( GetProcessHeap(), 0, thread_info->rawinput );
 
     exiting_thread_id = 0;
@@ -290,7 +277,6 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     case DLL_PROCESS_DETACH:
         USER_unload_driver();
         FreeLibrary(imm32_module);
-        DeleteCriticalSection(&user_section);
         break;
     }
     return ret;
@@ -372,4 +358,24 @@ BOOL WINAPI ShutdownBlockReasonDestroy(HWND hwnd)
     FIXME("(%p): stub\n", hwnd);
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
+}
+
+const char *SPY_GetMsgName( UINT msg, HWND hwnd )
+{
+    return (const char *)NtUserCallHwndParam( hwnd, msg, NtUserSpyGetMsgName );
+}
+
+const char *SPY_GetVKeyName( WPARAM wparam )
+{
+    return (const char *)NtUserCallOneParam( wparam, NtUserSpyGetVKeyName );
+}
+
+void SPY_EnterMessage( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, 0, FNID_SPYENTER, flag );
+}
+
+void SPY_ExitMessage( INT flag, HWND hwnd, UINT msg, LRESULT lreturn, WPARAM wparam, LPARAM lparam )
+{
+    if (TRACE_ON(message)) NtUserMessageCall( hwnd, msg, wparam, lparam, lreturn, FNID_SPYEXIT, flag );
 }
