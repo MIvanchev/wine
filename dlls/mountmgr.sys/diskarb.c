@@ -350,7 +350,7 @@ NTSTATUS dhcp_request( void *args )
     return STATUS_SUCCESS;
 }
 
-#elif !defined(SONAME_LIBDBUS_1)
+#elif !defined(HAVE_LIBDBUS_1)
 
 NTSTATUS dhcp_request( void *args )
 {

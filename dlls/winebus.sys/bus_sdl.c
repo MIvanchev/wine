@@ -57,68 +57,73 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
 
-#ifdef SONAME_LIBSDL2
+#ifdef HAVE_LIBSDL2
 
 static pthread_mutex_t sdl_cs = PTHREAD_MUTEX_INITIALIZER;
 static struct sdl_bus_options options;
 
-static void *sdl_handle = NULL;
 static UINT quit_event = -1;
 static struct list event_queue = LIST_INIT(event_queue);
 static struct list device_list = LIST_INIT(device_list);
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
-MAKE_FUNCPTR(SDL_GetError);
-MAKE_FUNCPTR(SDL_Init);
-MAKE_FUNCPTR(SDL_JoystickClose);
-MAKE_FUNCPTR(SDL_JoystickEventState);
-MAKE_FUNCPTR(SDL_JoystickGetGUID);
-MAKE_FUNCPTR(SDL_JoystickGetGUIDString);
-MAKE_FUNCPTR(SDL_JoystickInstanceID);
-MAKE_FUNCPTR(SDL_JoystickName);
-MAKE_FUNCPTR(SDL_JoystickNumAxes);
-MAKE_FUNCPTR(SDL_JoystickOpen);
-MAKE_FUNCPTR(SDL_WaitEventTimeout);
-MAKE_FUNCPTR(SDL_JoystickNumButtons);
-MAKE_FUNCPTR(SDL_JoystickNumBalls);
-MAKE_FUNCPTR(SDL_JoystickNumHats);
-MAKE_FUNCPTR(SDL_JoystickGetAxis);
-MAKE_FUNCPTR(SDL_JoystickGetHat);
-MAKE_FUNCPTR(SDL_IsGameController);
-MAKE_FUNCPTR(SDL_GameControllerClose);
-MAKE_FUNCPTR(SDL_GameControllerGetAxis);
-MAKE_FUNCPTR(SDL_GameControllerGetButton);
-MAKE_FUNCPTR(SDL_GameControllerName);
-MAKE_FUNCPTR(SDL_GameControllerOpen);
-MAKE_FUNCPTR(SDL_GameControllerEventState);
-MAKE_FUNCPTR(SDL_HapticClose);
-MAKE_FUNCPTR(SDL_HapticDestroyEffect);
-MAKE_FUNCPTR(SDL_HapticGetEffectStatus);
-MAKE_FUNCPTR(SDL_HapticNewEffect);
-MAKE_FUNCPTR(SDL_HapticOpenFromJoystick);
-MAKE_FUNCPTR(SDL_HapticPause);
-MAKE_FUNCPTR(SDL_HapticQuery);
-MAKE_FUNCPTR(SDL_HapticRumbleInit);
-MAKE_FUNCPTR(SDL_HapticRumblePlay);
-MAKE_FUNCPTR(SDL_HapticRumbleStop);
-MAKE_FUNCPTR(SDL_HapticRumbleSupported);
-MAKE_FUNCPTR(SDL_HapticRunEffect);
-MAKE_FUNCPTR(SDL_HapticSetGain);
-MAKE_FUNCPTR(SDL_HapticStopAll);
-MAKE_FUNCPTR(SDL_HapticStopEffect);
-MAKE_FUNCPTR(SDL_HapticUnpause);
-MAKE_FUNCPTR(SDL_HapticUpdateEffect);
-MAKE_FUNCPTR(SDL_JoystickIsHaptic);
-MAKE_FUNCPTR(SDL_GameControllerAddMapping);
-MAKE_FUNCPTR(SDL_RegisterEvents);
-MAKE_FUNCPTR(SDL_PushEvent);
-MAKE_FUNCPTR(SDL_GetTicks);
-static int (*pSDL_JoystickRumble)(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms);
-static int (*pSDL_JoystickRumbleTriggers)(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble, Uint32 duration_ms);
-static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
-static Uint16 (*pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
-static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
-static SDL_JoystickType (*pSDL_JoystickGetType)(SDL_Joystick * joystick);
+#define pSDL_GetError                   SDL_GetError
+#define pSDL_Init                       SDL_Init
+#define pSDL_JoystickClose              SDL_JoystickClose
+#define pSDL_JoystickEventState         SDL_JoystickEventState
+#define pSDL_JoystickGetGUID            SDL_JoystickGetGUID
+#define pSDL_JoystickGetGUIDString      SDL_JoystickGetGUIDString
+#define pSDL_JoystickInstanceID         SDL_JoystickInstanceID
+#define pSDL_JoystickName               SDL_JoystickName
+#define pSDL_JoystickNumAxes            SDL_JoystickNumAxes
+#define pSDL_JoystickOpen               SDL_JoystickOpen
+#define pSDL_WaitEventTimeout           SDL_WaitEventTimeout
+#define pSDL_JoystickNumButtons         SDL_JoystickNumButtons
+#define pSDL_JoystickNumBalls           SDL_JoystickNumBalls
+#define pSDL_JoystickNumHats            SDL_JoystickNumHats
+#define pSDL_JoystickGetAxis            SDL_JoystickGetAxis
+#define pSDL_JoystickGetHat             SDL_JoystickGetHat
+#define pSDL_IsGameController           SDL_IsGameController
+#define pSDL_GameControllerClose        SDL_GameControllerClose
+#define pSDL_GameControllerGetAxis      SDL_GameControllerGetAxis
+#define pSDL_GameControllerGetButton    SDL_GameControllerGetButton
+#define pSDL_GameControllerName         SDL_GameControllerName
+#define pSDL_GameControllerOpen         SDL_GameControllerOpen
+#define pSDL_GameControllerEventState   SDL_GameControllerEventState
+#define pSDL_HapticClose                SDL_HapticClose
+#define pSDL_HapticDestroyEffect        SDL_HapticDestroyEffect
+#define pSDL_HapticGetEffectStatus      SDL_HapticGetEffectStatus
+#define pSDL_HapticNewEffect            SDL_HapticNewEffect
+#define pSDL_HapticOpenFromJoystick     SDL_HapticOpenFromJoystick
+#define pSDL_HapticPause                SDL_HapticPause
+#define pSDL_HapticQuery                SDL_HapticQuery
+#define pSDL_HapticRumbleInit           SDL_HapticRumbleInit
+#define pSDL_HapticRumblePlay           SDL_HapticRumblePlay
+#define pSDL_HapticRumbleStop           SDL_HapticRumbleStop
+#define pSDL_HapticRumbleSupported      SDL_HapticRumbleSupported
+#define pSDL_HapticRunEffect            SDL_HapticRunEffect
+#define pSDL_HapticSetGain              SDL_HapticSetGain
+#define pSDL_HapticStopAll              SDL_HapticStopAll
+#define pSDL_HapticStopEffect           SDL_HapticStopEffect
+#define pSDL_HapticUnpause              SDL_HapticUnpause
+#define pSDL_HapticUpdateEffect         SDL_HapticUpdateEffect
+#define pSDL_JoystickIsHaptic           SDL_JoystickIsHaptic
+#define pSDL_GameControllerAddMapping   SDL_GameControllerAddMapping
+#define pSDL_RegisterEvents             SDL_RegisterEvents
+#define pSDL_PushEvent                  SDL_PushEvent
+#define pSDL_GetTicks                   SDL_GetTicks
+#define pSDL_JoystickRumble             SDL_JoystickRumble
+#define pSDL_JoystickRumbleTriggers     SDL_JoystickRumbleTriggers
+#define pSDL_JoystickGetProduct         SDL_JoystickGetProduct
+#define pSDL_JoystickGetProductVersion  SDL_JoystickGetProductVersion
+#define pSDL_JoystickGetVendor          SDL_JoystickGetVendor
+#define pSDL_JoystickGetType            SDL_JoystickGetType
+
+#define SDL_HAS_JOYSTICKRUMBLE              (SDL_VERSION_ATLEAST(2, 0, 9))
+#define SDL_HAS_JOYSTICKRUMBLETRIGGERS      (SDL_VERSION_ATLEAST(2, 0, 14))
+#define SDL_HAS_JOYSTICKGETPRODUCT          (SDL_VERSION_ATLEAST(2, 0, 6))
+#define SDL_HAS_JOYSTICKGETPRODUCTVERSION   (SDL_VERSION_ATLEAST(2, 0, 6))
+#define SDL_HAS_JOYSTICKGETVENDOR           (SDL_VERSION_ATLEAST(2, 0, 6))
+#define SDL_HAS_JOYSTICKGETTYPE             (SDL_VERSION_ATLEAST(2, 0, 6))
 
 /* internal bits for extended rumble support, SDL_Haptic types are 16-bits */
 #define WINE_SDL_JOYSTICK_RUMBLE  0x40000000 /* using SDL_JoystickRumble API */
@@ -196,8 +201,10 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl)
             impl->effect_support |= WINE_SDL_HAPTIC_RUMBLE;
     }
 
-    if (pSDL_JoystickRumble && !pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0))
+#if SDL_HAS_JOYSTICKRUMBLE
+    if (!pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0))
         impl->effect_support |= WINE_SDL_JOYSTICK_RUMBLE;
+#endif
 
     if (impl->effect_support & EFFECT_SUPPORT_HAPTICS)
     {
@@ -278,8 +285,8 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     hat_count = pSDL_JoystickNumHats(impl->sdl_joystick);
     button_count = pSDL_JoystickNumButtons(impl->sdl_joystick);
 
-    if (!pSDL_JoystickGetType) physical_usage = device_usage;
-    else switch (pSDL_JoystickGetType(impl->sdl_joystick))
+#if SDL_HAS_JOYSTICKGETTYPE
+    switch (pSDL_JoystickGetType(impl->sdl_joystick))
     {
     case SDL_JOYSTICK_TYPE_ARCADE_PAD:
     case SDL_JOYSTICK_TYPE_ARCADE_STICK:
@@ -304,6 +311,9 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
         physical_usage.Usage = HID_USAGE_SIMULATION_FLIGHT_SIMULATION_DEVICE;
         break;
     }
+#else
+    physical_usage = device_usage;
+#endif
 
     if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
@@ -445,8 +455,9 @@ static NTSTATUS sdl_device_haptics_start(struct unix_device *iface, UINT duratio
     if (impl->effect_support & WINE_SDL_JOYSTICK_RUMBLE)
     {
         pSDL_JoystickRumble(impl->sdl_joystick, rumble_intensity, buzz_intensity, duration_ms);
-        if (pSDL_JoystickRumbleTriggers)
-            pSDL_JoystickRumbleTriggers(impl->sdl_joystick, left_intensity, right_intensity, duration_ms);
+#if SDL_HAS_JOYSTICKRUMBLETRIGGERS
+        pSDL_JoystickRumbleTriggers(impl->sdl_joystick, left_intensity, right_intensity, duration_ms);
+#endif
     }
     else if (impl->effect_support & SDL_HAPTIC_LEFTRIGHT)
     {
@@ -482,8 +493,9 @@ static NTSTATUS sdl_device_haptics_stop(struct unix_device *iface)
     if (impl->effect_support & WINE_SDL_JOYSTICK_RUMBLE)
     {
         pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0);
-        if (pSDL_JoystickRumbleTriggers)
-            pSDL_JoystickRumbleTriggers(impl->sdl_joystick, 0, 0, 0);
+#if SDL_HAS_JOYSTICKRUMBLETRIGGERS
+        pSDL_JoystickRumbleTriggers(impl->sdl_joystick, 0, 0, 0);
+#endif
     }
     else if (impl->effect_support & SDL_HAPTIC_LEFTRIGHT)
         pSDL_HapticStopAll(impl->sdl_haptic);
@@ -920,17 +932,15 @@ static void sdl_add_device(unsigned int index)
 
     id = pSDL_JoystickInstanceID(joystick);
 
-    if (pSDL_JoystickGetProductVersion != NULL) {
-        desc.vid = pSDL_JoystickGetVendor(joystick);
-        desc.pid = pSDL_JoystickGetProduct(joystick);
-        desc.version = pSDL_JoystickGetProductVersion(joystick);
-    }
-    else
-    {
-        desc.vid = 0x01;
-        desc.pid = pSDL_JoystickInstanceID(joystick) + 1;
-        desc.version = 0;
-    }
+#if SDL_HAS_JOYSTICKGETPRODUCTVERSION
+    desc.vid = pSDL_JoystickGetVendor(joystick);
+    desc.pid = pSDL_JoystickGetProduct(joystick);
+    desc.version = pSDL_JoystickGetProductVersion(joystick);
+#else
+    desc.vid = 0x01;
+    desc.pid = pSDL_JoystickInstanceID(joystick) + 1;
+    desc.version = 0;
+#endif
 
     guid = pSDL_JoystickGetGUID(joystick);
     pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
@@ -1002,70 +1012,6 @@ NTSTATUS sdl_bus_init(void *args)
 
     options = *(struct sdl_bus_options *)args;
 
-    if (!(sdl_handle = dlopen(SONAME_LIBSDL2, RTLD_NOW)))
-    {
-        WARN("could not load %s\n", SONAME_LIBSDL2);
-        return STATUS_UNSUCCESSFUL;
-    }
-#define LOAD_FUNCPTR(f)                          \
-    if ((p##f = dlsym(sdl_handle, #f)) == NULL)  \
-    {                                            \
-        WARN("could not find symbol %s\n", #f);  \
-        goto failed;                             \
-    }
-    LOAD_FUNCPTR(SDL_GetError);
-    LOAD_FUNCPTR(SDL_Init);
-    LOAD_FUNCPTR(SDL_JoystickClose);
-    LOAD_FUNCPTR(SDL_JoystickEventState);
-    LOAD_FUNCPTR(SDL_JoystickGetGUID);
-    LOAD_FUNCPTR(SDL_JoystickGetGUIDString);
-    LOAD_FUNCPTR(SDL_JoystickInstanceID);
-    LOAD_FUNCPTR(SDL_JoystickName);
-    LOAD_FUNCPTR(SDL_JoystickNumAxes);
-    LOAD_FUNCPTR(SDL_JoystickOpen);
-    LOAD_FUNCPTR(SDL_WaitEventTimeout);
-    LOAD_FUNCPTR(SDL_JoystickNumButtons);
-    LOAD_FUNCPTR(SDL_JoystickNumBalls);
-    LOAD_FUNCPTR(SDL_JoystickNumHats);
-    LOAD_FUNCPTR(SDL_JoystickGetAxis);
-    LOAD_FUNCPTR(SDL_JoystickGetHat);
-    LOAD_FUNCPTR(SDL_IsGameController);
-    LOAD_FUNCPTR(SDL_GameControllerClose);
-    LOAD_FUNCPTR(SDL_GameControllerGetAxis);
-    LOAD_FUNCPTR(SDL_GameControllerGetButton);
-    LOAD_FUNCPTR(SDL_GameControllerName);
-    LOAD_FUNCPTR(SDL_GameControllerOpen);
-    LOAD_FUNCPTR(SDL_GameControllerEventState);
-    LOAD_FUNCPTR(SDL_HapticClose);
-    LOAD_FUNCPTR(SDL_HapticDestroyEffect);
-    LOAD_FUNCPTR(SDL_HapticGetEffectStatus);
-    LOAD_FUNCPTR(SDL_HapticNewEffect);
-    LOAD_FUNCPTR(SDL_HapticOpenFromJoystick);
-    LOAD_FUNCPTR(SDL_HapticPause);
-    LOAD_FUNCPTR(SDL_HapticQuery);
-    LOAD_FUNCPTR(SDL_HapticRumbleInit);
-    LOAD_FUNCPTR(SDL_HapticRumblePlay);
-    LOAD_FUNCPTR(SDL_HapticRumbleStop);
-    LOAD_FUNCPTR(SDL_HapticRumbleSupported);
-    LOAD_FUNCPTR(SDL_HapticRunEffect);
-    LOAD_FUNCPTR(SDL_HapticSetGain);
-    LOAD_FUNCPTR(SDL_HapticStopAll);
-    LOAD_FUNCPTR(SDL_HapticStopEffect);
-    LOAD_FUNCPTR(SDL_HapticUnpause);
-    LOAD_FUNCPTR(SDL_HapticUpdateEffect);
-    LOAD_FUNCPTR(SDL_JoystickIsHaptic);
-    LOAD_FUNCPTR(SDL_GameControllerAddMapping);
-    LOAD_FUNCPTR(SDL_RegisterEvents);
-    LOAD_FUNCPTR(SDL_PushEvent);
-    LOAD_FUNCPTR(SDL_GetTicks);
-#undef LOAD_FUNCPTR
-    pSDL_JoystickRumble = dlsym(sdl_handle, "SDL_JoystickRumble");
-    pSDL_JoystickRumbleTriggers = dlsym(sdl_handle, "SDL_JoystickRumbleTriggers");
-    pSDL_JoystickGetProduct = dlsym(sdl_handle, "SDL_JoystickGetProduct");
-    pSDL_JoystickGetProductVersion = dlsym(sdl_handle, "SDL_JoystickGetProductVersion");
-    pSDL_JoystickGetVendor = dlsym(sdl_handle, "SDL_JoystickGetVendor");
-    pSDL_JoystickGetType = dlsym(sdl_handle, "SDL_JoystickGetType");
-
     if (pSDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0)
     {
         ERR("could not init SDL: %s\n", pSDL_GetError());
@@ -1101,8 +1047,6 @@ NTSTATUS sdl_bus_init(void *args)
     return STATUS_SUCCESS;
 
 failed:
-    dlclose(sdl_handle);
-    sdl_handle = NULL;
     return STATUS_UNSUCCESSFUL;
 }
 
@@ -1123,16 +1067,12 @@ NTSTATUS sdl_bus_wait(void *args)
 
     TRACE("SDL main loop exiting\n");
     bus_event_queue_destroy(&event_queue);
-    dlclose(sdl_handle);
-    sdl_handle = NULL;
     return STATUS_SUCCESS;
 }
 
 NTSTATUS sdl_bus_stop(void *args)
 {
     SDL_Event event;
-
-    if (!sdl_handle) return STATUS_SUCCESS;
 
     event.type = quit_event;
     if (pSDL_PushEvent(&event) != 1)

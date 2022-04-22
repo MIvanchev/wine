@@ -31,7 +31,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 # include <dbus/dbus.h>
 #endif
 
@@ -45,41 +45,36 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 
-#define DBUS_FUNCS               \
-    DO_FUNC(dbus_bus_add_match); \
-    DO_FUNC(dbus_bus_get); \
-    DO_FUNC(dbus_bus_get_private); \
-    DO_FUNC(dbus_bus_remove_match); \
-    DO_FUNC(dbus_connection_add_filter); \
-    DO_FUNC(dbus_connection_read_write_dispatch); \
-    DO_FUNC(dbus_connection_remove_filter); \
-    DO_FUNC(dbus_connection_send_with_reply_and_block); \
-    DO_FUNC(dbus_error_free); \
-    DO_FUNC(dbus_error_init); \
-    DO_FUNC(dbus_error_is_set); \
-    DO_FUNC(dbus_free_string_array); \
-    DO_FUNC(dbus_message_get_args); \
-    DO_FUNC(dbus_message_get_interface); \
-    DO_FUNC(dbus_message_get_member); \
-    DO_FUNC(dbus_message_get_path); \
-    DO_FUNC(dbus_message_get_type); \
-    DO_FUNC(dbus_message_is_signal); \
-    DO_FUNC(dbus_message_iter_append_basic); \
-    DO_FUNC(dbus_message_iter_get_arg_type); \
-    DO_FUNC(dbus_message_iter_get_basic); \
-    DO_FUNC(dbus_message_iter_get_fixed_array); \
-    DO_FUNC(dbus_message_iter_init); \
-    DO_FUNC(dbus_message_iter_init_append); \
-    DO_FUNC(dbus_message_iter_next); \
-    DO_FUNC(dbus_message_iter_recurse); \
-    DO_FUNC(dbus_message_new_method_call); \
-    DO_FUNC(dbus_message_unref)
-
-#define DO_FUNC(f) static typeof(f) * p_##f
-DBUS_FUNCS;
-#undef DO_FUNC
+#define p_dbus_bus_add_match                            dbus_bus_add_match
+#define p_dbus_bus_get                                  dbus_bus_get
+#define p_dbus_bus_get_private                          dbus_bus_get_private
+#define p_dbus_bus_remove_match                         dbus_bus_remove_match
+#define p_dbus_connection_add_filter                    dbus_connection_add_filter
+#define p_dbus_connection_read_write_dispatch           dbus_connection_read_write_dispatch
+#define p_dbus_connection_remove_filter                 dbus_connection_remove_filter
+#define p_dbus_connection_send_with_reply_and_block     dbus_connection_send_with_reply_and_block
+#define p_dbus_error_free                               dbus_error_free
+#define p_dbus_error_init                               dbus_error_init
+#define p_dbus_error_is_set                             dbus_error_is_set
+#define p_dbus_free_string_array                        dbus_free_string_array
+#define p_dbus_message_get_args                         dbus_message_get_args
+#define p_dbus_message_get_interface                    dbus_message_get_interface
+#define p_dbus_message_get_member                       dbus_message_get_member
+#define p_dbus_message_get_path                         dbus_message_get_path
+#define p_dbus_message_get_type                         dbus_message_get_type
+#define p_dbus_message_is_signal                        dbus_message_is_signal
+#define p_dbus_message_iter_append_basic                dbus_message_iter_append_basic
+#define p_dbus_message_iter_get_arg_type                dbus_message_iter_get_arg_type
+#define p_dbus_message_iter_get_basic                   dbus_message_iter_get_basic
+#define p_dbus_message_iter_get_fixed_array             dbus_message_iter_get_fixed_array
+#define p_dbus_message_iter_init                        dbus_message_iter_init
+#define p_dbus_message_iter_init_append                 dbus_message_iter_init_append
+#define p_dbus_message_iter_next                        dbus_message_iter_next
+#define p_dbus_message_iter_recurse                     dbus_message_iter_recurse
+#define p_dbus_message_new_method_call                  dbus_message_new_method_call
+#define p_dbus_message_unref                            dbus_message_unref
 
 static int udisks_timeout = -1;
 static DBusConnection *connection;
@@ -131,19 +126,7 @@ static GUID *parse_uuid( GUID *guid, const char *str )
 
 static BOOL load_dbus_functions(void)
 {
-    void *handle;
-
-    if (!(handle = dlopen( SONAME_LIBDBUS_1, RTLD_NOW )))
-        goto failed;
-
-#define DO_FUNC(f) if (!(p_##f = dlsym( handle, #f ))) goto failed
-    DBUS_FUNCS;
-#undef DO_FUNC
     return TRUE;
-
-failed:
-    WARN( "failed to load DBUS support: %s\n", dlerror() );
-    return FALSE;
 }
 
 static const char *udisks_next_dict_entry( DBusMessageIter *iter, DBusMessageIter *variant )
@@ -824,11 +807,11 @@ NTSTATUS dhcp_request( void *args )
 }
 #endif
 
-#else  /* SONAME_LIBDBUS_1 */
+#else  /* HAVE_LIBDBUS_1 */
 
 void run_dbus_loop(void)
 {
     TRACE( "Skipping, DBUS support not compiled in\n" );
 }
 
-#endif  /* SONAME_LIBDBUS_1 */
+#endif  /* HAVE_LIBDBUS_1 */

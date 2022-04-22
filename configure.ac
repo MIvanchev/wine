@@ -1392,10 +1392,10 @@ if test "x$with_dbus" != "xno"
 then
     WINE_PACKAGE_FLAGS(DBUS,[dbus-1],,,,
         [AC_CHECK_HEADER([dbus/dbus.h],
-            [WINE_CHECK_SONAME(dbus-1, dbus_connection_close,,[DBUS_CFLAGS=""],[$DBUS_LIBS])],
+            [WINE_CHECK_LIB(dbus-1, dbus_connection_close)],
             [DBUS_CFLAGS=""])])
 fi
-WINE_NOTICE_WITH(dbus,[test "x$ac_cv_lib_soname_dbus_1" = "x" -a \
+WINE_NOTICE_WITH(dbus,[test "x$ac_cv_lib_dbus_1_dbus_connection_close" = "xno" -a \
                             "x$ac_cv_header_DiskArbitration_DiskArbitration_h" != "xyes"],
                  [libdbus ${notice_platform}development files not found, no dynamic device support.])
 
@@ -1558,7 +1558,8 @@ if test "x$with_pulse" != "xno";
 then
     WINE_PACKAGE_FLAGS(PULSE,[libpulse],,,,
         [AC_CHECK_HEADERS(pulse/pulseaudio.h,
-            [AC_CHECK_LIB(pulse, pa_stream_is_corked,[:],[PULSE_LIBS=""],[$PULSE_LIBS])],
+            [AC_CHECK_LIB(pulse, pa_stream_is_corked,
+                [PULSE_LIBS="$PULSE_LIBS -lm -ldl -lrt"],[PULSE_LIBS=""],[$PULSE_LIBS -lm -ldl -lrt])],
             [PULSE_LIBS=""])])
 fi
 WINE_NOTICE_WITH(pulse, [test -z "$PULSE_LIBS"],
@@ -1588,8 +1589,12 @@ AC_SUBST(ALSA_LIBS,"")
 if test "x$with_alsa" != "xno"
 then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access_mask,
-        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]], [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
-                        [ALSA_LIBS="-lasound"])])
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]],
+                                            [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
+                           [ALSA_LIBS="$ALSA_LIBS -lm -ldl -lpthread"],
+                           [ALSA_LIBS=""])],
+        [ALSA_LIBS=""],
+        [$ALSA_LIBS -lm -ldl -pthread])
 fi
 test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
 
@@ -1668,9 +1673,9 @@ if test "x$with_sdl" != "xno"
 then
     WINE_PACKAGE_FLAGS(SDL2,[sdl2],[-lSDL2],,,
         [AC_CHECK_HEADERS([SDL.h],
-            [WINE_CHECK_SONAME(SDL2,SDL_Init,,,[$SDL2_LIBS],[[libSDL2-2.0*]])])])
+            [WINE_CHECK_LIB(SDL2,SDL_Init)])])
 fi
-WINE_NOTICE_WITH(sdl,[test "x$ac_cv_lib_soname_SDL2" = "x"],
+WINE_NOTICE_WITH(sdl,[test "x$ac_cv_lib_SDL2_SDL_Init" != "xyes"],
                  [libSDL2 ${notice_platform}development files not found, SDL2 won't be supported.])
 
 dnl **** Check for capi4linux ****
