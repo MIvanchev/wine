@@ -339,7 +339,6 @@ extern int add_gdi_face( const WCHAR *family_name, const WCHAR *second_name,
                          DWORD ntmflags, DWORD version, DWORD flags,
                          const struct bitmap_font_size *size ) DECLSPEC_HIDDEN;
 extern UINT font_init(void) DECLSPEC_HIDDEN;
-extern UINT get_acp(void) DECLSPEC_HIDDEN;
 extern CPTABLEINFO *get_cptable( WORD cp ) DECLSPEC_HIDDEN;
 extern const struct font_backend_funcs *init_freetype_lib(void) DECLSPEC_HIDDEN;
 
@@ -533,38 +532,13 @@ static inline DC *get_physdev_dc( PHYSDEV dev )
     return get_nulldrv_dc( dev );
 }
 
-BOOL WINAPI FontIsLinked(HDC);
-
-BOOL WINAPI SetVirtualResolution(HDC hdc, DWORD horz_res, DWORD vert_res, DWORD horz_size, DWORD vert_size);
-
-static inline BOOL is_rect_empty( const RECT *rect )
-{
-    return (rect->left >= rect->right || rect->top >= rect->bottom);
-}
-
 static inline BOOL intersect_rect( RECT *dst, const RECT *src1, const RECT *src2 )
 {
     dst->left   = max( src1->left, src2->left );
     dst->top    = max( src1->top, src2->top );
     dst->right  = min( src1->right, src2->right );
     dst->bottom = min( src1->bottom, src2->bottom );
-    return !is_rect_empty( dst );
-}
-
-static inline void offset_rect( RECT *rect, int offset_x, int offset_y )
-{
-    rect->left   += offset_x;
-    rect->top    += offset_y;
-    rect->right  += offset_x;
-    rect->bottom += offset_y;
-}
-
-static inline void set_rect( RECT *rect, int left, int top, int right, int bottom )
-{
-    rect->left = left;
-    rect->top = top;
-    rect->right = right;
-    rect->bottom = bottom;
+    return !IsRectEmpty( dst );
 }
 
 static inline void order_rect( RECT *rect )
@@ -611,9 +585,9 @@ static inline void reset_bounds( RECT *bounds )
 
 static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 {
-    if (is_rect_empty( src1 ))
+    if (IsRectEmpty( src1 ))
     {
-        if (is_rect_empty( src2 ))
+        if (IsRectEmpty( src2 ))
         {
             reset_bounds( dest );
             return;
@@ -622,7 +596,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
     }
     else
     {
-        if (is_rect_empty( src2 )) *dest = *src1;
+        if (IsRectEmpty( src2 )) *dest = *src1;
         else
         {
             dest->left   = min( src1->left, src2->left );
@@ -635,7 +609,7 @@ static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
 
 static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
 {
-    if (is_rect_empty( rect )) return;
+    if (IsRectEmpty( rect )) return;
     bounds->left   = min( bounds->left, rect->left );
     bounds->top    = min( bounds->top, rect->top );
     bounds->right  = max( bounds->right, rect->right );

@@ -373,7 +373,7 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
             if (*result >= 0)
             {
                 DWORD len;
-                RtlUnicodeToMultiByteN( (LPSTR)lParam, ~0u, &len,
+                RtlUnicodeToMultiByteN( (LPSTR)lParam, 512 * 3, &len,
                                         buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR) );
                 *result = len - 1;
             }
@@ -633,7 +633,7 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
             if (*result >= 0)
             {
                 DWORD len;
-                RtlMultiByteToUnicodeN( (LPWSTR)lParam, ~0u, &len, buffer, strlen(buffer) + 1 );
+                RtlMultiByteToUnicodeN( (LPWSTR)lParam, 512 * 3, &len, buffer, strlen(buffer) + 1 );
                 *result = len / sizeof(WCHAR) - 1;
             }
         }
@@ -1268,7 +1268,7 @@ BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size )
         msg.lParam  = params->lparam;
         dispatch_win_proc_params( params );
 
-        NtUserCallTwoParam( result, (UINT_PTR)&msg, NtUserReplyMessage );
+        NtUserReplyMessage( result, &msg );
         if (buffer != stack_buffer && buffer != params + 1)
             HeapFree( GetProcessHeap(), 0, buffer );
     }
@@ -1332,7 +1332,7 @@ LRESULT WINAPI CallWindowProcA( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam
 
     params.func = func;
     params.result = &result;
-    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, (ULONG_PTR)&params, FNID_CALLWNDPROC, TRUE ))
+    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, &params, NtUserCallWindowProc, TRUE ))
         return 0;
     dispatch_win_proc_params( &params );
     return result;
@@ -1351,7 +1351,7 @@ LRESULT WINAPI CallWindowProcW( WNDPROC func, HWND hwnd, UINT msg, WPARAM wParam
 
     params.func = func;
     params.result = &result;
-    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, (ULONG_PTR)&params, FNID_CALLWNDPROC, FALSE ))
+    if (!NtUserMessageCall( hwnd, msg, wParam, lParam, &params, NtUserCallWindowProc, FALSE ))
         return 0;
     dispatch_win_proc_params( &params );
     return result;
@@ -1482,14 +1482,6 @@ static LRESULT WINAPI StaticWndProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     return wow_handlers.static_proc( hwnd, msg, wParam, lParam, TRUE );
 }
 
-static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
-{
-    DWORD ret = USER_Driver->pMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
-    if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
-    if ((mask & QS_INPUT) == QS_INPUT) get_user_thread_info()->message_count = 0;
-    return ret;
-}
-
 /**********************************************************************
  *		UserRegisterWowHandlers (USER32.@)
  *
@@ -1505,7 +1497,6 @@ void WINAPI UserRegisterWowHandlers( const struct wow_handlers16 *new, struct wo
     orig->mdiclient_proc  = MDIClientWndProc_common;
     orig->scrollbar_proc  = ScrollBarWndProc_common;
     orig->static_proc     = StaticWndProc_common;
-    orig->wait_message    = wait_message;
     orig->create_window   = WIN_CreateWindowEx;
     orig->get_win_handle  = WIN_GetFullHandle;
     orig->alloc_winproc   = WINPROC_AllocProc;
@@ -1524,7 +1515,6 @@ struct wow_handlers16 wow_handlers =
     MDIClientWndProc_common,
     ScrollBarWndProc_common,
     StaticWndProc_common,
-    wait_message,
     WIN_CreateWindowEx,
     NULL,  /* call_window_proc */
     NULL,  /* call_dialog_proc */

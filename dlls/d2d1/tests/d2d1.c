@@ -20,7 +20,7 @@
 #include <limits.h>
 #include <math.h>
 #include <float.h>
-#include "d2d1_1.h"
+#include "d2d1_3.h"
 #include "d3d11.h"
 #include "wincrypt.h"
 #include "wine/test.h"
@@ -9584,6 +9584,38 @@ static void test_dpi(BOOL d3d11)
     release_test_context(&ctx);
 }
 
+static void test_unit_mode(BOOL d3d11)
+{
+    struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    D2D1_UNIT_MODE unit_mode;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, 0xdeadbeef);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, D2D1_UNIT_MODE_PIXELS);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_PIXELS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, 0xdeadbeef);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_PIXELS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_Release(context);
+    release_test_context(&ctx);
+}
+
 static void test_wic_bitmap_format(BOOL d3d11)
 {
     IWICImagingFactory *wic_factory;
@@ -9925,13 +9957,15 @@ static void test_mt_factory(BOOL d3d11)
 
 static void test_effect(BOOL d3d11)
 {
-    unsigned int i, j, min_inputs, max_inputs, str_size, input_count;
+    unsigned int i, j, min_inputs, max_inputs, str_size, input_count, factory_version;
     D2D1_BITMAP_PROPERTIES bitmap_desc;
     D2D1_BUFFER_PRECISION precision;
     ID2D1Image *image_a, *image_b;
     struct d2d1_test_context ctx;
     ID2D1DeviceContext *context;
-    ID2D1Factory1 *factory;
+    ID2D1Factory1 *factory1;
+    ID2D1Factory2 *factory2;
+    ID2D1Factory3 *factory3;
     ID2D1Bitmap *bitmap;
     ID2D1Effect *effect;
     D2D1_SIZE_U size;
@@ -9943,28 +9977,43 @@ static void test_effect(BOOL d3d11)
     const struct effect_test
     {
         const CLSID *clsid;
+        UINT32 factory_version;
         UINT32 default_input_count;
         UINT32 min_inputs;
         UINT32 max_inputs;
     }
     effect_tests[] =
     {
-        {&CLSID_D2D12DAffineTransform,       1, 1, 1},
-        {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1},
-        {&CLSID_D2D1Composite,               2, 1, 0xffffffff},
-        {&CLSID_D2D1Crop,                    1, 1, 1},
-        {&CLSID_D2D1Shadow,                  1, 1, 1},
+        {&CLSID_D2D12DAffineTransform,       1, 1, 1, 1},
+        {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1, 1},
+        {&CLSID_D2D1Composite,               1, 2, 1, 0xffffffff},
+        {&CLSID_D2D1Crop,                    1, 1, 1, 1},
+        {&CLSID_D2D1Shadow,                  1, 1, 1, 1},
+        {&CLSID_D2D1Grayscale,               3, 1, 1, 1},
     };
 
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory1)))
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
+    factory_version = 1;
+    if (SUCCEEDED(ID2D1Factory1_QueryInterface(factory1, &IID_ID2D1Factory2, (void **)&factory2)))
+    {
+        ID2D1Factory2_Release(factory2);
+        factory_version = 2;
+    }
+    if (SUCCEEDED(ID2D1Factory1_QueryInterface(factory1, &IID_ID2D1Factory3, (void **)&factory3)))
+    {
+        ID2D1Factory3_Release(factory3);
+        factory_version = 3;
+    }
+    if (factory_version < 3)
+        win_skip("ID2D1Factory%u is not supported.\n", factory_version + 1);
 
     hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
@@ -9972,6 +10021,9 @@ static void test_effect(BOOL d3d11)
     for (i = 0; i < ARRAY_SIZE(effect_tests); ++i)
     {
         const struct effect_test *test = effect_tests + i;
+
+        if (factory_version < test->factory_version)
+            continue;
 
         winetest_push_context("Test %u", i);
 
@@ -10109,7 +10161,7 @@ static void test_effect(BOOL d3d11)
     }
 
     ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
+    ID2D1Factory1_Release(factory1);
     release_test_context(&ctx);
 }
 
@@ -10347,6 +10399,84 @@ static void test_effect_crop(BOOL d3d11)
     ID2D1Effect_Release(effect);
     ID2D1DeviceContext_Release(context);
     ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
+static void test_effect_grayscale(BOOL d3d11)
+{
+    DWORD colour, expected_colour, luminance;
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    struct d2d1_test_context ctx;
+    struct resource_readback rb;
+    ID2D1DeviceContext *context;
+    D2D1_SIZE_U input_size;
+    ID2D1Factory3 *factory;
+    ID2D1Bitmap1 *bitmap;
+    ID2D1Effect *effect;
+    ID2D1Image *output;
+    unsigned int i;
+    HRESULT hr;
+
+    const DWORD test_pixels[] = {0xffffffff, 0x12345678, 0x89abcdef, 0x77777777, 0xdeadbeef};
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory3, NULL, (void **)&factory)))
+    {
+        win_skip("ID2D1Factory3 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Grayscale, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(test_pixels); ++i)
+    {
+        DWORD pixel = test_pixels[i];
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&input_size, 1, 1);
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(context, input_size, &pixel, sizeof(pixel), &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
+        ID2D1Effect_GetOutput(effect, &output);
+
+        ID2D1DeviceContext_BeginDraw(context);
+        ID2D1DeviceContext_Clear(context, 0);
+        ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
+        hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        get_surface_readback(&ctx, &rb);
+        colour = get_readback_colour(&rb, 0, 0);
+        luminance = (DWORD)(0.299f * ((pixel >> 16) & 0xff)
+                + 0.587f * ((pixel >> 8) & 0xff)
+                + 0.114f * ((pixel >> 0) & 0xff) + 0.5f);
+        expected_colour = (pixel & 0xff000000) | (luminance << 16) | (luminance << 8) | luminance;
+        todo_wine ok(compare_colour(colour, expected_colour, 1),
+                "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
+        release_resource_readback(&rb);
+
+        ID2D1Image_Release(output);
+        ID2D1Bitmap1_Release(bitmap);
+        winetest_pop_context();
+    }
+
+    ID2D1Effect_Release(effect);
+    ID2D1DeviceContext_Release(context);
+    ID2D1Factory3_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -10666,6 +10796,99 @@ static void test_stroke_contains_point(BOOL d3d11)
     ID2D1Factory_Release(factory);
 }
 
+static void test_image_bounds(BOOL d3d11)
+{
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    D2D1_UNIT_MODE unit_mode;
+    ID2D1Factory1 *factory;
+    ID2D1Bitmap *bitmap;
+    float dpi_x, dpi_y;
+    D2D_RECT_F bounds;
+    D2D1_SIZE_F size;
+    unsigned int i;
+    HRESULT hr;
+
+    const struct bitmap_bounds_test
+    {
+        float dpi_x;
+        float dpi_y;
+        D2D_SIZE_U pixel_size;
+    }
+    bitmap_bounds_tests[] =
+    {
+        {96.0f,  96.0f,  {100, 100}},
+        {48.0f,  48.0f,  {100, 100}},
+        {192.0f, 192.0f, {100, 100}},
+        {96.0f,  10.0f,  {100, 100}},
+        {50.0f,  100.0f, {100, 100}},
+        {150.0f, 150.0f, {100, 100}},
+        {48.0f,  48.0f,  {1, 1}},
+        {192.0f, 192.0f, {1, 1}},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(bitmap_bounds_tests); ++i)
+    {
+        const struct bitmap_bounds_test *test = &bitmap_bounds_tests[i];
+        winetest_push_context("Test %u", i);
+
+        bitmap_desc.dpiX = test->dpi_x;
+        bitmap_desc.dpiY = test->dpi_y;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        hr = ID2D1RenderTarget_CreateBitmap(ctx.rt, test->pixel_size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        set_rect(&bounds, 0.0f, 0.0f, 0.0f, 0.0f);
+        size = ID2D1Bitmap_GetSize(bitmap);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, size.width, size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f, size.width, size.height);
+
+        /* Test bitmap local bounds after changing context dpi */
+        ID2D1DeviceContext_GetDpi(context, &dpi_x, &dpi_y);
+        ID2D1DeviceContext_SetDpi(context, dpi_x * 2.0f, dpi_y * 2.0f);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, size.width, size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f, size.width, size.height);
+        ID2D1DeviceContext_SetDpi(context, dpi_x, dpi_y);
+
+        /* Test bitmap local bounds after changing context unit mode */
+        unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+        ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+        ID2D1DeviceContext_SetUnitMode(context, D2D1_UNIT_MODE_PIXELS);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, test->pixel_size.width, test->pixel_size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f,
+                (float)test->pixel_size.width, (float)test->pixel_size.height);
+        ID2D1DeviceContext_SetUnitMode(context, unit_mode);
+
+        ID2D1Bitmap_Release(bitmap);
+        winetest_pop_context();
+    }
+
+    ID2D1DeviceContext_Release(context);
+    ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
 START_TEST(d2d1)
 {
     HMODULE d2d1_dll = GetModuleHandleA("d2d1.dll");
@@ -10727,6 +10950,7 @@ START_TEST(d2d1)
     queue_test(test_command_list);
     queue_d3d10_test(test_max_bitmap_size);
     queue_test(test_dpi);
+    queue_test(test_unit_mode);
     queue_test(test_wic_bitmap_format);
     queue_d3d10_test(test_math);
     queue_d3d10_test(test_colour_space);
@@ -10735,7 +10959,9 @@ START_TEST(d2d1)
     queue_test(test_effect);
     queue_test(test_effect_2d_affine);
     queue_test(test_effect_crop);
+    queue_test(test_effect_grayscale);
     queue_d3d10_test(test_stroke_contains_point);
+    queue_test(test_image_bounds);
 
     run_queued_tests();
 }

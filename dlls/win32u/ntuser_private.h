@@ -37,11 +37,8 @@ struct user_callbacks
     BOOL (WINAPI *pDestroyCaret)(void);
     BOOL (WINAPI *pEndMenu)(void);
     BOOL (WINAPI *pHideCaret)( HWND hwnd );
-    BOOL (WINAPI *pPostMessageW)( HWND, UINT, WPARAM, LPARAM );
-    LRESULT (WINAPI *pSendMessageTimeoutW)( HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR );
-    LRESULT (WINAPI *pSendMessageA)( HWND, UINT, WPARAM, LPARAM );
-    LRESULT (WINAPI *pSendMessageW)( HWND, UINT, WPARAM, LPARAM );
-    BOOL (WINAPI *pSendNotifyMessageW)( HWND, UINT, WPARAM, LPARAM );
+    BOOL (WINAPI *pImmProcessKey)(HWND, HKL, UINT, LPARAM, DWORD);
+    BOOL (WINAPI *pImmTranslateMessage)(HWND, UINT, WPARAM, LPARAM);
     BOOL (WINAPI *pSetSystemMenu)( HWND hwnd, HMENU menu );
     BOOL (WINAPI *pShowCaret)( HWND hwnd );
     void (CDECL *free_menu_items)( void *ptr );
@@ -50,21 +47,26 @@ struct user_callbacks
     void (CDECL *notify_ime)( HWND hwnd, UINT param );
     BOOL (CDECL *post_dde_message)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
                                     DWORD type );
-    BOOL (CDECL *process_hardware_message)( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
-                                            HWND hwnd_filter, UINT first, UINT last, BOOL remove );
+    BOOL (CDECL *process_rawinput_message)( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data );
     BOOL (CDECL *rawinput_device_get_usages)(HANDLE handle, USHORT *usage_page, USHORT *usage);
     void (CDECL *register_builtin_classes)(void);
-    BOOL (CDECL *set_menu)( HWND hwnd, HMENU menu );
     void (WINAPI *set_standard_scroll_painted)( HWND hwnd, INT bar, BOOL visible );
-    void (CDECL *set_user_driver)( void *, UINT );
+    void (CDECL *toggle_caret)( HWND hwnd );
     BOOL (CDECL *unpack_dde_message)( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
                                       void **buffer, size_t size );
+    void (CDECL *update_mouse_tracking_info)( HWND hwnd );
     BOOL (WINAPI *register_imm)( HWND hwnd );
     void (WINAPI *unregister_imm)( HWND hwnd );
 };
 
 #define WM_SYSTIMER         0x0118
 #define WM_POPUPSYSTEMMENU  0x0313
+
+enum system_timer_id
+{
+    SYSTEM_TIMER_TRACK_MOUSE = 0xfffa,
+    SYSTEM_TIMER_CARET = 0xffff,
+};
 
 struct user_object
 {
@@ -143,6 +145,7 @@ static inline BOOL is_broadcast( HWND hwnd )
 /* no attempt is made to keep the layout compatible with the Windows one */
 struct user_thread_info
 {
+    struct ntuser_thread_info     client_info;            /* Data shared with client */
     HANDLE                        server_queue;           /* Handle to server-side queue */
     DWORD                         wake_mask;              /* Current queue wake mask */
     DWORD                         changed_mask;           /* Current queue changed mask */
@@ -156,14 +159,9 @@ struct user_thread_info
     INPUT_MESSAGE_SOURCE          msg_source;             /* Message source for current message */
     struct received_message_info *receive_info;           /* Message being currently received */
     struct wm_char_mapping_data  *wmchar_data;            /* Data for WM_CHAR mappings */
-    DWORD                         GetMessageTimeVal;      /* Value for GetMessageTime */
-    DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
-    ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
     HKL                           kbd_layout;             /* Current keyboard layout */
     DWORD                         kbd_layout_id;          /* Current keyboard layout ID */
-    HWND                          top_window;             /* Desktop window */
-    HWND                          msg_window;             /* HWND_MESSAGE parent window */
     struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
     UINT                          spy_indent;             /* Current spy indent */
 };
@@ -205,9 +203,29 @@ enum builtin_winprocs
     NB_BUILTIN_AW_WINPROCS = WINPROC_DESKTOP
 };
 
-struct menu_item;
-
 /* FIXME: make it private to menu.c */
+
+/* Menu item structure */
+typedef struct menu_item
+{
+    /* ----------- MENUITEMINFO Stuff ----------- */
+    UINT      fType;          /* Item type. */
+    UINT      fState;         /* Item state.  */
+    UINT_PTR  wID;            /* Item id.  */
+    HMENU     hSubMenu;       /* Pop-up menu.  */
+    HBITMAP   hCheckBit;      /* Bitmap when checked.  */
+    HBITMAP   hUnCheckBit;    /* Bitmap when unchecked.  */
+    LPWSTR    text;           /* Item text. */
+    ULONG_PTR dwItemData;     /* Application defined.  */
+    LPWSTR    dwTypeData;     /* depends on fMask */
+    HBITMAP   hbmpItem;       /* bitmap */
+    /* ----------- Wine stuff ----------- */
+    RECT      rect;           /* Item area (relative to the items_rect),
+                               * see MENU_AdjustMenuItemRect(). */
+    UINT      xTab;           /* X position of text after Tab */
+    SIZE      bmpsize;        /* size needed for the HBMMENU_CALLBACK bitmap */
+} MENUITEM;
+
 typedef struct
 {
     struct user_object obj;
@@ -297,9 +315,6 @@ HICON alloc_cursoricon_handle( BOOL is_icon ) DECLSPEC_HIDDEN;
 /* dce.c */
 extern void free_dce( struct dce *dce, HWND hwnd ) DECLSPEC_HIDDEN;
 extern void invalidate_dce( WND *win, const RECT *extra_rect ) DECLSPEC_HIDDEN;
-
-/* message.c */
-LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 
 /* window.c */
 HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type ) DECLSPEC_HIDDEN;

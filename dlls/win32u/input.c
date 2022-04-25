@@ -1260,6 +1260,14 @@ HWND get_active_window(void)
     return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
 }
 
+/* see GetCapture */
+HWND get_capture(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndCapture : 0;
+}
+
 /* see GetFocus */
 HWND get_focus(void)
 {
@@ -1352,9 +1360,9 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
     if (hwnd)
     {
         /* send palette messages */
-        if (send_message( hwnd, WM_QUERYNEWPALETTE, 0, 0 ) && user_callbacks)
-            user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
-                                                  SMTO_ABORTIFHUNG, 2000, NULL );
+        if (send_message( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
+            send_message_timeout( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
+                                  SMTO_ABORTIFHUNG, 2000, NULL, FALSE );
         if (!is_window(hwnd)) return FALSE;
     }
 
@@ -1394,7 +1402,7 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
                       MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, is_iconic(hwnd) ),
                       (LPARAM)previous );
         if (NtUserGetAncestor( hwnd, GA_PARENT ) == get_desktop_window())
-            post_message( get_desktop_window(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
+            NtUserPostMessage( get_desktop_window(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
     }
 
     /* now change focus if necessary */
@@ -1529,13 +1537,13 @@ BOOL set_foreground_window( HWND hwnd, BOOL mouse )
     {
         if (send_msg_old)  /* old window belongs to other thread */
             NtUserMessageCall( previous, WM_WINE_SETACTIVEWINDOW, 0, 0,
-                               0, FNID_SENDNOTIFYMESSAGE, FALSE );
+                               0, NtUserSendNotifyMessage, FALSE );
         else if (send_msg_new)  /* old window belongs to us but new one to other thread */
             ret = set_active_window( 0, NULL, mouse, TRUE );
 
         if (send_msg_new)  /* new window belongs to other thread */
             NtUserMessageCall( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0,
-                               0, FNID_SENDNOTIFYMESSAGE, FALSE );
+                               0, NtUserSendNotifyMessage, FALSE );
         else  /* new window belongs to us */
             ret = set_active_window( hwnd, NULL, mouse, TRUE );
     }

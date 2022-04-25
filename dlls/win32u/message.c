@@ -36,6 +36,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
+WINE_DECLARE_DEBUG_CHANNEL(key);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 #define MAX_WINPROC_RECURSION  64
@@ -111,6 +112,82 @@ struct send_message_info
 
 static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
 
+/* flag for messages that contain pointers */
+/* 32 messages per entry, messages 0..31 map to bits 0..31 */
+
+#define SET(msg) (1 << ((msg) & 31))
+
+static const unsigned int message_pointer_flags[] =
+{
+    /* 0x00 - 0x1f */
+    SET(WM_CREATE) | SET(WM_SETTEXT) | SET(WM_GETTEXT) |
+    SET(WM_WININICHANGE) | SET(WM_DEVMODECHANGE),
+    /* 0x20 - 0x3f */
+    SET(WM_GETMINMAXINFO) | SET(WM_DRAWITEM) | SET(WM_MEASUREITEM) | SET(WM_DELETEITEM) |
+    SET(WM_COMPAREITEM),
+    /* 0x40 - 0x5f */
+    SET(WM_WINDOWPOSCHANGING) | SET(WM_WINDOWPOSCHANGED) | SET(WM_COPYDATA) | SET(WM_HELP),
+    /* 0x60 - 0x7f */
+    SET(WM_STYLECHANGING) | SET(WM_STYLECHANGED),
+    /* 0x80 - 0x9f */
+    SET(WM_NCCREATE) | SET(WM_NCCALCSIZE) | SET(WM_GETDLGCODE),
+    /* 0xa0 - 0xbf */
+    SET(EM_GETSEL) | SET(EM_GETRECT) | SET(EM_SETRECT) | SET(EM_SETRECTNP),
+    /* 0xc0 - 0xdf */
+    SET(EM_REPLACESEL) | SET(EM_GETLINE) | SET(EM_SETTABSTOPS),
+    /* 0xe0 - 0xff */
+    SET(SBM_GETRANGE) | SET(SBM_SETSCROLLINFO) | SET(SBM_GETSCROLLINFO) | SET(SBM_GETSCROLLBARINFO),
+    /* 0x100 - 0x11f */
+    0,
+    /* 0x120 - 0x13f */
+    0,
+    /* 0x140 - 0x15f */
+    SET(CB_GETEDITSEL) | SET(CB_ADDSTRING) | SET(CB_DIR) | SET(CB_GETLBTEXT) |
+    SET(CB_INSERTSTRING) | SET(CB_FINDSTRING) | SET(CB_SELECTSTRING) |
+    SET(CB_GETDROPPEDCONTROLRECT) | SET(CB_FINDSTRINGEXACT),
+    /* 0x160 - 0x17f */
+    0,
+    /* 0x180 - 0x19f */
+    SET(LB_ADDSTRING) | SET(LB_INSERTSTRING) | SET(LB_GETTEXT) | SET(LB_SELECTSTRING) |
+    SET(LB_DIR) | SET(LB_FINDSTRING) |
+    SET(LB_GETSELITEMS) | SET(LB_SETTABSTOPS) | SET(LB_ADDFILE) | SET(LB_GETITEMRECT),
+    /* 0x1a0 - 0x1bf */
+    SET(LB_FINDSTRINGEXACT),
+    /* 0x1c0 - 0x1df */
+    0,
+    /* 0x1e0 - 0x1ff */
+    0,
+    /* 0x200 - 0x21f */
+    SET(WM_NEXTMENU) | SET(WM_SIZING) | SET(WM_MOVING) | SET(WM_DEVICECHANGE),
+    /* 0x220 - 0x23f */
+    SET(WM_MDICREATE) | SET(WM_MDIGETACTIVE) | SET(WM_DROPOBJECT) |
+    SET(WM_QUERYDROPOBJECT) | SET(WM_DRAGLOOP) | SET(WM_DRAGSELECT) | SET(WM_DRAGMOVE),
+    /* 0x240 - 0x25f */
+    0,
+    /* 0x260 - 0x27f */
+    0,
+    /* 0x280 - 0x29f */
+    0,
+    /* 0x2a0 - 0x2bf */
+    0,
+    /* 0x2c0 - 0x2df */
+    0,
+    /* 0x2e0 - 0x2ff */
+    0,
+    /* 0x300 - 0x31f */
+    SET(WM_ASKCBFORMATNAME)
+};
+
+/* check whether a given message type includes pointers */
+static inline BOOL is_pointer_message( UINT message, WPARAM wparam )
+{
+    if (message >= 8*sizeof(message_pointer_flags)) return FALSE;
+    if (message == WM_DEVICECHANGE && !(wparam & 0x8000)) return FALSE;
+    return (message_pointer_flags[message / 32] & SET(message)) != 0;
+}
+
+#undef SET
+
 static BOOL init_win_proc_params( struct win_proc_params *params, HWND hwnd, UINT msg,
                                   WPARAM wparam, LPARAM lparam, BOOL ansi )
 {
@@ -173,7 +250,7 @@ static BOOL dispatch_win_proc_params( struct win_proc_params *params, size_t siz
     if (thread_info->recursion_count > MAX_WINPROC_RECURSION) return FALSE;
     thread_info->recursion_count++;
 
-    KeUserModeCallback( NtUserCallWindowProc, params, size, &ret_ptr, &ret_len );
+    KeUserModeCallback( NtUserCallWinProc, params, size, &ret_ptr, &ret_len );
 
     thread_info->recursion_count--;
     return TRUE;
@@ -218,6 +295,26 @@ static inline BOOL listbox_has_strings( HWND hwnd )
 {
     DWORD style = get_window_long( hwnd, GWL_STYLE );
     return (!(style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (style & LBS_HASSTRINGS));
+}
+
+/* check whether message is in the range of keyboard messages */
+static inline BOOL is_keyboard_message( UINT message )
+{
+    return (message >= WM_KEYFIRST && message <= WM_KEYLAST);
+}
+
+/* check whether message is in the range of mouse messages */
+static inline BOOL is_mouse_message( UINT message )
+{
+    return ((message >= WM_NCMOUSEFIRST && message <= WM_NCMOUSELAST) ||
+            (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST));
+}
+
+/* check whether message matches the specified hwnd filter */
+static inline BOOL check_hwnd_filter( const MSG *msg, HWND hwnd_filter )
+{
+    if (!hwnd_filter || hwnd_filter == get_desktop_window()) return TRUE;
+    return (msg->hwnd == hwnd_filter || is_child( hwnd_filter, msg->hwnd ));
 }
 
 /***********************************************************************
@@ -983,7 +1080,7 @@ BOOL reply_message_result( LRESULT result, MSG *msg )
  *
  * Handle an internal Wine message instead of calling the window proc.
  */
-LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch(msg)
     {
@@ -1146,6 +1243,374 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
 
     TRACE_(relay)( "\1Ret  message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
                    callback, hwnd, debugstr_msg_name( msg, hwnd ), data, result );
+}
+
+/***********************************************************************
+ *          accept_hardware_message
+ *
+ * Tell the server we have passed the message to the app
+ * (even though we may end up dropping it later on)
+ */
+static void accept_hardware_message( UINT hw_id )
+{
+    SERVER_START_REQ( accept_hardware_message )
+    {
+        req->hw_id = hw_id;
+        if (wine_server_call( req ))
+            FIXME("Failed to reply to MSG_HARDWARE message. Message may not be removed from queue.\n");
+    }
+    SERVER_END_REQ;
+}
+
+/***********************************************************************
+ *           send_parent_notify
+ *
+ * Send a WM_PARENTNOTIFY to all ancestors of the given window, unless
+ * the window has the WS_EX_NOPARENTNOTIFY style.
+ */
+static void send_parent_notify( HWND hwnd, WORD event, WORD idChild, POINT pt )
+{
+    /* pt has to be in the client coordinates of the parent window */
+    map_window_points( 0, hwnd, &pt, 1, get_thread_dpi() );
+    for (;;)
+    {
+        HWND parent;
+
+        if (!(get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)) break;
+        if (get_window_long( hwnd, GWL_EXSTYLE ) & WS_EX_NOPARENTNOTIFY) break;
+        if (!(parent = get_parent( hwnd ))) break;
+        if (parent == get_desktop_window()) break;
+        map_window_points( hwnd, parent, &pt, 1, get_thread_dpi() );
+        hwnd = parent;
+        send_message( hwnd, WM_PARENTNOTIFY,
+                      MAKEWPARAM( event, idChild ), MAKELPARAM( pt.x, pt.y ) );
+    }
+}
+
+/***********************************************************************
+ *          process_keyboard_message
+ *
+ * returns TRUE if the contents of 'msg' should be passed to the application
+ */
+static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
+                                      UINT first, UINT last, BOOL remove )
+{
+    EVENTMSG event;
+
+    if (msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN ||
+        msg->message == WM_KEYUP || msg->message == WM_SYSKEYUP)
+        switch (msg->wParam)
+        {
+            case VK_LSHIFT: case VK_RSHIFT:
+                msg->wParam = VK_SHIFT;
+                break;
+            case VK_LCONTROL: case VK_RCONTROL:
+                msg->wParam = VK_CONTROL;
+                break;
+            case VK_LMENU: case VK_RMENU:
+                msg->wParam = VK_MENU;
+                break;
+        }
+
+    /* FIXME: is this really the right place for this hook? */
+    event.message = msg->message;
+    event.hwnd    = msg->hwnd;
+    event.time    = msg->time;
+    event.paramL  = (msg->wParam & 0xFF) | (HIWORD(msg->lParam) << 8);
+    event.paramH  = msg->lParam & 0x7FFF;
+    if (HIWORD(msg->lParam) & 0x0100) event.paramH |= 0x8000; /* special_key - bit */
+    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, TRUE );
+
+    /* check message filters */
+    if (msg->message < first || msg->message > last) return FALSE;
+    if (!check_hwnd_filter( msg, hwnd_filter )) return FALSE;
+
+    if (remove)
+    {
+        if((msg->message == WM_KEYDOWN) &&
+           (msg->hwnd != get_desktop_window()))
+        {
+            /* Handle F1 key by sending out WM_HELP message */
+            if (msg->wParam == VK_F1)
+            {
+                NtUserPostMessage( msg->hwnd, WM_KEYF1, 0, 0 );
+            }
+            else if(msg->wParam >= VK_BROWSER_BACK &&
+                    msg->wParam <= VK_LAUNCH_APP2)
+            {
+                /* FIXME: Process keystate */
+                send_message( msg->hwnd, WM_APPCOMMAND, (WPARAM)msg->hwnd,
+                              MAKELPARAM(0, (FAPPCOMMAND_KEY | (msg->wParam - VK_BROWSER_BACK + 1))) );
+            }
+        }
+        else if (msg->message == WM_KEYUP)
+        {
+            /* Handle VK_APPS key by posting a WM_CONTEXTMENU message */
+            if (msg->wParam == VK_APPS && user_callbacks && !user_callbacks->is_menu_active())
+                NtUserPostMessage( msg->hwnd, WM_CONTEXTMENU, (WPARAM)msg->hwnd, -1 );
+        }
+    }
+
+    if (call_hooks( WH_KEYBOARD, remove ? HC_ACTION : HC_NOREMOVE,
+                    LOWORD(msg->wParam), msg->lParam, TRUE ))
+    {
+        /* skip this message */
+        call_hooks( WH_CBT, HCBT_KEYSKIPPED, LOWORD(msg->wParam), msg->lParam, TRUE );
+        accept_hardware_message( hw_id );
+        return FALSE;
+    }
+    if (remove) accept_hardware_message( hw_id );
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+
+    if (remove && msg->message == WM_KEYDOWN && user_callbacks)
+        if (user_callbacks->pImmProcessKey( msg->hwnd, NtUserGetKeyboardLayout(0),
+                                            msg->wParam, msg->lParam, 0 ))
+            msg->wParam = VK_PROCESSKEY;
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *          process_mouse_message
+ *
+ * returns TRUE if the contents of 'msg' should be passed to the application
+ */
+static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, HWND hwnd_filter,
+                                   UINT first, UINT last, BOOL remove )
+{
+    static MSG clk_msg;
+
+    POINT pt;
+    UINT message;
+    INT hittest;
+    EVENTMSG event;
+    GUITHREADINFO info;
+    MOUSEHOOKSTRUCTEX hook;
+    BOOL eat_msg;
+    WPARAM wparam;
+
+    /* find the window to dispatch this mouse message to */
+
+    info.cbSize = sizeof(info);
+    NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info );
+    if (info.hwndCapture)
+    {
+        hittest = HTCLIENT;
+        msg->hwnd = info.hwndCapture;
+    }
+    else
+    {
+        HWND orig = msg->hwnd;
+
+        msg->hwnd = window_from_point( msg->hwnd, msg->pt, &hittest );
+        if (!msg->hwnd) /* As a heuristic, try the next window if it's the owner of orig */
+        {
+            HWND next = get_window_relative( orig, GW_HWNDNEXT );
+
+            if (next && get_window_relative( orig, GW_OWNER ) == next &&
+                is_current_thread_window( next ))
+                msg->hwnd = window_from_point( next, msg->pt, &hittest );
+        }
+    }
+
+    if (!msg->hwnd || !is_current_thread_window( msg->hwnd ))
+    {
+        accept_hardware_message( hw_id );
+        return FALSE;
+    }
+
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+    set_thread_dpi_awareness_context( get_window_dpi_awareness_context( msg->hwnd ));
+
+    /* FIXME: is this really the right place for this hook? */
+    event.message = msg->message;
+    event.time    = msg->time;
+    event.hwnd    = msg->hwnd;
+    event.paramL  = msg->pt.x;
+    event.paramH  = msg->pt.y;
+    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, TRUE );
+
+    if (!check_hwnd_filter( msg, hwnd_filter )) return FALSE;
+
+    pt = msg->pt;
+    message = msg->message;
+    wparam = msg->wParam;
+    /* Note: windows has no concept of a non-client wheel message */
+    if (message != WM_MOUSEWHEEL)
+    {
+        if (hittest != HTCLIENT)
+        {
+            message += WM_NCMOUSEMOVE - WM_MOUSEMOVE;
+            wparam = hittest;
+        }
+        else
+        {
+            /* coordinates don't get translated while tracking a menu */
+            /* FIXME: should differentiate popups and top-level menus */
+            if (!(info.flags & GUI_INMENUMODE))
+                screen_to_client( msg->hwnd, &pt );
+        }
+    }
+    msg->lParam = MAKELONG( pt.x, pt.y );
+
+    /* translate double clicks */
+
+    if (msg->message == WM_LBUTTONDOWN ||
+        msg->message == WM_RBUTTONDOWN ||
+        msg->message == WM_MBUTTONDOWN ||
+        msg->message == WM_XBUTTONDOWN)
+    {
+        BOOL update = remove;
+
+        /* translate double clicks -
+	 * note that ...MOUSEMOVEs can slip in between
+	 * ...BUTTONDOWN and ...BUTTONDBLCLK messages */
+
+        if ((info.flags & (GUI_INMENUMODE|GUI_INMOVESIZE)) ||
+            hittest != HTCLIENT ||
+            (get_class_long( msg->hwnd, GCL_STYLE, FALSE ) & CS_DBLCLKS))
+        {
+           if ((msg->message == clk_msg.message) &&
+               (msg->hwnd == clk_msg.hwnd) &&
+               (msg->wParam == clk_msg.wParam) &&
+               (msg->time - clk_msg.time < NtUserGetDoubleClickTime()) &&
+               (abs(msg->pt.x - clk_msg.pt.x) < get_system_metrics( SM_CXDOUBLECLK ) / 2) &&
+               (abs(msg->pt.y - clk_msg.pt.y) < get_system_metrics( SM_CYDOUBLECLK ) / 2))
+           {
+               message += (WM_LBUTTONDBLCLK - WM_LBUTTONDOWN);
+               if (update)
+               {
+                   clk_msg.message = 0;  /* clear the double click conditions */
+                   update = FALSE;
+               }
+           }
+        }
+        if (message < first || message > last) return FALSE;
+        /* update static double click conditions */
+        if (update) clk_msg = *msg;
+    }
+    else
+    {
+        if (message < first || message > last) return FALSE;
+    }
+    msg->wParam = wparam;
+
+    /* message is accepted now (but may still get dropped) */
+
+    hook.pt           = msg->pt;
+    hook.hwnd         = msg->hwnd;
+    hook.wHitTestCode = hittest;
+    hook.dwExtraInfo  = extra_info;
+    hook.mouseData    = msg->wParam;
+    if (call_hooks( WH_MOUSE, remove ? HC_ACTION : HC_NOREMOVE, message, (LPARAM)&hook, TRUE ))
+    {
+        hook.pt           = msg->pt;
+        hook.hwnd         = msg->hwnd;
+        hook.wHitTestCode = hittest;
+        hook.dwExtraInfo  = extra_info;
+        hook.mouseData    = msg->wParam;
+        call_hooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook, TRUE );
+        accept_hardware_message( hw_id );
+        return FALSE;
+    }
+
+    if ((hittest == HTERROR) || (hittest == HTNOWHERE))
+    {
+        send_message( msg->hwnd, WM_SETCURSOR, (WPARAM)msg->hwnd, MAKELONG( hittest, msg->message ));
+        accept_hardware_message( hw_id );
+        return FALSE;
+    }
+
+    if (remove) accept_hardware_message( hw_id );
+
+    if (!remove || info.hwndCapture)
+    {
+        msg->message = message;
+        return TRUE;
+    }
+
+    eat_msg = FALSE;
+
+    if (msg->message == WM_LBUTTONDOWN ||
+        msg->message == WM_RBUTTONDOWN ||
+        msg->message == WM_MBUTTONDOWN ||
+        msg->message == WM_XBUTTONDOWN)
+    {
+        /* Send the WM_PARENTNOTIFY,
+         * note that even for double/nonclient clicks
+         * notification message is still WM_L/M/RBUTTONDOWN.
+         */
+        send_parent_notify( msg->hwnd, msg->message, 0, msg->pt );
+
+        /* Activate the window if needed */
+
+        if (msg->hwnd != info.hwndActive)
+        {
+            HWND hwndTop = NtUserGetAncestor( msg->hwnd, GA_ROOT );
+
+            if ((get_window_long( hwndTop, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
+            {
+                LONG ret = send_message( msg->hwnd, WM_MOUSEACTIVATE, (WPARAM)hwndTop,
+                                         MAKELONG( hittest, msg->message ) );
+                switch(ret)
+                {
+                case MA_NOACTIVATEANDEAT:
+                    eat_msg = TRUE;
+                    /* fall through */
+                case MA_NOACTIVATE:
+                    break;
+                case MA_ACTIVATEANDEAT:
+                    eat_msg = TRUE;
+                    /* fall through */
+                case MA_ACTIVATE:
+                case 0:
+                    if (!set_foreground_window( hwndTop, TRUE )) eat_msg = TRUE;
+                    break;
+                default:
+                    WARN( "unknown WM_MOUSEACTIVATE code %d\n", ret );
+                    break;
+                }
+            }
+        }
+    }
+
+    /* send the WM_SETCURSOR message */
+
+    /* Windows sends the normal mouse message as the message parameter
+       in the WM_SETCURSOR message even if it's non-client mouse message */
+    send_message( msg->hwnd, WM_SETCURSOR, (WPARAM)msg->hwnd, MAKELONG( hittest, msg->message ));
+
+    msg->message = message;
+    return !eat_msg;
+}
+
+/***********************************************************************
+ *           process_hardware_message
+ *
+ * Process a hardware message; return TRUE if message should be passed on to the app
+ */
+static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
+                                      HWND hwnd_filter, UINT first, UINT last, BOOL remove )
+{
+    DPI_AWARENESS_CONTEXT context;
+    BOOL ret = FALSE;
+
+    get_user_thread_info()->msg_source.deviceType = msg_data->source.device;
+    get_user_thread_info()->msg_source.originId   = msg_data->source.origin;
+
+    /* hardware messages are always in physical coords */
+    context = set_thread_dpi_awareness_context( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+
+    if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
+        ret = user_callbacks && user_callbacks->process_rawinput_message( msg, hw_id, msg_data );
+    else if (is_keyboard_message( msg->message ))
+        ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
+    else if (is_mouse_message( msg->message ))
+        ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
+    else
+        ERR( "unknown message type %x\n", msg->message );
+    set_thread_dpi_awareness_context( context );
+    return ret;
 }
 
 /***********************************************************************
@@ -1326,17 +1791,16 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             if (size >= sizeof(msg_data->hardware))
             {
                 hw_id = msg_data->hardware.hw_id;
-                if (!user_callbacks) continue;
-                if (!user_callbacks->process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
-                                                               hwnd, first, last, flags & PM_REMOVE ))
+                if (!process_hardware_message( &info.msg, hw_id, &msg_data->hardware,
+                                               hwnd, first, last, flags & PM_REMOVE ))
                 {
                     TRACE("dropping msg %x\n", info.msg.message );
                     continue;  /* ignore it */
                 }
                 *msg = info.msg;
-                thread_info->GetMessagePosVal = MAKELONG( info.msg.pt.x, info.msg.pt.y );
-                thread_info->GetMessageTimeVal = info.msg.time;
-                thread_info->GetMessageExtraInfoVal = msg_data->hardware.info;
+                thread_info->client_info.message_pos   = MAKELONG( info.msg.pt.x, info.msg.pt.y );
+                thread_info->client_info.message_time  = info.msg.time;
+                thread_info->client_info.message_extra = msg_data->hardware.info;
                 free( buffer );
                 call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
                 return 1;
@@ -1369,9 +1833,9 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             }
             *msg = info.msg;
             msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
-            thread_info->GetMessagePosVal = MAKELONG( msg->pt.x, msg->pt.y );
-            thread_info->GetMessageTimeVal = info.msg.time;
-            thread_info->GetMessageExtraInfoVal = 0;
+            thread_info->client_info.message_pos   = MAKELONG( msg->pt.x, msg->pt.y );
+            thread_info->client_info.message_time  = info.msg.time;
+            thread_info->client_info.message_extra = 0;
             thread_info->msg_source = msg_source_unavailable;
             free( buffer );
             call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
@@ -1398,7 +1862,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
  *
  * Process all pending sent messages.
  */
-void process_sent_messages(void)
+static void process_sent_messages(void)
 {
     MSG msg;
     peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0 );
@@ -1987,7 +2451,7 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
     LRESULT retval = 0;
 
     /* Process timer messages */
-    if (msg->lParam && (msg->message == WM_TIMER || msg->message == WM_SYSTIMER))
+    if (msg->lParam && msg->message == WM_TIMER)
     {
         params.func = (WNDPROC)msg->lParam;
         params.result = &retval; /* FIXME */
@@ -2005,6 +2469,22 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
         __ENDTRY
         return retval;
     }
+    if (msg->message == WM_SYSTIMER)
+    {
+        switch (msg->wParam)
+        {
+            case SYSTEM_TIMER_CARET:
+                if (!user_callbacks) break;
+                user_callbacks->toggle_caret( msg->hwnd );
+                return 0;
+
+            case SYSTEM_TIMER_TRACK_MOUSE:
+                if (!user_callbacks) break;
+                user_callbacks->update_mouse_tracking_info( msg->hwnd );
+                return 0;
+        }
+    }
+
     if (!msg->hwnd) return 0;
 
     spy_enter_message( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message, msg->wParam, msg->lParam );
@@ -2033,6 +2513,107 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
 LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
 {
     return dispatch_message( msg, FALSE );
+}
+
+static BOOL is_message_broadcastable( UINT msg )
+{
+    return msg < WM_USER || msg >= 0xc000;
+}
+
+/***********************************************************************
+ *           broadcast_message
+ */
+static BOOL broadcast_message( struct send_message_info *info, DWORD_PTR *res_ptr )
+{
+    HWND *list;
+
+    if (is_message_broadcastable( info->msg ) &&
+        (list = list_window_children( 0, get_desktop_window(), NULL, 0 )))
+    {
+        int i;
+
+        for (i = 0; list[i]; i++)
+        {
+            if (!is_window(list[i])) continue;
+            if ((get_window_long( list[i], GWL_STYLE ) & (WS_POPUP|WS_CHILD)) == WS_CHILD)
+                continue;
+
+            switch(info->type)
+            {
+            case MSG_UNICODE:
+                send_message_timeout( list[i], info->msg, info->wparam, info->lparam,
+                                      info->flags, info->timeout, NULL, FALSE );
+                break;
+            case MSG_ASCII:
+                send_message_timeout( list[i], info->msg, info->wparam, info->lparam,
+                                      info->flags, info->timeout, NULL, TRUE );
+                break;
+            case MSG_NOTIFY:
+                NtUserMessageCall( list[i], info->msg, info->wparam, info->lparam,
+                                   0, NtUserSendNotifyMessage, FALSE );
+                break;
+            case MSG_CALLBACK:
+                {
+                    struct send_message_callback_params params =
+                        { .callback = info->callback, .data = info->data };
+                    NtUserMessageCall( list[i], info->msg, info->wparam, info->lparam,
+                                       &params, NtUserSendMessageCallback, FALSE );
+                    break;
+                }
+            case MSG_POSTED:
+                NtUserPostMessage( list[i], info->msg, info->wparam, info->lparam );
+                break;
+            default:
+                ERR( "bad type %d\n", info->type );
+                break;
+            }
+        }
+    }
+
+    if (res_ptr) *res_ptr = 1;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           process_message
+ *
+ * Backend implementation of the various SendMessage functions.
+ */
+static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr, BOOL ansi )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
+    DWORD dest_pid;
+    BOOL ret;
+    LRESULT result;
+
+    if (is_broadcast( info->hwnd )) return broadcast_message( info, res_ptr );
+
+    if (!(info->dest_tid = get_window_thread( info->hwnd, &dest_pid ))) return FALSE;
+    if (is_exiting_thread( info->dest_tid )) return FALSE;
+
+    thread_info->msg_source = msg_source_unavailable;
+    spy_enter_message( SPY_SENDMESSAGE, info->hwnd, info->msg, info->wparam, info->lparam );
+
+    if (info->dest_tid == GetCurrentThreadId())
+    {
+        result = call_window_proc( info->hwnd, info->msg, info->wparam, info->lparam,
+                                   !ansi, TRUE, info->wm_char, FALSE, NULL, 0 );
+        if (info->type == MSG_CALLBACK)
+            call_sendmsg_callback( info->callback, info->hwnd, info->msg, info->data, result );
+        ret = TRUE;
+    }
+    else
+    {
+        if (dest_pid != GetCurrentProcessId() && (info->type == MSG_ASCII || info->type == MSG_UNICODE))
+            info->type = MSG_OTHER_PROCESS;
+        ret = send_inter_thread_message( info, &result );
+    }
+
+    spy_exit_message( SPY_RESULT_OK, info->hwnd, info->msg, result, info->wparam, info->lparam );
+    thread_info->msg_source = prev_source;
+    if (ret && res_ptr) *res_ptr = result;
+    return ret;
 }
 
 /***********************************************************************
@@ -2070,12 +2651,11 @@ UINT_PTR WINAPI NtUserSetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC 
 /***********************************************************************
  *           NtUserSetSystemTimer (win32u.@)
  */
-UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
+UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout )
 {
     UINT_PTR ret;
-    WNDPROC winproc = 0;
 
-    if (proc) winproc = alloc_winproc( (WNDPROC)proc, TRUE );
+    TRACE( "window %p, id %#lx, timeout %u\n", hwnd, id, timeout );
 
     timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
 
@@ -2085,7 +2665,7 @@ UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIME
         req->msg    = WM_SYSTIMER;
         req->id     = id;
         req->rate   = timeout;
-        req->lparam = (ULONG_PTR)winproc;
+        req->lparam = 0;
         if (!wine_server_call_err( req ))
         {
             ret = reply->id;
@@ -2095,7 +2675,6 @@ UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIME
     }
     SERVER_END_REQ;
 
-    TRACE( "Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
     return ret;
 }
 
@@ -2133,59 +2712,241 @@ BOOL kill_system_timer( HWND hwnd, UINT_PTR id )
     return ret;
 }
 
-static BOOL send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-                                 LRESULT *result, BOOL ansi )
+static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
 {
-    /* FIXME: move implementation from user32 */
-    if (!user_callbacks) return FALSE;
-    *result = ansi
-        ? user_callbacks->pSendMessageA( hwnd, msg, wparam, lparam )
-        : user_callbacks->pSendMessageW( hwnd, msg, wparam, lparam );
-    return TRUE;
+    struct send_message_info info;
+    DWORD_PTR res = 0;
+
+    info.type    = ansi ? MSG_ASCII : MSG_UNICODE;
+    info.hwnd    = hwnd;
+    info.msg     = msg;
+    info.wparam  = wparam;
+    info.lparam  = lparam;
+    info.flags   = SMTO_NORMAL;
+    info.timeout = 0;
+    info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+
+    process_message( &info, &res, ansi );
+    return res;
+}
+
+/* see SendMessageTimeoutW */
+LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                              UINT flags, UINT timeout, DWORD_PTR *res_ptr, BOOL ansi )
+{
+    struct send_message_info info;
+
+    info.type    = ansi ? MSG_ASCII : MSG_UNICODE;
+    info.hwnd    = hwnd;
+    info.msg     = msg;
+    info.wparam  = wparam;
+    info.lparam  = lparam;
+    info.flags   = flags;
+    info.timeout = timeout;
+    info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+
+    return process_message( &info, res_ptr, ansi );
 }
 
 /* see SendMessageW */
 LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    LRESULT result = 0;
-    send_window_message( hwnd, msg, wparam, lparam, &result, FALSE );
-    return result;
+    return send_window_message( hwnd, msg, wparam, lparam, FALSE );
 }
 
 /* see SendNotifyMessageW */
 static BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
 {
-    return user_callbacks && user_callbacks->pSendNotifyMessageW( hwnd, msg, wparam, lparam );
+    struct send_message_info info;
+
+    if (is_pointer_message( msg, wparam ))
+    {
+        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        return FALSE;
+    }
+
+    info.type    = MSG_NOTIFY;
+    info.hwnd    = hwnd;
+    info.msg     = msg;
+    info.wparam  = wparam;
+    info.lparam  = lparam;
+    info.flags   = 0;
+    info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+
+    return process_message( &info, NULL, ansi );
 }
 
-/* see PostMessageW */
-LRESULT post_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+/* see SendMessageCallbackW */
+static BOOL send_message_callback( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                                   const struct send_message_callback_params *params, BOOL ansi )
 {
-    /* FIXME: move implementation from user32 */
-    if (!user_callbacks) return 0;
-    return user_callbacks->pPostMessageW( hwnd, msg, wparam, lparam );
+    struct send_message_info info;
+
+    if (is_pointer_message( msg, wparam ))
+    {
+        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        return FALSE;
+    }
+
+    info.type     = MSG_CALLBACK;
+    info.hwnd     = hwnd;
+    info.msg      = msg;
+    info.wparam   = wparam;
+    info.lparam   = lparam;
+    info.callback = params->callback;
+    info.data     = params->data;
+    info.flags    = 0;
+    info.wm_char  = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+
+    return process_message( &info, NULL, ansi );
 }
 
-BOOL WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-                               ULONG_PTR result_info, DWORD type, BOOL ansi )
+/***********************************************************************
+ *           NtUserPostMessage  (win32u.@)
+ */
+BOOL WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct send_message_info info;
+
+    if (is_pointer_message( msg, wparam ))
+    {
+        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        return FALSE;
+    }
+
+    TRACE( "hwnd %p msg %x (%s) wp %lx lp %lx\n",
+           hwnd, msg, debugstr_msg_name(msg, hwnd), wparam, lparam );
+
+    info.type   = MSG_POSTED;
+    info.hwnd   = hwnd;
+    info.msg    = msg;
+    info.wparam = wparam;
+    info.lparam = lparam;
+    info.flags  = 0;
+
+    if (is_broadcast(hwnd)) return broadcast_message( &info, NULL );
+
+    if (!hwnd) return NtUserPostThreadMessage( GetCurrentThreadId(), msg, wparam, lparam );
+
+    if (!(info.dest_tid = get_window_thread( hwnd, NULL ))) return FALSE;
+
+    if (is_exiting_thread( info.dest_tid )) return TRUE;
+
+    return put_message_in_queue( &info, NULL );
+}
+
+/**********************************************************************
+ *           NtUserPostThreadMessage  (win32u.@)
+ */
+BOOL WINAPI NtUserPostThreadMessage( DWORD thread, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    struct send_message_info info;
+
+    if (is_pointer_message( msg, wparam ))
+    {
+        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        return FALSE;
+    }
+    if (is_exiting_thread( thread )) return TRUE;
+
+    info.type     = MSG_POSTED;
+    info.dest_tid = thread;
+    info.hwnd     = 0;
+    info.msg      = msg;
+    info.wparam   = wparam;
+    info.lparam   = lparam;
+    info.flags    = 0;
+    return put_message_in_queue( &info, NULL );
+}
+
+LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                                  void *result_info, DWORD type, BOOL ansi )
 {
     switch (type)
     {
-    case FNID_CALLWNDPROC:
+    case NtUserDefWindowProc:
+        return default_window_proc( hwnd, msg, wparam, lparam, ansi );
+    case NtUserCallWindowProc:
         return init_win_proc_params( (struct win_proc_params *)result_info, hwnd, msg,
                                      wparam, lparam, ansi );
-    case FNID_SENDMESSAGE:
-        return send_window_message( hwnd, msg, wparam, lparam, (LRESULT *)result_info, ansi );
-    case FNID_SENDNOTIFYMESSAGE:
+    case NtUserSendMessage:
+        return send_window_message( hwnd, msg, wparam, lparam, ansi );
+    case NtUserSendMessageTimeout:
+        {
+            struct send_message_timeout_params *params = (void *)result_info;
+            DWORD_PTR res = 0;
+            params->result = send_message_timeout( hwnd, msg, wparam, lparam, params->flags,
+                                                   params->timeout, &res, ansi );
+            return res;
+        }
+    case NtUserSendNotifyMessage:
         return send_notify_message( hwnd, msg, wparam, lparam, ansi );
-    case FNID_SPYENTER:
+    case NtUserSendMessageCallback:
+        return send_message_callback( hwnd, msg, wparam, lparam, (void *)result_info, ansi );
+    case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );
         return 0;
-    case FNID_SPYEXIT:
-        spy_exit_message( ansi, hwnd, msg, result_info, wparam, lparam );
+    case NtUserSpyExit:
+        spy_exit_message( ansi, hwnd, msg, (LPARAM)result_info, wparam, lparam );
         return 0;
     default:
-        FIXME( "%p %x %lx %lx %lx %x %x\n", hwnd, msg, wparam, lparam, result_info, type, ansi );
+        FIXME( "%p %x %lx %lx %p %x %x\n", hwnd, msg, wparam, lparam, result_info, type, ansi );
     }
     return 0;
+}
+
+/***********************************************************************
+ *           NtUserTranslateMessage (win32u.@)
+ */
+BOOL WINAPI NtUserTranslateMessage( const MSG *msg, UINT flags )
+{
+    UINT message;
+    WCHAR wp[8];
+    BYTE state[256];
+    INT len;
+
+    if (flags) FIXME( "unsupported flags %x\n", flags );
+
+    if (msg->message < WM_KEYFIRST || msg->message > WM_KEYLAST) return FALSE;
+    if (msg->message != WM_KEYDOWN && msg->message != WM_SYSKEYDOWN) return TRUE;
+
+    TRACE_(key)( "Translating key %s (%04lX), scancode %04x\n",
+                 debugstr_vkey_name( msg->wParam ), msg->wParam, HIWORD(msg->lParam) );
+
+    switch (msg->wParam)
+    {
+    case VK_PACKET:
+        message = (msg->message == WM_KEYDOWN) ? WM_CHAR : WM_SYSCHAR;
+        TRACE_(key)( "PostMessageW(%p,%s,%04x,%08x)\n", msg->hwnd,
+                     debugstr_msg_name( message, msg->hwnd ),
+                     HIWORD(msg->lParam), LOWORD(msg->lParam) );
+        NtUserPostMessage( msg->hwnd, message, HIWORD(msg->lParam), LOWORD(msg->lParam) );
+        return TRUE;
+
+    case VK_PROCESSKEY:
+        return user_callbacks && user_callbacks->pImmTranslateMessage( msg->hwnd, msg->message,
+                                                                       msg->wParam, msg->lParam );
+    }
+
+    NtUserGetKeyboardState( state );
+    len = NtUserToUnicodeEx( msg->wParam, HIWORD(msg->lParam), state, wp, ARRAY_SIZE(wp), 0,
+                             NtUserGetKeyboardLayout(0) );
+    if (len == -1)
+    {
+        message = msg->message == WM_KEYDOWN ? WM_DEADCHAR : WM_SYSDEADCHAR;
+        TRACE_(key)( "-1 -> PostMessageW(%p,%s,%04x,%08lx)\n",
+                     msg->hwnd, debugstr_msg_name( message, msg->hwnd ), wp[0], msg->lParam );
+        NtUserPostMessage( msg->hwnd, message, wp[0], msg->lParam );
+    }
+    else if (len > 0)
+    {
+        INT i;
+
+        message = msg->message == WM_KEYDOWN ? WM_CHAR : WM_SYSCHAR;
+        TRACE_(key)( "%d -> PostMessageW(%p,%s,<x>,%08lx) for <x> in %s\n", len, msg->hwnd,
+                     debugstr_msg_name(message, msg->hwnd), msg->lParam, debugstr_wn(wp, len) );
+        for (i = 0; i < len; i++)
+            NtUserPostMessage( msg->hwnd, message, wp[i], msg->lParam );
+    }
+    return TRUE;
 }

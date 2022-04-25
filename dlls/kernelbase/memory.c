@@ -585,7 +585,11 @@ struct kernelbase_global_data
     struct mem_entry *mem_entries_end;
 };
 
-#include "pshpack1.h"
+#define MEM_FLAG_USED        1
+#define MEM_FLAG_MOVEABLE    2
+#define MEM_FLAG_DISCARDABLE 4
+#define MEM_FLAG_DISCARDED   8
+#define MEM_FLAG_DDESHARE    0x8000
 
 struct mem_entry
 {
@@ -593,28 +597,20 @@ struct mem_entry
     {
         struct
         {
-            WORD magic;
-            void *ptr;
-            BYTE flags;
+            WORD flags;
             BYTE lock;
         };
         void *next_free;
     };
+    void *ptr;
 };
 
-#include "poppack.h"
+C_ASSERT(sizeof(struct mem_entry) == 2 * sizeof(void *));
 
 #define MAX_MEM_HANDLES  0x10000
-static struct mem_entry mem_entries[MAX_MEM_HANDLES];
-static struct mem_entry *next_free_mem = mem_entries;
+static struct mem_entry *next_free_mem;
+static struct kernelbase_global_data global_data = {0};
 
-static struct kernelbase_global_data kernelbase_global_data =
-{
-    .mem_entries = mem_entries,
-    .mem_entries_end = mem_entries + MAX_MEM_HANDLES,
-};
-
-#define MAGIC_LOCAL_USED    0x5342
 /* align the storage needed for the HLOCAL on an 8-byte boundary thus
  * LocalAlloc/LocalReAlloc'ing with LMEM_MOVEABLE of memory with
  * size = 8*k, where k=1,2,3,... allocs exactly the given size.
@@ -625,24 +621,31 @@ static struct kernelbase_global_data kernelbase_global_data =
 static inline struct mem_entry *unsafe_mem_from_HLOCAL( HLOCAL handle )
 {
     struct mem_entry *mem = CONTAINING_RECORD( handle, struct mem_entry, ptr );
-    struct kernelbase_global_data *data = &kernelbase_global_data;
-    if (!((ULONG_PTR)handle & 2)) return NULL;
+    struct kernelbase_global_data *data = &global_data;
+    if (((UINT_PTR)handle & ((sizeof(void *) << 1) - 1)) != sizeof(void *)) return NULL;
     if (mem < data->mem_entries || mem >= data->mem_entries_end) return NULL;
-    if (mem->magic != MAGIC_LOCAL_USED) return NULL;
+    if (!(mem->flags & MEM_FLAG_USED)) return NULL;
     return mem;
 }
 
 static inline HLOCAL HLOCAL_from_mem( struct mem_entry *mem )
 {
+    if (!mem) return 0;
     return &mem->ptr;
 }
 
 static inline void *unsafe_ptr_from_HLOCAL( HLOCAL handle )
 {
-    if ((ULONG_PTR)handle & 2) return NULL;
+    if (((UINT_PTR)handle & ((sizeof(void *) << 1) - 1))) return NULL;
     return handle;
 }
 
+void init_global_data(void)
+{
+    global_data.mem_entries = VirtualAlloc( NULL, MAX_MEM_HANDLES * sizeof(struct mem_entry), MEM_COMMIT, PAGE_READWRITE );
+    if (!(next_free_mem = global_data.mem_entries)) ERR( "Failed to allocate kernelbase global handle table\n" );
+    global_data.mem_entries_end = global_data.mem_entries + MAX_MEM_HANDLES;
+}
 
 /***********************************************************************
  *           KernelBaseGetGlobalData   (kernelbase.@)
@@ -650,7 +653,7 @@ static inline void *unsafe_ptr_from_HLOCAL( HLOCAL handle )
 void *WINAPI KernelBaseGetGlobalData(void)
 {
     WARN_(globalmem)( "semi-stub!\n" );
-    return &kernelbase_global_data;
+    return &global_data;
 }
 
 
@@ -659,13 +662,18 @@ void *WINAPI KernelBaseGetGlobalData(void)
  */
 HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalAlloc( UINT flags, SIZE_T size )
 {
-    /* mask out obsolete flags */
-    flags &= ~(GMEM_NOCOMPACT | GMEM_NOT_BANKED | GMEM_NOTIFY);
+    struct mem_entry *mem;
+    HGLOBAL handle;
 
     /* LocalAlloc allows a 0-size fixed block, but GlobalAlloc doesn't */
     if (!(flags & GMEM_MOVEABLE) && !size) size = 1;
 
-    return LocalAlloc( flags, size );
+    handle = LocalAlloc( flags, size );
+
+    if ((mem = unsafe_mem_from_HLOCAL( handle )) && (flags & GMEM_DDESHARE))
+        mem->flags |= MEM_FLAG_DDESHARE;
+
+    return handle;
 }
 
 
@@ -701,7 +709,7 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
     }
 
     RtlLockHeap( heap );
-    if ((mem = next_free_mem) < mem_entries || mem >= mem_entries + MAX_MEM_HANDLES)
+    if ((mem = next_free_mem) < global_data.mem_entries || mem >= global_data.mem_entries_end)
         mem = NULL;
     else
     {
@@ -714,12 +722,13 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
     if (!mem) goto failed;
     handle = HLOCAL_from_mem( mem );
 
-    mem->magic = MAGIC_LOCAL_USED;
-    mem->flags = flags >> 8;
+    mem->flags = MEM_FLAG_USED | MEM_FLAG_MOVEABLE;
+    if (flags & LMEM_DISCARDABLE) mem->flags |= MEM_FLAG_DISCARDABLE;
     mem->lock  = 0;
     mem->ptr   = NULL;
 
-    if (size)
+    if (!size) mem->flags |= MEM_FLAG_DISCARDED;
+    else
     {
         if (!(ptr = HeapAlloc( heap, heap_flags, size + HLOCAL_STORAGE ))) goto failed;
         *(HLOCAL *)ptr = handle;
@@ -776,6 +785,7 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalFree( HLOCAL handle )
  */
 LPVOID WINAPI DECLSPEC_HOTPATCH LocalLock( HLOCAL handle )
 {
+    HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     void *ret = NULL;
 
@@ -796,28 +806,19 @@ LPVOID WINAPI DECLSPEC_HOTPATCH LocalLock( HLOCAL handle )
         return ret;
     }
 
-    RtlLockHeap( GetProcessHeap() );
-    __TRY
+    RtlLockHeap( heap );
+    if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {
-        if ((mem = unsafe_mem_from_HLOCAL( handle )))
-        {
-            ret = mem->ptr;
-            if (!mem->ptr) SetLastError( ERROR_DISCARDED );
-            else if (mem->lock < LMEM_LOCKCOUNT) mem->lock++;
-        }
-        else
-        {
-            WARN_(globalmem)( "invalid handle %p\n", handle );
-            SetLastError( ERROR_INVALID_HANDLE );
-        }
+        if (!(ret = mem->ptr)) SetLastError( ERROR_DISCARDED );
+        else if (!++mem->lock) mem->lock--;
     }
-    __EXCEPT_PAGE_FAULT
+    else
     {
-        WARN_(globalmem)( "(%p): Page fault occurred ! Caused by bug ?\n", handle );
+        WARN_(globalmem)( "invalid handle %p\n", handle );
         SetLastError( ERROR_INVALID_HANDLE );
     }
-    __ENDTRY
-    RtlUnlockHeap( GetProcessHeap() );
+    RtlUnlockHeap( heap );
+
     return ret;
 }
 
@@ -927,6 +928,7 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
  */
 BOOL WINAPI DECLSPEC_HOTPATCH LocalUnlock( HLOCAL handle )
 {
+    HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     BOOL ret = FALSE;
 
@@ -938,36 +940,27 @@ BOOL WINAPI DECLSPEC_HOTPATCH LocalUnlock( HLOCAL handle )
         return FALSE;
     }
 
-    RtlLockHeap( GetProcessHeap() );
-    __TRY
+    RtlLockHeap( heap );
+    if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {
-        if ((mem = unsafe_mem_from_HLOCAL( handle )))
+        if (mem->lock)
         {
-            if (mem->lock)
-            {
-                mem->lock--;
-                ret = (mem->lock != 0);
-                if (!ret) SetLastError( NO_ERROR );
-            }
-            else
-            {
-                WARN_(globalmem)( "%p not locked\n", handle );
-                SetLastError( ERROR_NOT_LOCKED );
-            }
+            ret = (--mem->lock != 0);
+            if (!ret) SetLastError( NO_ERROR );
         }
         else
         {
-            WARN_(globalmem)( "invalid handle %p\n", handle );
-            SetLastError( ERROR_INVALID_HANDLE );
+            WARN_(globalmem)( "handle %p not locked\n", handle );
+            SetLastError( ERROR_NOT_LOCKED );
         }
     }
-    __EXCEPT_PAGE_FAULT
+    else
     {
-        WARN_(globalmem)( "(%p): Page fault occurred ! Caused by bug ?\n", handle );
-        SetLastError( ERROR_INVALID_PARAMETER );
+        WARN_(globalmem)( "invalid handle %p\n", handle );
+        SetLastError( ERROR_INVALID_HANDLE );
     }
-    __ENDTRY
-    RtlUnlockHeap( GetProcessHeap() );
+    RtlUnlockHeap( heap );
+
     return ret;
 }
 

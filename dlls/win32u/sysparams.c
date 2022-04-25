@@ -1547,6 +1547,27 @@ RECT get_virtual_screen_rect( UINT dpi )
     return rect;
 }
 
+static BOOL is_window_rect_full_screen( const RECT *rect )
+{
+    struct monitor *monitor;
+    BOOL ret = FALSE;
+
+    if (!lock_display_devices()) return FALSE;
+
+    LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
+    {
+        if (rect->left <= monitor->rc_monitor.left && rect->right >= monitor->rc_monitor.right &&
+            rect->top <= monitor->rc_monitor.top && rect->bottom >= monitor->rc_monitor.bottom)
+        {
+            ret = TRUE;
+            break;
+        }
+    }
+
+    unlock_display_devices();
+    return ret;
+}
+
 RECT get_display_rect( const WCHAR *display )
 {
     struct monitor *monitor;
@@ -1970,7 +1991,7 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
 
         monrect = map_dpi_rect( monitor->rc_monitor, get_monitor_dpi( monitor->handle ),
                                 get_thread_dpi() );
-        offset_rect( &monrect, -origin.x, -origin.y );
+        OffsetRect( &monrect, -origin.x, -origin.y );
         if (!intersect_rect( &monrect, &monrect, &limit )) continue;
 
         enum_info[count].handle = monitor->handle;
@@ -2049,7 +2070,7 @@ HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi )
     RECT r;
 
     r = map_dpi_rect( *rect, dpi, system_dpi );
-    if (is_rect_empty( &r ))
+    if (IsRectEmpty( &r ))
     {
         r.right = r.left + 1;
         r.bottom = r.top + 1;
@@ -2659,7 +2680,7 @@ static void logfont16to32( const LOGFONT16 *font16, LPLOGFONTW font32 )
     font32->lfClipPrecision = font16->lfClipPrecision;
     font32->lfQuality = font16->lfQuality;
     font32->lfPitchAndFamily = font16->lfPitchAndFamily;
-    win32u_mbtowc( NULL, font32->lfFaceName, LF_FACESIZE, font16->lfFaceName,
+    win32u_mbtowc( &ansi_cp, font32->lfFaceName, LF_FACESIZE, font16->lfFaceName,
                    strlen( font16->lfFaceName ));
     font32->lfFaceName[LF_FACESIZE-1] = 0;
 }
@@ -4103,9 +4124,8 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
     {
         static const WCHAR emptyW[1];
         if (winini & (SPIF_SENDWININICHANGE | SPIF_SENDCHANGE))
-            user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_SETTINGCHANGE,
-                                                  action, (LPARAM) emptyW,
-                                                  SMTO_ABORTIFHUNG, 2000, NULL );
+            send_message_timeout( HWND_BROADCAST, WM_SETTINGCHANGE, action, (LPARAM) emptyW,
+                                  SMTO_ABORTIFHUNG, 2000, NULL, FALSE );
     }
     TRACE( "(%u, %u, %p, %u) ret %d\n", action, val, ptr, winini, ret );
     return ret;
@@ -4230,7 +4250,7 @@ int get_system_metrics( int index )
     case SM_PENWINDOWS:
         return 0;
     case SM_DBCSENABLED:
-        return get_cptable(get_acp())->MaximumCharacterSize > 1;
+        return ansi_cp.MaximumCharacterSize > 1;
     case SM_CMOUSEBUTTONS:
         return 3;
     case SM_SECURE:
@@ -4547,8 +4567,8 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
             set_entry( &system_colors[colors[i]], values[i], 0, 0 );
 
     /* Send WM_SYSCOLORCHANGE message to all windows */
-    user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0,
-                                          SMTO_ABORTIFHUNG, 2000, NULL );
+    send_message_timeout( HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0,
+                          SMTO_ABORTIFHUNG, 2000, NULL, FALSE );
     /* Repaint affected portions of all visible windows */
     NtUserRedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
     return TRUE;
@@ -4633,23 +4653,28 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 {
     switch(code)
     {
-    case NtUserCreateMenu:
-        return HandleToUlong( create_menu() );
-    case NtUserGetDesktopWindow:
+    case NtUserCallNoParam_GetDesktopWindow:
         return HandleToUlong( get_desktop_window() );
-    case NtUserGetInputState:
+
+    case NtUserCallNoParam_GetInputState:
         return get_input_state();
-    case NtUserReleaseCapture:
+
+    case NtUserCallNoParam_ReleaseCapture:
         return release_capture();
+
     /* temporary exports */
     case NtUserExitingThread:
         exiting_thread_id = GetCurrentThreadId();
-    case NtUserProcessSentMessages:
-        process_sent_messages();
         return 0;
+
     case NtUserThreadDetach:
         thread_detach();
         return 0;
+
+    case NtUserUpdateClipboard:
+        user_driver->pUpdateClipboard();
+        return 0;
+
     default:
         FIXME( "invalid code %u\n", code );
         return 0;
@@ -4663,41 +4688,66 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 {
     switch(code)
     {
-    case NtUserBeginDeferWindowPos:
+    case NtUserCallOneParam_BeginDeferWindowPos:
         return HandleToUlong( begin_defer_window_pos( arg ));
-    case NtUserCreateCursorIcon:
+
+    case NtUserCallOneParam_CreateCursorIcon:
         return HandleToUlong( alloc_cursoricon_handle( arg ));
-    case NtUserDispatchMessageA:
+
+    case NtUserCallOneParam_CreateMenu:
+        return HandleToUlong( create_menu( arg ) );
+
+    case NtUserCallOneParam_DispatchMessageA:
         return dispatch_message( (const MSG *)arg, TRUE );
-    case NtUserEnableDC:
+
+    case NtUserCallOneParam_EnableDC:
         return set_dce_flags( UlongToHandle(arg), DCHF_ENABLEDC );
-    case NtUserEnableThunkLock:
+
+    case NtUserCallOneParam_EnableThunkLock:
         enable_thunk_lock = arg;
         return 0;
-    case NtUserGetClipCursor:
+
+    case NtUserCallOneParam_EnumClipboardFormats:
+        return enum_clipboard_formats( arg );
+
+    case NtUserCallOneParam_GetClipCursor:
         return get_clip_cursor( (RECT *)arg );
-    case NtUserGetCursorPos:
+
+    case NtUserCallOneParam_GetCursorPos:
         return get_cursor_pos( (POINT *)arg );
-    case NtUserGetIconParam:
+
+    case NtUserCallOneParam_GetIconParam:
         return get_icon_param( UlongToHandle(arg) );
-    case NtUserGetSysColor:
+
+    case NtUserCallOneParam_GetSysColor:
         return get_sys_color( arg );
-    case NtUserRealizePalette:
+
+    case NtUserCallOneParam_IsWindowRectFullScreen:
+        return is_window_rect_full_screen( (const RECT *)arg );
+
+    case NtUserCallOneParam_RealizePalette:
         return realize_palette( UlongToHandle(arg) );
-    case NtUserGetPrimaryMonitorRect:
+
+    case NtUserCallOneParam_GetPrimaryMonitorRect:
         *(RECT *)arg = get_primary_monitor_rect( 0 );
         return 1;
-    case NtUserGetSysColorBrush:
+
+    case NtUserCallOneParam_GetSysColorBrush:
         return HandleToUlong( get_sys_color_brush(arg) );
-    case NtUserGetSysColorPen:
+
+    case NtUserCallOneParam_GetSysColorPen:
         return HandleToUlong( get_sys_color_pen(arg) );
-    case NtUserGetSystemMetrics:
+
+    case NtUserCallOneParam_GetSystemMetrics:
         return get_system_metrics( arg );
-    case NtUserGetVirtualScreenRect:
+
+    case NtUserCallOneParam_GetVirtualScreenRect:
         *(RECT *)arg = get_virtual_screen_rect( 0 );
         return 1;
-    case NtUserMessageBeep:
+
+    case NtUserCallOneParam_MessageBeep:
         return message_beep( arg );
+
     /* temporary exports */
     case NtUserCallHooks:
         {
@@ -4705,18 +4755,13 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
             return call_hooks( params->id, params->code, params->wparam, params->lparam,
                                params->next_unicode );
         }
-    case NtUserFlushWindowSurfaces:
-        flush_window_surfaces( arg );
-        return 0;
+
     case NtUserGetDeskPattern:
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
+
     case NtUserGetWinProcPtr:
         return (UINT_PTR)get_winproc_ptr( UlongToHandle(arg) );
-    case NtUserHandleInternalMessage:
-        {
-            MSG *msg = (MSG *)arg;
-            return handle_internal_message( msg->hwnd, msg->message, msg->wParam, msg->lParam );
-        }
+
     case NtUserLock:
         switch( arg )
         {
@@ -4724,10 +4769,13 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         case 1: user_unlock(); return 0;
         default: user_check_not_lock(); return 0;
         }
+
     case NtUserSetCallbacks:
         return (UINT_PTR)InterlockedExchangePointer( (void **)&user_callbacks, (void *)arg );
+
     case NtUserSpyGetVKeyName:
         return (UINT_PTR)debugstr_vkey_name( arg );
+
     default:
         FIXME( "invalid code %u\n", code );
         return 0;
@@ -4741,25 +4789,34 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
 {
     switch(code)
     {
-    case NtUserGetMonitorInfo:
+    case NtUserCallTwoParam_GetMenuInfo:
+        return get_menu_info( UlongToHandle(arg1), (MENUINFO *)arg2 );
+
+    case NtUserCallTwoParam_GetMonitorInfo:
         return get_monitor_info( UlongToHandle(arg1), (MONITORINFO *)arg2 );
-    case NtUserGetSystemMetricsForDpi:
+
+    case NtUserCallTwoParam_GetSystemMetricsForDpi:
         return get_system_metrics_for_dpi( arg1, arg2 );
-    case NtUserMirrorRgn:
-        return mirror_window_region( UlongToHandle(arg1), UlongToHandle(arg2) );
-    case NtUserMonitorFromRect:
+
+    case NtUserCallTwoParam_MonitorFromRect:
         return HandleToUlong( monitor_from_rect( (const RECT *)arg1, arg2, get_thread_dpi() ));
-    case NtUserReplyMessage:
+
+    case NtUserCallTwoParam_ReplyMessage:
         return reply_message_result( arg1, (MSG *)arg2 );
-    case NtUserSetIconParam:
+
+    case NtUserCallTwoParam_SetIconParam:
         return set_icon_param( UlongToHandle(arg1), arg2 );
-    case NtUserUnhookWindowsHook:
+
+    case NtUserCallTwoParam_UnhookWindowsHook:
         return unhook_windows_hook( arg1, (HOOKPROC)arg2 );
+
     /* temporary exports */
     case NtUserAllocWinProc:
         return (UINT_PTR)alloc_winproc( (WNDPROC)arg1, arg2 );
+
     case NtUserGetHandlePtr:
         return (UINT_PTR)get_user_handle_ptr( UlongToHandle(arg1), arg2 );
+
     default:
         FIXME( "invalid code %u\n", code );
         return 0;

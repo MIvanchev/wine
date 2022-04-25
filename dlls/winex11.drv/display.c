@@ -29,22 +29,26 @@ struct x11drv_display_device_handler desktop_handler;
 
 HANDLE get_display_device_init_mutex(void)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
-    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
+    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
+    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE mutex = 0;
 
-    WaitForSingleObject(mutex, INFINITE);
+    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
+    NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE );
+    if (mutex) NtWaitForSingleObject( mutex, FALSE, NULL );
     return mutex;
 }
 
 void release_display_device_init_mutex(HANDLE mutex)
 {
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
+    NtReleaseMutant( mutex, NULL );
+    NtClose( mutex );
 }
 
 POINT virtual_screen_to_root(INT x, INT y)
 {
-    RECT virtual = get_virtual_screen_rect();
+    RECT virtual = NtUserGetVirtualScreenRect();
     POINT pt;
 
     pt.x = x - virtual.left;
@@ -54,26 +58,12 @@ POINT virtual_screen_to_root(INT x, INT y)
 
 POINT root_to_virtual_screen(INT x, INT y)
 {
-    RECT virtual = get_virtual_screen_rect();
+    RECT virtual = NtUserGetVirtualScreenRect();
     POINT pt;
 
     pt.x = x + virtual.left;
     pt.y = y + virtual.top;
     return pt;
-}
-
-RECT get_virtual_screen_rect(void)
-{
-    RECT virtual;
-    NtUserCallOneParam( (UINT_PTR)&virtual, NtUserGetVirtualScreenRect );
-    return virtual;
-}
-
-RECT get_primary_monitor_rect(void)
-{
-    RECT primary;
-    NtUserCallOneParam( (UINT_PTR)&primary, NtUserGetPrimaryMonitorRect );
-    return primary;
 }
 
 /* Get the primary monitor rect from the host system */
@@ -188,39 +178,17 @@ void X11DRV_DisplayDevices_RegisterEventHandlers(void)
         handler->register_event_handlers();
 }
 
-static BOOL CALLBACK update_windows_on_display_change(HWND hwnd, LPARAM lparam)
-{
-    struct x11drv_win_data *data;
-    UINT mask = (UINT)lparam;
-
-    if (!(data = get_win_data(hwnd)))
-        return TRUE;
-
-    /* update the full screen state */
-    update_net_wm_states(data);
-
-    if (mask && data->whole_window)
-    {
-        POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
-        XWindowChanges changes;
-        changes.x = pos.x;
-        changes.y = pos.y;
-        XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
-    }
-    release_win_data(data);
-    return TRUE;
-}
-
 void X11DRV_DisplayDevices_Update(BOOL send_display_change)
 {
     RECT old_virtual_rect, new_virtual_rect;
     DWORD tid, pid;
     HWND foreground;
-    UINT mask = 0;
+    UINT mask = 0, i;
+    HWND *list;
 
-    old_virtual_rect = get_virtual_screen_rect();
+    old_virtual_rect = NtUserGetVirtualScreenRect();
     X11DRV_DisplayDevices_Init(TRUE);
-    new_virtual_rect = get_virtual_screen_rect();
+    new_virtual_rect = NtUserGetVirtualScreenRect();
 
     /* Calculate XReconfigureWMWindow() mask */
     if (old_virtual_rect.left != new_virtual_rect.left)
@@ -229,20 +197,43 @@ void X11DRV_DisplayDevices_Update(BOOL send_display_change)
         mask |= CWY;
 
     X11DRV_resize_desktop(send_display_change);
-    EnumWindows(update_windows_on_display_change, (LPARAM)mask);
+
+    list = build_hwnd_list();
+    for (i = 0; list && list[i] != HWND_BOTTOM; i++)
+    {
+        struct x11drv_win_data *data;
+
+        if (!(data = get_win_data( list[i] ))) continue;
+
+        /* update the full screen state */
+        update_net_wm_states(data);
+
+        if (mask && data->whole_window)
+        {
+            POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
+            XWindowChanges changes;
+            changes.x = pos.x;
+            changes.y = pos.y;
+            XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
+        }
+        release_win_data(data);
+    }
+
+    free( list );
 
     /* forward clip_fullscreen_window request to the foreground window */
-    if ((foreground = GetForegroundWindow()) && (tid = GetWindowThreadProcessId( foreground, &pid )) && pid == GetCurrentProcessId())
+    if ((foreground = NtUserGetForegroundWindow()) &&
+        (tid = NtUserGetWindowThread( foreground, &pid )) && pid == GetCurrentProcessId())
     {
         if (tid == GetCurrentThreadId()) clip_fullscreen_window( foreground, TRUE );
-        else SendNotifyMessageW( foreground, WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
+        else send_notify_message( foreground, WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
     }
 }
 
 static BOOL force_display_devices_refresh;
 
-void CDECL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                        BOOL force, void *param )
+void X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
+                                  BOOL force, void *param )
 {
     struct x11drv_display_device_handler *handler;
     struct gdi_adapter *adapters;

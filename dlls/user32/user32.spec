@@ -33,7 +33,7 @@
 @ stdcall CallWindowProcW(ptr long long long long)
 @ stdcall CascadeChildWindows(long long)
 @ stdcall CascadeWindows(long long ptr long ptr)
-@ stdcall ChangeClipboardChain(long long)
+@ stdcall ChangeClipboardChain(long long) NtUserChangeClipboardChain
 @ stdcall ChangeDisplaySettingsA(ptr long)
 @ stdcall ChangeDisplaySettingsExA(str ptr long long ptr)
 @ stdcall ChangeDisplaySettingsExW(wstr ptr long long ptr)
@@ -63,7 +63,7 @@
 @ stdcall -import CharUpperBuffW(wstr long)
 @ stdcall -import CharUpperW(wstr)
 @ stdcall CheckDlgButton(long long long)
-@ stdcall CheckMenuItem(long long long)
+@ stdcall CheckMenuItem(long long long) NtUserCheckMenuItem
 @ stdcall CheckMenuRadioItem(long long long long long)
 @ stdcall CheckRadioButton(long long long long)
 @ stdcall ChildWindowFromPoint(long int64)
@@ -73,7 +73,7 @@
 @ stub ClientThreadSetup
 @ stdcall ClientToScreen(long ptr)
 @ stdcall -import ClipCursor(ptr) NtUserClipCursor
-@ stdcall CloseClipboard()
+@ stdcall CloseClipboard() NtUserCloseClipboard
 @ stdcall CloseDesktop(long) NtUserCloseDesktop
 @ stdcall CloseTouchInputHandle(long)
 @ stdcall CloseWindow(long)
@@ -203,7 +203,7 @@
 @ stdcall DrawTextW(long wstr long ptr long)
 @ stdcall EditWndProc(long long long long) EditWndProcA
 @ stdcall EmptyClipboard()
-@ stdcall EnableMenuItem(long long long)
+@ stdcall EnableMenuItem(long long long) NtUserEnableMenuItem
 @ stdcall EnableMouseInPointer(long)
 @ stdcall EnableNonClientDpiScaling(long)
 @ stdcall EnableScrollBar(long long long)
@@ -237,7 +237,7 @@
 @ stdcall EnumWindowStationsW(ptr long)
 @ stdcall EnumWindows(ptr long)
 @ stdcall EqualRect(ptr ptr)
-@ stdcall ExcludeUpdateRgn(long long)
+@ stdcall ExcludeUpdateRgn(long long) NtUserExcludeUpdateRgn
 @ stdcall ExitWindowsEx(long long)
 @ stdcall FillRect(long ptr long)
 @ stdcall FindWindowA(str str)
@@ -338,7 +338,7 @@
 @ stdcall GetMenuItemID(long long)
 @ stdcall GetMenuItemInfoA(long long long ptr)
 @ stdcall GetMenuItemInfoW(long long long ptr)
-@ stdcall GetMenuItemRect(long long long ptr)
+@ stdcall GetMenuItemRect(long long long ptr) NtUserGetMenuItemRect
 @ stdcall GetMenuState(long long long)
 @ stdcall GetMenuStringA(long long ptr long long)
 @ stdcall GetMenuStringW(long long ptr long long)
@@ -571,7 +571,7 @@
 @ stdcall PostMessageW(long long long long)
 @ stdcall PostQuitMessage(long)
 @ stdcall PostThreadMessageA(long long long long)
-@ stdcall PostThreadMessageW(long long long long)
+@ stdcall PostThreadMessageW(long long long long) NtUserPostThreadMessage
 @ stdcall PrintWindow(long long long)
 @ stdcall PrivateExtractIconExA(str long ptr ptr long)
 @ stdcall PrivateExtractIconExW(wstr long ptr ptr long)
@@ -655,7 +655,7 @@
 @ stdcall SetClassLongW(long long long)
 @ stdcall SetClassWord(long long long) NtUserSetClassWord
 @ stdcall SetClipboardData(long long)
-@ stdcall SetClipboardViewer(long)
+@ stdcall SetClipboardViewer(long) NtUserSetClipboardViewer
 @ stdcall SetCoalescableTimer(long long long ptr long) NtUserSetTimer
 # @ stub SetConsoleReserveKeys
 @ stdcall -import SetCursor(long) NtUserSetCursor
@@ -678,9 +678,9 @@
 @ stdcall SetLastErrorEx(long long)
 @ stdcall SetLayeredWindowAttributes(ptr long long long) NtUserSetLayeredWindowAttributes
 @ stdcall SetLogonNotifyWindow(long long)
-@ stdcall SetMenu(long long)
-@ stdcall SetMenuContextHelpId(long long)
-@ stdcall SetMenuDefaultItem(long long long)
+@ stdcall SetMenu(long long) NtUserSetMenu
+@ stdcall SetMenuContextHelpId(long long) NtUserSetMenuContextHelpId
+@ stdcall SetMenuDefaultItem(long long long) NtUserSetMenuDefaultItem
 @ stdcall SetMenuInfo(long ptr)
 @ stdcall SetMenuItemBitmaps(long long long long long)
 @ stdcall SetMenuItemInfoA(long long long ptr)
@@ -708,7 +708,7 @@
 @ stdcall SetSysColorsTemp(ptr ptr long)
 @ stdcall SetSystemCursor(long long)
 @ stdcall SetSystemMenu(long long)
-@ stdcall SetSystemTimer(long long long ptr) NtUserSetSystemTimer
+@ stdcall SetSystemTimer(long long long ptr)
 @ stdcall SetTaskmanWindow (long)
 @ stdcall SetThreadDesktop(long) NtUserSetThreadDesktop
 @ stdcall SetThreadDpiAwarenessContext(ptr)
@@ -831,12 +831,3 @@
 @ varargs wsprintfW(wstr wstr)
 @ stdcall wvsprintfA(ptr str ptr)
 @ stdcall wvsprintfW(ptr wstr ptr)
-
-################################################################
-# Wine internal extensions
-#
-# All functions must be prefixed with '__wine_' (for internal functions)
-# or 'wine_' (for user-visible functions) to avoid namespace conflicts.
-#
-@ cdecl __wine_set_pixel_format(long long)
-@ cdecl __wine_set_user_driver(ptr long)

@@ -1540,12 +1540,7 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
 {
     TRACE("hwnd %p WM_SYSCOMMAND %lx %lx\n", hwnd, wParam, lParam );
 
-    if (!IsWindowEnabled( hwnd )) return 0;
-
-    if (HOOK_CallHooks( WH_CBT, HCBT_SYSCOMMAND, wParam, lParam, TRUE ))
-        return 0;
-
-    if (!USER_Driver->pSysCommand( hwnd, wParam, lParam ))
+    if (!NtUserMessageCall( hwnd, WM_SYSCOMMAND, wParam, lParam, 0, NtUserDefWindowProc, FALSE ))
         return 0;
 
     switch (wParam & 0xfff0)
@@ -1553,23 +1548,6 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
     case SC_SIZE:
     case SC_MOVE:
         WINPOS_SysCommandSizeMove( hwnd, wParam );
-        break;
-
-    case SC_MINIMIZE:
-        ShowOwnedPopups(hwnd,FALSE);
-        NtUserShowWindow( hwnd, SW_MINIMIZE );
-        break;
-
-    case SC_MAXIMIZE:
-        if (IsIconic(hwnd))
-            ShowOwnedPopups(hwnd,TRUE);
-        NtUserShowWindow( hwnd, SW_MAXIMIZE );
-        break;
-
-    case SC_RESTORE:
-        if (IsIconic(hwnd))
-            ShowOwnedPopups(hwnd,TRUE);
-        NtUserShowWindow( hwnd, SW_RESTORE );
         break;
 
     case SC_CLOSE:

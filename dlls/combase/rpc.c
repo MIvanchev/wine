@@ -77,7 +77,7 @@ struct registered_if
 static inline void get_rpc_endpoint(LPWSTR endpoint, const OXID *oxid)
 {
     /* FIXME: should get endpoint from rpcss */
-    wsprintfW(endpoint, L"\\pipe\\OLE_%08lx%08lx", (DWORD)(*oxid >> 32), (DWORD)*oxid);
+    wsprintfW(endpoint, L"\\pipe\\OLE_%016I64x", *oxid);
 }
 
 typedef struct
@@ -537,6 +537,12 @@ static HRESULT create_surrogate_server(REFCLSID rclsid, HANDLE *process)
     LONG ret;
 
     TRACE("Attempting to start surrogate server for %s\n", debugstr_guid(rclsid));
+
+    hr = open_key_for_clsid(rclsid, NULL, KEY_READ, &key);
+    if (FAILED(hr) && (arch == 64 || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
+        hr = open_key_for_clsid(rclsid, NULL, opposite | KEY_READ, &key);
+    if (FAILED(hr)) return hr;
+    RegCloseKey(key);
 
     hr = open_appidkey_from_clsid(rclsid, KEY_READ, &key);
     if (FAILED(hr) && (arch == 64 || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
