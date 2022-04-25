@@ -1317,19 +1317,9 @@ then
     opengl_msg=""
     if test "x$with_opengl" != "xno"
     then
-	WINE_CHECK_SONAME(GL,glXCreateContext,
-		     [OPENGL_LIBS="-lGL"],
-                     [WINE_CHECK_SONAME(GL,glXCreateContext,
-			    [OPENGL_LIBS="-Xlinker -dylib_file -Xlinker /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib -lGL"],
-			    [if test -f /usr/X11R6/lib/libGL.a
-                            then
-	                        opengl_msg="/usr/X11R6/lib/libGL.a is present on your system.
-This probably prevents linking to OpenGL. Try deleting the file and restarting configure."
-                            else
-                                opengl_msg="No OpenGL library found on this system."
-                            fi],
-			    $X_LIBS -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
-		     $X_LIBS -lm $X_EXTRA_LIBS)
+	WINE_CHECK_LIB(GL,glXCreateContext,
+                     [OPENGL_LIBS="$GL_LIBS"],
+                     [opengl_msg="No OpenGL library found on this system."])
         if test "x$with_osmesa" != "xno"
         then
             WINE_CHECK_SONAME(OSMesa,OSMesaGetProcAddress,,,[$X_LIBS -lm $X_EXTRA_LIBS])
@@ -1559,7 +1549,9 @@ then
     WINE_PACKAGE_FLAGS(PULSE,[libpulse],,,,
         [AC_CHECK_HEADERS(pulse/pulseaudio.h,
             [AC_CHECK_LIB(pulse, pa_stream_is_corked,
-                [PULSE_LIBS="$PULSE_LIBS -lm -ldl -lrt"],[PULSE_LIBS=""],[$PULSE_LIBS -lm -ldl -lrt])],
+                [PULSE_LIBS="$PULSE_LIBS $DBUS_LIBS -lm -ldl -lrt"],
+                [PULSE_LIBS=""],
+                [$PULSE_LIBS $DBUS_LIBS -lm -ldl -lrt])],
             [PULSE_LIBS=""])])
 fi
 WINE_NOTICE_WITH(pulse, [test -z "$PULSE_LIBS"],
@@ -1591,10 +1583,10 @@ then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access_mask,
         [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]],
                                             [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
-                           [ALSA_LIBS="$ALSA_LIBS -lm -ldl -lpthread"],
+                           [ALSA_LIBS="$(pkg-config --libs --static alsa)"],
                            [ALSA_LIBS=""])],
         [ALSA_LIBS=""],
-        [$ALSA_LIBS -lm -ldl -pthread])
+        [$(pkg-config --libs --static alsa)])
 fi
 test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
 

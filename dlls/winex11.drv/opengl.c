@@ -280,8 +280,8 @@ static const BOOL is_win64 = sizeof(void *) > sizeof(int);
 
 static struct opengl_funcs opengl_funcs;
 
-#define USE_GL_FUNC(name) #name,
-static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
+#define USE_GL_FUNC(name) &name,
+static const void *opengl_func_ptrs[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
 static void X11DRV_WineGL_LoadExtensions(void);
@@ -355,7 +355,8 @@ static void (*pglXDestroyWindow)( Display *dpy, GLXWindow win );
 
 /* GLX Extensions */
 static GLXContext (*pglXCreateContextAttribsARB)(Display *dpy, GLXFBConfig config, GLXContext share_context, Bool direct, const int *attrib_list);
-static void* (*pglXGetProcAddressARB)(const GLubyte *);
+/* extern void *glXGetProcAddressARB(const GLubyte  *procName); */
+#define pglXGetProcAddressARB glXGetProcAdressARB
 static void (*pglXSwapIntervalEXT)(Display *dpy, GLXDrawable drawable, int interval);
 static int   (*pglXSwapIntervalSGI)(int);
 
@@ -532,30 +533,14 @@ done:
     return ret;
 }
 
-static void *opengl_handle;
-
 static void init_opengl(void)
 {
     int error_base, event_base;
     unsigned int i;
 
-    /* No need to load any other libraries as according to the ABI, libGL should be self-sufficient
-       and include all dependencies */
-    opengl_handle = dlopen( SONAME_LIBGL, RTLD_NOW | RTLD_GLOBAL );
-    if (opengl_handle == NULL)
+    for (i = 0; i < ARRAY_SIZE( opengl_func_ptrs ); i++)
     {
-        ERR( "Failed to load libGL: %s\n", dlerror() );
-        ERR( "OpenGL support is disabled.\n");
-        return;
-    }
-
-    for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
-    {
-        if (!(((void **)&opengl_funcs.gl)[i] = dlsym( opengl_handle, opengl_func_names[i] )))
-        {
-            ERR( "%s not found in libGL, disabling OpenGL.\n", opengl_func_names[i] );
-            goto failed;
-        }
+        ((void **)&opengl_funcs.gl)[i] = opengl_func_ptrs[i];
     }
 
     /* redirect some standard OpenGL functions */
@@ -565,12 +550,6 @@ static void init_opengl(void)
     REDIRECT( glFlush );
     REDIRECT( glGetString );
 #undef REDIRECT
-
-    pglXGetProcAddressARB = dlsym(opengl_handle, "glXGetProcAddressARB");
-    if (pglXGetProcAddressARB == NULL) {
-        ERR("Could not find glXGetProcAddressARB in libGL, disabling OpenGL.\n");
-        goto failed;
-    }
 
 #define LOAD_FUNCPTR(f) do if((p##f = (void*)pglXGetProcAddressARB((const unsigned char*)#f)) == NULL) \
     { \
@@ -714,11 +693,6 @@ static void init_opengl(void)
 
     X11DRV_WineGL_LoadExtensions();
     init_pixel_formats( gdi_display );
-    return;
-
-failed:
-    dlclose(opengl_handle);
-    opengl_handle = NULL;
 }
 
 static BOOL has_opengl(void)
@@ -1328,7 +1302,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
             gl->drawable = pglXCreateWindow( gdi_display, gl->format->fbconfig, gl->window, NULL );
         TRACE( "%p created client %lx drawable %lx\n", hwnd, gl->window, gl->drawable );
     }
-#ifdef SONAME_LIBXCOMPOSITE
+#ifdef HAVE_LIBXCOMPOSITE
     else if(usexcomposite)
     {
         gl->type = DC_GL_CHILD_WIN;
@@ -3418,4 +3392,4 @@ void destroy_gl_drawable( HWND hwnd )
 {
 }
 
-#endif /* defined(SONAME_LIBGL) */
+#endif /* defined(HAVE_LIBGL) */
