@@ -1319,7 +1319,16 @@ then
     then
 	WINE_CHECK_LIB(GL,glXCreateContext,
                      [OPENGL_LIBS="$GL_LIBS"],
-                     [opengl_msg="No OpenGL library found on this system."])
+                     [WINE_CHECK_SONAME(GL,glXCreateContext,
+			    [OPENGL_LIBS="-Xlinker -dylib_file -Xlinker /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib -lGL"],
+			    [if test -f /usr/X11R6/lib/libGL.a
+                            then
+	                        opengl_msg="/usr/X11R6/lib/libGL.a is present on your system.
+This probably prevents linking to OpenGL. Try deleting the file and restarting configure."
+                            else
+                                opengl_msg="No OpenGL library found on this system."
+                            fi],
+			    $X_LIBS -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)])
         if test "x$with_osmesa" != "xno"
         then
             WINE_CHECK_SONAME(OSMesa,OSMesaGetProcAddress,,,[$X_LIBS -lm $X_EXTRA_LIBS])

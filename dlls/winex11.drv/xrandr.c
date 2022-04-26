@@ -89,7 +89,7 @@ static int load_xrandr(void)
     r = 4;
 #endif
 
-   return r;
+    return r;
 }
 
 static int XRandRErrorHandler(Display *dpy, XErrorEvent *event, void *arg)

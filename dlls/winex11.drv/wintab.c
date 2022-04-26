@@ -1520,7 +1520,7 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
     return rc;
 }
 
-#else /* SONAME_LIBXI */
+#else /* HAVE_LIBXI */
 
 /***********************************************************************
  *		AttachEventQueueToTablet (X11DRV.@)
