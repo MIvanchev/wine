@@ -1429,7 +1429,7 @@ if test "x$with_usb" != "xno"
 then
     WINE_PACKAGE_FLAGS(USB,[libusb-1.0],[-lusb-1.0],,,
         [AC_CHECK_HEADER([libusb.h],
-            [AC_CHECK_LIB(usb-1.0,libusb_interrupt_event_handler,[:],[USB_LIBS=""],[$USB_LIBS])],
+            [AC_CHECK_LIB(usb-1.0,libusb_interrupt_event_handler,[USB_LIBS="$USB_LIBS -lrt"],[USB_LIBS=""],[$USB_LIBS -lrt])],
             [USB_LIBS=""])])
 fi
 WINE_NOTICE_WITH(usb,[test "$ac_cv_lib_usb_1_0_libusb_interrupt_event_handler" != "yes"],
