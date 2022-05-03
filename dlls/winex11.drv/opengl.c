@@ -40,7 +40,7 @@
 #include "wine/heap.h"
 #include "wine/debug.h"
 
-#ifdef SONAME_LIBGL
+#ifdef HAVE_LIBGL
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -281,7 +281,7 @@ static const BOOL is_win64 = sizeof(void *) > sizeof(int);
 static struct opengl_funcs opengl_funcs;
 
 #define USE_GL_FUNC(name) &name,
-static const void *opengl_func_ptrs[] = { ALL_WGL_FUNCS };
+static void *opengl_func_ptrs[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
 static void X11DRV_WineGL_LoadExtensions(void);
@@ -355,8 +355,8 @@ static void (*pglXDestroyWindow)( Display *dpy, GLXWindow win );
 
 /* GLX Extensions */
 static GLXContext (*pglXCreateContextAttribsARB)(Display *dpy, GLXFBConfig config, GLXContext share_context, Bool direct, const int *attrib_list);
-/* extern void *glXGetProcAddressARB(const GLubyte  *procName); */
-#define pglXGetProcAddressARB glXGetProcAdressARB
+void *glXGetProcAddressARB(const GLubyte  *procName);
+#define pglXGetProcAddressARB glXGetProcAddressARB
 static void (*pglXSwapIntervalEXT)(Display *dpy, GLXDrawable drawable, int interval);
 static int   (*pglXSwapIntervalSGI)(int);
 
@@ -693,6 +693,10 @@ static void init_opengl(void)
 
     X11DRV_WineGL_LoadExtensions();
     init_pixel_formats( gdi_display );
+    return;
+
+failed:
+    return;
 }
 
 static BOOL has_opengl(void)
