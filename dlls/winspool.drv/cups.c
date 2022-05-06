@@ -118,58 +118,40 @@ WINE_DEFAULT_DEBUG_CHANNEL(winspool);
 static const WCHAR CUPS_Port[] = { 'C','U','P','S',':',0 };
 static const WCHAR LPR_Port[] = { 'L','P','R',':',0 };
 
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
 
-static void *libcups_handle;
+#define pcupsAddOption          cupsAddOption
+#define pcupsFreeDests          cupsFreeDests
+#define pcupsFreeOptions        cupsFreeOptions
+#define pcupsGetDests           cupsGetDests
+#define pcupsGetOption          cupsGetOption
+#define pcupsParseOptions       cupsParseOptions
+#define pcupsPrintFile          cupsPrintFile
+#define pcupsGetNamedDest       cupsGetNamedDest
+#define pcupsGetPPD             cupsGetPPD
+#define pcupsGetPPD3            cupsGetPPD3
+#define pcupsLastErrorString    cupsLastErrorString
 
-#define CUPS_FUNCS \
-    DO_FUNC(cupsAddOption); \
-    DO_FUNC(cupsFreeDests); \
-    DO_FUNC(cupsFreeOptions); \
-    DO_FUNC(cupsGetDests); \
-    DO_FUNC(cupsGetOption); \
-    DO_FUNC(cupsParseOptions); \
-    DO_FUNC(cupsPrintFile)
-#define CUPS_OPT_FUNCS \
-    DO_FUNC(cupsGetNamedDest); \
-    DO_FUNC(cupsGetPPD); \
-    DO_FUNC(cupsGetPPD3); \
-    DO_FUNC(cupsLastErrorString)
+#define CUPS_VERSION_ATLEAST(major, minor, patch) \
+    ((CUPS_VERSION_MAJOR) > (major) \
+     || ((CUPS_VERSION_MAJOR) == (major) && (CUPS_VERSION_MINOR) > (minor)) \
+     || ((CUPS_VERSION_MAJOR) == (major) && (CUPS_VERSION_MINOR) == (minor) \
+          && (CUPS_VERSION_PATCH) >= (patch)))
 
-#define DO_FUNC(f) static typeof(f) *p##f
-CUPS_FUNCS;
-#undef DO_FUNC
-static cups_dest_t * (*pcupsGetNamedDest)(http_t *, const char *, const char *);
-static const char *  (*pcupsGetPPD)(const char *);
-static http_status_t (*pcupsGetPPD3)(http_t *, const char *, time_t *, char *, size_t);
-static const char *  (*pcupsLastErrorString)(void);
+#define CUPS_HAS_CUPSGETNAMEDDEST       (CUPS_VERSION_ATLEAST(1, 4, 0))
+#define CUPS_HAS_CUPSGETPPD             (CUPS_VERSION_ATLEAST(0, 0, 0))
+#define CUPS_HAS_CUPSGETPPD3            (CUPS_VERSION_ATLEAST(1, 4, 0))
+#define CUPS_HAS_CUPSLASTERRORSTRING    (CUPS_VERSION_ATLEAST(1, 2, 0))
 
-#endif /* SONAME_LIBCUPS */
+#endif /* HAVE_LIBCUPS */
 
 static NTSTATUS process_attach( void *args )
 {
-#ifdef SONAME_LIBCUPS
-    libcups_handle = dlopen( SONAME_LIBCUPS, RTLD_NOW );
-    TRACE( "%p: %s loaded\n", libcups_handle, SONAME_LIBCUPS );
-    if (!libcups_handle) return STATUS_DLL_NOT_FOUND;
-
-#define DO_FUNC(x) \
-    p##x = dlsym( libcups_handle, #x ); \
-    if (!p##x) \
-    { \
-        ERR( "failed to load symbol %s\n", #x ); \
-        libcups_handle = NULL; \
-        return STATUS_ENTRYPOINT_NOT_FOUND; \
-    }
-    CUPS_FUNCS;
-#undef DO_FUNC
-#define DO_FUNC(x) p##x = dlsym( libcups_handle, #x )
-    CUPS_OPT_FUNCS;
-#undef DO_FUNC
+#ifdef HAVE_LIBCUPS
     return STATUS_SUCCESS;
-#else /* SONAME_LIBCUPS */
+#else /* HAVE_LIBCUPS */
     return STATUS_NOT_SUPPORTED;
-#endif /* SONAME_LIBCUPS */
+#endif /* HAVE_LIBCUPS */
 }
 
 static BOOL copy_file( const char *src, const char *dst )
@@ -222,7 +204,7 @@ static char *get_unix_file_name( LPCWSTR path )
 }
 
 
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
 static WCHAR *cups_get_optionW( const char *opt_name, int num_options, cups_option_t *options )
 {
     const char *value;
@@ -262,8 +244,13 @@ static http_status_t cupsGetPPD3_wrapper( http_t *http, const char *name, time_t
 {
     const char *ppd;
 
-    if (pcupsGetPPD3) return pcupsGetPPD3( http, name, modtime, buffer, bufsize );
-    if (!pcupsGetPPD) return HTTP_NOT_FOUND;
+#if CUPS_HAS_GETPPD3
+    return pcupsGetPPD3( http, name, modtime, buffer, bufsize );
+#endif
+
+#if !CUPS_HAS_GETPPD
+    return HTTP_NOT_FOUND;
+#endif
 
     TRACE( "No cupsGetPPD3 implementation, so calling cupsGetPPD\n" );
 
@@ -317,7 +304,9 @@ static int get_cups_default_options( const char *printer, int num_options, cups_
     cups_dest_t *dest;
     int i;
 
-    if (!pcupsGetNamedDest) return num_options;
+#if !CUPS_HAS_GETNAMEDDEST
+    return num_options;
+#endif
 
     dest = pcupsGetNamedDest( NULL, printer, NULL );
     if (!dest) return num_options;
@@ -332,12 +321,12 @@ static int get_cups_default_options( const char *printer, int num_options, cups_
     pcupsFreeDests( 1, dest );
     return num_options;
 }
-#endif /* SONAME_LIBCUPS */
+#endif /* HAVE_LIBCUPS */
 
 static NTSTATUS enum_printers( void *args )
 {
     const struct enum_printers_params *params = args;
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
     unsigned int num, i, name_len, comment_len, location_len, needed;
     WCHAR *comment, *location, *ptr;
     struct printer_info *info;
@@ -401,7 +390,7 @@ static NTSTATUS enum_printers( void *args )
 #else
     *params->num = 0;
     return STATUS_NOT_SUPPORTED;
-#endif /* SONAME_LIBCUPS */
+#endif /* HAVE_LIBCUPS */
 }
 
 static NTSTATUS get_ppd( void *args )
@@ -420,7 +409,7 @@ static NTSTATUS get_ppd( void *args )
     }
     else
     {
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
         http_status_t http_status;
         time_t modtime = 0;
         char *printer_name;
@@ -617,7 +606,7 @@ static BOOL schedule_lpr( const WCHAR *printer_name, const WCHAR *filename )
  */
 static BOOL schedule_cups( const WCHAR *printer_name, const WCHAR *filename, const WCHAR *document_title )
 {
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
     if (pcupsPrintFile)
     {
         char *unixname, *queue, *unix_doc_title;
@@ -643,9 +632,10 @@ static BOOL schedule_cups( const WCHAR *printer_name, const WCHAR *filename, con
             TRACE( "\t%d: %s = %s\n", i, options[i].name, options[i].value );
 
         ret = pcupsPrintFile( queue, unixname, unix_doc_title, num_options, options );
-        if (ret == 0 && pcupsLastErrorString)
+#if CUPS_HAS_LASTERRORSTRING
+        if (ret == 0)
             WARN( "cupsPrintFile failed with error %s\n", debugstr_a( pcupsLastErrorString() ) );
-
+#endif
         pcupsFreeOptions( num_options, options );
 
         free( unix_doc_title );

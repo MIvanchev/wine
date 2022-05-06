@@ -81,7 +81,8 @@ AC_DEFUN([WINE_CHECK_LIB],
 [AC_REQUIRE([WINE_PATH_PKG_CONFIG])dnl
 AS_VAR_PUSHDEF([ac_libs], [m4_toupper($1)_LIBS])dnl
 AC_ARG_VAR(ac_libs, [Linker flags for $1, overriding pkg-config])dnl
-AS_VAR_SET_IF([PKG_CONFIG], [ac_libs=`$PKG_CONFIG --libs --static $(echo [$1] | tr A-Z a-z) 2>/dev/null`])
+AS_VAR_SET_IF([ac_libs], [],
+        [AS_VAR_SET_IF([PKG_CONFIG], [ac_libs=`$PKG_CONFIG --libs --static $(echo [$1] | tr A-Z a-z) 2>/dev/null || $PKG_CONFIG --libs --static lib$(echo [$1] | tr A-Z a-z) 2>/dev/null`])])
 AS_VAR_SET(ac_libs, ["$ac_libs $5"])
 AC_CHECK_LIB([$1], [$2],
              [AC_DEFINE(AS_TR_CPP(HAVE_LIB$1), 1, [Define if -l$1 is available])

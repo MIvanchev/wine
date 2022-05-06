@@ -1439,9 +1439,10 @@ WINE_NOTICE_WITH(usb,[test "$ac_cv_lib_usb_1_0_libusb_interrupt_event_handler" !
 dnl **** Check for libv4l2 ****
 if test "x$with_v4l2" != "xno"
 then
-    WINE_CHECK_SONAME(v4l2,v4l2_open)
+    AC_CHECK_HEADER([libv4l2.h],
+        [WINE_CHECK_LIB(v4l2,v4l2_open)])
 fi
-WINE_NOTICE_WITH(v4l2,[test "x$ac_cv_lib_soname_v4l2" = "x"],
+WINE_NOTICE_WITH(v4l2,[test "x$ac_cv_lib_v4l2_v4l2_open" != "xyes"],
                  [libv4l2 ${notice_platform}development files not found.])
 
 dnl **** Check for libgphoto2 ****
@@ -1703,13 +1704,13 @@ then
                        [AC_CHECK_HEADERS(cups/cups.h cups/ppd.h)
                         if test "$ac_cv_header_cups_cups_h" = "yes"
                         then
-                            WINE_CHECK_SONAME(cups,cupsGetDefault,,[CUPS_LIBS=""],[$CUPS_LIBS])
+                            WINE_CHECK_LIB(cups,cupsGetDefault)
                         else
                             CUPS_CFLAGS=""
                             CUPS_LIBS=""
                         fi])
 fi
-WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_soname_cups" = "x"],
+WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_cups_cupsGetDefault" != "xyes"],
                  [libcups ${notice_platform}development files not found, CUPS won't be supported.])
 
 dnl **** Check for fontconfig ****
@@ -1768,9 +1769,7 @@ WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_soname_gssapi_krb5" = "x"],
 dnl **** Check for OpenAL 1.1 ****
 if test "$ac_cv_header_AL_al_h" = "yes"
 then
-    WINE_CHECK_SONAME(openal,alGetSource3i,[AC_SUBST(OPENAL_LIBS,"-lopenal")
-                      ac_cv_lib_openal=yes
-                      AC_DEFINE_UNQUOTED(HAVE_OPENAL,1,[Define to 1 if OpenAL is available])],,)
+    WINE_CHECK_LIB(openal,alGetSource3i,[ac_cv_lib_openal=yes],,[-lstdc++])
 fi
 WINE_NOTICE_WITH(openal,[test "x$ac_cv_lib_openal" != xyes],
                  [libopenal ${notice_platform}development files not found (or too old), OpenAL won't be supported.],

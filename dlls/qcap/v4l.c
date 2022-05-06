@@ -60,19 +60,17 @@ static typeof(close) *video_close = close;
 static typeof(ioctl) *video_ioctl = ioctl;
 static typeof(read) *video_read = read;
 
+#ifdef HAVE_LIBV4L2
+#include <libv4l2.h>
+#endif
+
 static BOOL video_init(void)
 {
-#ifdef SONAME_LIBV4L2
-    static void *video_lib;
-
-    if (video_lib)
-        return TRUE;
-    if (!(video_lib = dlopen(SONAME_LIBV4L2, RTLD_NOW)))
-        return FALSE;
-    video_open = dlsym(video_lib, "v4l2_open");
-    video_close = dlsym(video_lib, "v4l2_close");
-    video_ioctl = dlsym(video_lib, "v4l2_ioctl");
-    video_read = dlsym(video_lib, "v4l2_read");
+#ifdef HAVE_LIBV4L2
+    video_open = v4l2_open;
+    video_close = v4l2_close;
+    video_ioctl = v4l2_ioctl;
+    video_read = v4l2_read;
 
     return TRUE;
 #else
@@ -471,7 +469,7 @@ static NTSTATUS v4l_device_create( void *args )
     {
         WARN("Device does not support read().\n");
         if (!have_libv4l2)
-#ifdef SONAME_LIBV4L2
+#ifdef HAVE_LIBV4L2
             ERR_(winediag)("Reading from %s requires libv4l2, but it could not be loaded.\n", path);
 #else
             ERR_(winediag)("Reading from %s requires libv4l2, but Wine was compiled without libv4l2 support.\n", path);
