@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include <stdlib.h>
 
@@ -31,8 +35,6 @@
 #include "winreg.h"
 #include "wingdi.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11settings);
 
@@ -92,7 +94,7 @@ static BOOL nores_get_id(const WCHAR *device_name, ULONG_PTR *id)
     if (!get_primary_adapter( primary_adapter ))
         return FALSE;
 
-    *id = !lstrcmpiW( device_name, primary_adapter ) ? 1 : 0;
+    *id = !wcsicmp( device_name, primary_adapter ) ? 1 : 0;
     return TRUE;
 }
 
@@ -101,7 +103,7 @@ static BOOL nores_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UIN
     RECT primary = get_host_primary_monitor_rect();
     DEVMODEW *modes;
 
-    modes = heap_calloc(1, sizeof(*modes));
+    modes = calloc(1, sizeof(*modes));
     if (!modes)
     {
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -126,7 +128,7 @@ static BOOL nores_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UIN
 
 static void nores_free_modes(DEVMODEW *modes)
 {
-    heap_free(modes);
+    free(modes);
 }
 
 static BOOL nores_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
@@ -218,8 +220,6 @@ void init_registry_display_settings(void)
 static HKEY get_display_device_reg_key( const WCHAR *device_name )
 {
     static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-    static const WCHAR video_value_fmt[] = {'\\','D','e','v','i','c','e','\\',
-                                            'V','i','d','e','o','%','d',0};
     static const WCHAR video_key[] = {
         '\\','R','e','g','i','s','t','r','y',
         '\\','M','a','c','h','i','n','e',
@@ -236,20 +236,22 @@ static HKEY get_display_device_reg_key( const WCHAR *device_name )
     WCHAR value_name[MAX_PATH], buffer[4096], *end_ptr;
     KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
     DWORD adapter_index, size;
+    char adapter_name[100];
     HKEY hkey;
 
     /* Device name has to be \\.\DISPLAY%d */
-    if (strncmpiW(device_name, display, ARRAY_SIZE(display)))
+    if (wcsnicmp( device_name, display, ARRAY_SIZE(display) ))
         return FALSE;
 
     /* Parse \\.\DISPLAY* */
-    adapter_index = strtolW(device_name + ARRAY_SIZE(display), &end_ptr, 10) - 1;
+    adapter_index = wcstol( device_name + ARRAY_SIZE(display), &end_ptr, 10 ) - 1;
     if (*end_ptr)
         return FALSE;
 
     /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
     if (!(hkey = reg_open_key( NULL, video_key, sizeof(video_key) ))) return FALSE;
-    sprintfW(value_name, video_value_fmt, adapter_index);
+    sprintf( adapter_name, "\\Device\\Video%d", adapter_index );
+    asciiz_to_unicode( value_name, adapter_name );
     size = query_reg_value( hkey, value_name, value, sizeof(buffer) );
     NtClose( hkey );
     if (!size || value->Type != REG_SZ) return FALSE;
@@ -431,7 +433,7 @@ static void set_display_depth(ULONG_PTR display_id, DWORD depth)
         }
     }
 
-    display_depth = heap_alloc(sizeof(*display_depth));
+    display_depth = malloc(sizeof(*display_depth));
     if (!display_depth)
     {
         ERR("Failed to allocate memory.\n");
@@ -501,7 +503,7 @@ BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DW
     }
 
     pthread_mutex_lock( &settings_mutex );
-    if (n == 0 || lstrcmpiW(cached_device_name, name) || cached_flags != flags)
+    if (n == 0 || wcsicmp(cached_device_name, name) || cached_flags != flags)
     {
         if (!handler.get_id(name, &id) || !handler.get_modes(id, flags, &modes, &mode_count))
         {
@@ -595,7 +597,7 @@ static DEVMODEW *get_full_mode(ULONG_PTR id, DEVMODEW *dev_mode)
         return NULL;
     }
 
-    if (!(full_mode = heap_alloc(sizeof(*found_mode) + found_mode->dmDriverExtra)))
+    if (!(full_mode = malloc(sizeof(*found_mode) + found_mode->dmDriverExtra)))
     {
         handler.free_modes(modes);
         return NULL;
@@ -612,7 +614,7 @@ static DEVMODEW *get_full_mode(ULONG_PTR id, DEVMODEW *dev_mode)
 static void free_full_mode(DEVMODEW *mode)
 {
     if (!is_detached_mode(mode))
-        heap_free(mode);
+        free(mode);
 }
 
 static LONG get_display_settings(struct x11drv_display_setting **new_displays,
@@ -629,7 +631,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
     for (display_idx = 0; !NtUserEnumDisplayDevices( NULL, display_idx, &display_device, 0 ); ++display_idx)
         ++display_count;
 
-    displays = heap_calloc(display_count, sizeof(*displays));
+    displays = calloc(display_count, sizeof(*displays));
     if (!displays)
         goto done;
 
@@ -655,7 +657,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
 
             displays[display_idx].desired_mode = registry_mode;
         }
-        else if (!lstrcmpiW(dev_name, display_device.DeviceName))
+        else if (!wcsicmp(dev_name, display_device.DeviceName))
         {
             displays[display_idx].desired_mode = *dev_mode;
             if (!(dev_mode->dmFields & DM_POSITION))
@@ -692,7 +694,7 @@ static LONG get_display_settings(struct x11drv_display_setting **new_displays,
     return DISP_CHANGE_SUCCESSFUL;
 
 done:
-    heap_free(displays);
+    free(displays);
     return ret;
 }
 
@@ -710,7 +712,7 @@ static BOOL overlap_placed_displays(const RECT *rect, const struct x11drv_displa
     for (display_idx = 0; display_idx < display_count; ++display_idx)
     {
         if (displays[display_idx].placed &&
-            IntersectRect(&intersect, &displays[display_idx].new_rect, rect))
+            intersect_rect(&intersect, &displays[display_idx].new_rect, rect))
             return TRUE;
     }
     return FALSE;
@@ -951,12 +953,12 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
     {
         for (display_idx = 0; display_idx < display_count; ++display_idx)
         {
-            if (!lstrcmpiW(displays[display_idx].desired_mode.dmDeviceName, devname))
+            if (!wcsicmp(displays[display_idx].desired_mode.dmDeviceName, devname))
             {
                 full_mode = get_full_mode(displays[display_idx].id, &displays[display_idx].desired_mode);
                 if (!full_mode)
                 {
-                    heap_free(displays);
+                    free(displays);
                     return DISP_CHANGE_BADMODE;
                 }
 
@@ -964,7 +966,7 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
                 {
                     ERR("Failed to write %s display settings to registry.\n", wine_dbgstr_w(devname));
                     free_full_mode(full_mode);
-                    heap_free(displays);
+                    free(displays);
                     return DISP_CHANGE_NOTUPDATED;
                 }
 
@@ -976,14 +978,14 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
 
     if (flags & (CDS_TEST | CDS_NORESET))
     {
-        heap_free(displays);
+        free(displays);
         return DISP_CHANGE_SUCCESSFUL;
     }
 
     if (all_detached_settings(displays, display_count))
     {
         WARN("Detaching all displays is not permitted.\n");
-        heap_free(displays);
+        free(displays);
         return DISP_CHANGE_SUCCESSFUL;
     }
 
@@ -995,6 +997,6 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
         ret = apply_display_settings(displays, display_count, TRUE);
     if (ret == DISP_CHANGE_SUCCESSFUL)
         X11DRV_DisplayDevices_Update(TRUE);
-    heap_free(displays);
+    free(displays);
     return ret;
 }

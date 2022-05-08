@@ -505,6 +505,124 @@ static void test_window_text(void)
     DestroyWindow( hwnd );
 }
 
+#define test_menu_item_id(a, b, c) test_menu_item_id_(a, b, c, __LINE__)
+static void test_menu_item_id_( HMENU menu, int pos, int expect, int line )
+{
+    MENUITEMINFOW item;
+    BOOL ret;
+
+    item.cbSize = sizeof(item);
+    item.fMask = MIIM_ID;
+    ret = GetMenuItemInfoW( menu, pos, TRUE, &item );
+    ok_(__FILE__,line)( ret, "GetMenuItemInfoW failed: %lu\n", GetLastError() );
+    ok_(__FILE__,line)( item.wID == expect, "got if %d, expected %d\n", item.wID, expect );
+}
+
+static void test_menu(void)
+{
+    MENUITEMINFOW item;
+    HMENU menu;
+    int count;
+    BOOL ret;
+
+    menu = CreateMenu();
+
+    memset( &item, 0, sizeof(item) );
+    item.cbSize = sizeof(item);
+    item.fMask = MIIM_ID;
+    item.wID = 10;
+    ret = NtUserThunkedMenuItemInfo( menu, 0, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 1, "count = %d\n", count );
+
+    item.wID = 20;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 2, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 10 );
+    test_menu_item_id( menu, 1, 20 );
+
+    item.wID = 30;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 3, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 10 );
+    test_menu_item_id( menu, 1, 30 );
+    test_menu_item_id( menu, 2, 20 );
+
+    item.wID = 50;
+    ret = NtUserThunkedMenuItemInfo( menu, 10, 0, NtUserInsertMenuItem, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 4, "count = %d\n", count );
+    test_menu_item_id( menu, 0, 50 );
+    test_menu_item_id( menu, 1, 10 );
+    test_menu_item_id( menu, 2, 30 );
+    test_menu_item_id( menu, 3, 20 );
+
+    item.wID = 60;
+    ret = NtUserThunkedMenuItemInfo( menu, 1, MF_BYPOSITION, NtUserSetMenuItemInfo, &item, NULL );
+    ok( ret, "InsertMenuItemW failed: %lu\n", GetLastError() );
+
+    count = GetMenuItemCount( menu );
+    ok( count == 4, "count = %d\n", count );
+    test_menu_item_id( menu, 1, 60 );
+
+    ret = NtUserDestroyMenu( menu );
+    ok( ret, "NtUserDestroyMenu failed: %lu\n", GetLastError() );
+}
+
+static MSG *msg_ptr;
+
+static LRESULT WINAPI hook_proc( INT code, WPARAM wparam, LPARAM lparam )
+{
+    msg_ptr = (MSG *)lparam;
+    ok( code == 100, "code = %d\n", code );
+    ok( msg_ptr->time == 1, "time = %lx\n", msg_ptr->time );
+    ok( msg_ptr->wParam == 10, "wParam = %Ix\n", msg_ptr->wParam );
+    ok( msg_ptr->lParam == 20, "lParam = %Ix\n", msg_ptr->lParam );
+    msg_ptr->time = 3;
+    msg_ptr->wParam = 1;
+    msg_ptr->lParam = 2;
+    return CallNextHookEx( NULL, code, wparam, lparam );
+}
+
+static void test_message_filter(void)
+{
+    HHOOK hook;
+    MSG msg;
+    BOOL ret;
+
+    hook = SetWindowsHookExW( WH_MSGFILTER, hook_proc, NULL, GetCurrentThreadId() );
+    ok( hook != NULL, "SetWindowsHookExW failed\n");
+
+    memset( &msg, 0, sizeof(msg) );
+    msg.time = 1;
+    msg.wParam = 10;
+    msg.lParam = 20;
+    ret = NtUserCallMsgFilter( &msg, 100 );
+    ok( !ret, "CallMsgFilterW returned: %x\n", ret );
+    todo_wine
+    ok( msg_ptr != &msg, "our ptr was passed directly to hook\n" );
+
+    if (sizeof(void *) == 8) /* on some Windows versions, msg is not modified on wow64 */
+    {
+        ok( msg.time == 3, "time = %lx\n", msg.time );
+        ok( msg.wParam == 1, "wParam = %Ix\n", msg.wParam );
+        ok( msg.lParam == 2, "lParam = %Ix\n", msg.lParam );
+    }
+
+    ret = NtUserUnhookWindowsHookEx( hook );
+    ok( ret, "NtUserUnhookWindowsHook failed: %lu\n", GetLastError() );
+}
+
 START_TEST(win32u)
 {
     /* native win32u.dll fails if user32 is not loaded, so make sure it's fully initialized */
@@ -517,6 +635,8 @@ START_TEST(win32u)
     test_cursoricon();
     test_message_call();
     test_window_text();
+    test_menu();
+    test_message_filter();
 
     test_NtUserCloseWindowStation();
 }

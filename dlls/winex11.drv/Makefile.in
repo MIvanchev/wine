@@ -1,12 +1,11 @@
 EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winex11.drv
+UNIXLIB   = winex11.so
 IMPORTS   = uuid user32 gdi32 win32u
 DELAYIMPORTS = comctl32 ole32 shell32 imm32
 EXTRAINCL = $(X_CFLAGS)
-EXTRALIBS = $(X11_LIBS) $(XEXT_LIBS) $(XRENDER_LIBS) $(XRANDR_LIBS) $(XXF86VM_LIBS) \
-            $(XINERAMA_LIBS) $(XCURSOR_LIBS) $(XI_LIBS) $(XCOMPOSITE_LIBS) $(OPENGL_LIBS)
-
-EXTRADLLFLAGS = -mcygwin
+EXTRALIBS = -lwin32u $(X11_LIBS) $(XEXT_LIBS) $(XRENDER_LIBS) $(XRANDR_LIBS) $(XXF86VM_LIBS) \
+            $(XINERAMA_LIBS) $(XCURSOR_LIBS) $(XI_LIBS) $(XCOMPOSITE_LIBS) $(OPENGL_LIBS) -lm
 
 C_SRCS = \
 	bitblt.c \
@@ -14,6 +13,7 @@ C_SRCS = \
 	clipboard.c \
 	desktop.c \
 	display.c \
+	dllmain.c \
 	event.c \
 	graphics.c \
 	ime.c \

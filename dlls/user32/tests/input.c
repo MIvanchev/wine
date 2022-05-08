@@ -108,18 +108,6 @@ static const int GETFLAGS[]={0, 0, KEYEVENTF_KEYUP, 0, KEYEVENTF_KEYUP, 0, KEYEV
 /* matching descriptions */
 static const char *getdesc[]={"", "+alt","-alt","+X","-X","+shift","-shift","+ctrl","-ctrl"};
 
-/* The MSVC headers ignore our NONAMELESSUNION requests so we have to define our own type */
-typedef struct
-{
-    DWORD type;
-    union
-    {
-        MOUSEINPUT      mi;
-        KEYBDINPUT      ki;
-        HARDWAREINPUT   hi;
-    } u;
-} TEST_INPUT;
-
 typedef struct {
     UINT    message;
     WPARAM  wParam;
@@ -230,7 +218,7 @@ static int KbdMessage( KEV kev, WPARAM *pwParam, LPARAM *plParam )
  */
 static BOOL do_test( HWND hwnd, int seqnr, const KEV td[] )
 {
-    TEST_INPUT inputs[MAXKEYEVENTS];
+    INPUT inputs[MAXKEYEVENTS];
     KMSG expmsg[MAXKEYEVENTS];
     MSG msg;
     char buf[100];
@@ -242,11 +230,11 @@ static BOOL do_test( HWND hwnd, int seqnr, const KEV td[] )
     for (i = 0; i < MAXKEYEVENTS; i++)
     {
         inputs[evtctr].type = INPUT_KEYBOARD;
-        inputs[evtctr].u.ki.wVk = GETVKEY[td[i]];
-        inputs[evtctr].u.ki.wScan = GETSCAN[td[i]];
-        inputs[evtctr].u.ki.dwFlags = GETFLAGS[td[i]];
-        inputs[evtctr].u.ki.dwExtraInfo = 0;
-        inputs[evtctr].u.ki.time = ++timetag;
+        inputs[evtctr].ki.wVk = GETVKEY[td[i]];
+        inputs[evtctr].ki.wScan = GETSCAN[td[i]];
+        inputs[evtctr].ki.dwFlags = GETFLAGS[td[i]];
+        inputs[evtctr].ki.dwExtraInfo = 0;
+        inputs[evtctr].ki.time = ++timetag;
         if (td[i]) evtctr++;
 
         strcat(buf, getdesc[td[i]]);
@@ -258,7 +246,7 @@ static BOOL do_test( HWND hwnd, int seqnr, const KEV td[] )
     for( kmctr = 0; kmctr < MAXKEYEVENTS && expmsg[kmctr].message; kmctr++)
         ;
     ok( evtctr <= MAXKEYEVENTS, "evtctr is above MAXKEYEVENTS\n" );
-    ret = SendInput(evtctr, (INPUT *)inputs, sizeof(INPUT));
+    ret = SendInput(evtctr, inputs, sizeof(INPUT));
     ok(ret == evtctr, "SendInput failed to send some events\n");
     i = 0;
     if (winetest_debug > 1)
@@ -925,7 +913,7 @@ if(0) /* For some reason not stable on Wine */
 }
 static void test_Input_blackbox(void)
 {
-    TEST_INPUT i;
+    INPUT i;
     int ii;
     BYTE ks1[256], ks2[256];
     LONG_PTR prevWndProc;
@@ -962,15 +950,15 @@ static void test_Input_blackbox(void)
     ok(prevWndProc != 0 || GetLastError() == 0, "error: %d\n", (int) GetLastError());
 
     i.type = INPUT_KEYBOARD;
-    i.u.ki.time = 0;
-    i.u.ki.dwExtraInfo = 0;
+    i.ki.time = 0;
+    i.ki.dwExtraInfo = 0;
 
     for (ii = 0; ii < ARRAY_SIZE(sendinput_test)-1; ii++) {
         GetKeyboardState(ks1);
-        i.u.ki.wScan = ii+1 /* useful for debugging */;
-        i.u.ki.dwFlags = sendinput_test[ii].dwFlags;
-        i.u.ki.wVk = sendinput_test[ii].wVk;
-        SendInput(1, (INPUT*)&i, sizeof(TEST_INPUT));
+        i.ki.wScan = ii+1 /* useful for debugging */;
+        i.ki.dwFlags = sendinput_test[ii].dwFlags;
+        i.ki.wVk = sendinput_test[ii].wVk;
+        SendInput(1, &i, sizeof(INPUT));
         empty_message_queue();
         GetKeyboardState(ks2);
         compare_and_check(ii, ks1, ks2, &sendinput_test[ii], foreground);
@@ -1000,21 +988,21 @@ static void reset_key_status(WORD vk)
 
 static void test_unicode_keys(HWND hwnd, HHOOK hook)
 {
-    TEST_INPUT inputs[2];
+    INPUT inputs[2];
     MSG msg;
 
     /* init input data that never changes */
     inputs[1].type = inputs[0].type = INPUT_KEYBOARD;
-    inputs[1].u.ki.dwExtraInfo = inputs[0].u.ki.dwExtraInfo = 0;
-    inputs[1].u.ki.time = inputs[0].u.ki.time = 0;
+    inputs[1].ki.dwExtraInfo = inputs[0].ki.dwExtraInfo = 0;
+    inputs[1].ki.time = inputs[0].ki.time = 0;
 
     /* pressing & releasing a single unicode character */
-    inputs[0].u.ki.wVk = 0;
-    inputs[0].u.ki.wScan = 0x3c0;
-    inputs[0].u.ki.dwFlags = KEYEVENTF_UNICODE;
+    inputs[0].ki.wVk = 0;
+    inputs[0].ki.wScan = 0x3c0;
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
 
     reset_key_status(VK_PACKET);
-    SendInput(1, (INPUT*)inputs, sizeof(INPUT));
+    SendInput(1, inputs, sizeof(INPUT));
     while(PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)){
         if(msg.message == WM_KEYDOWN && msg.wParam == VK_PACKET){
             TranslateMessage(&msg);
@@ -1031,12 +1019,12 @@ static void test_unicode_keys(HWND hwnd, HHOOK hook)
                 "Last hookdown msg should have been 0x3c0, was: 0x%lx\n", key_status.last_hook_down);
     }
 
-    inputs[1].u.ki.wVk = 0;
-    inputs[1].u.ki.wScan = 0x3c0;
-    inputs[1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    inputs[1].ki.wVk = 0;
+    inputs[1].ki.wScan = 0x3c0;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
 
     reset_key_status(VK_PACKET);
-    SendInput(1, (INPUT*)(inputs+1), sizeof(INPUT));
+    SendInput(1, inputs + 1, sizeof(INPUT));
     while(PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)){
         if(msg.message == WM_KEYDOWN && msg.wParam == VK_PACKET){
             TranslateMessage(&msg);
@@ -1052,17 +1040,17 @@ static void test_unicode_keys(HWND hwnd, HHOOK hook)
     }
 
     /* holding alt, pressing & releasing a unicode character, releasing alt */
-    inputs[0].u.ki.wVk = VK_LMENU;
-    inputs[0].u.ki.wScan = 0;
-    inputs[0].u.ki.dwFlags = 0;
+    inputs[0].ki.wVk = VK_LMENU;
+    inputs[0].ki.wScan = 0;
+    inputs[0].ki.dwFlags = 0;
 
-    inputs[1].u.ki.wVk = 0;
-    inputs[1].u.ki.wScan = 0x3041;
-    inputs[1].u.ki.dwFlags = KEYEVENTF_UNICODE;
+    inputs[1].ki.wVk = 0;
+    inputs[1].ki.wScan = 0x3041;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE;
 
     reset_key_status(VK_PACKET);
     key_status.expect_alt = TRUE;
-    SendInput(2, (INPUT*)inputs, sizeof(INPUT));
+    SendInput(2, inputs, sizeof(INPUT));
     while(PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)){
         if(msg.message == WM_SYSKEYDOWN && msg.wParam == VK_PACKET){
             TranslateMessage(&msg);
@@ -1079,17 +1067,17 @@ static void test_unicode_keys(HWND hwnd, HHOOK hook)
                 "Last hooksysdown msg should have been 0x3041, was: 0x%lx\n", key_status.last_hook_syskey_down);
     }
 
-    inputs[1].u.ki.wVk = 0;
-    inputs[1].u.ki.wScan = 0x3041;
-    inputs[1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    inputs[1].ki.wVk = 0;
+    inputs[1].ki.wScan = 0x3041;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
 
-    inputs[0].u.ki.wVk = VK_LMENU;
-    inputs[0].u.ki.wScan = 0;
-    inputs[0].u.ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[0].ki.wVk = VK_LMENU;
+    inputs[0].ki.wScan = 0;
+    inputs[0].ki.dwFlags = KEYEVENTF_KEYUP;
 
     reset_key_status(VK_PACKET);
     key_status.expect_alt = TRUE;
-    SendInput(2, (INPUT*)inputs, sizeof(INPUT));
+    SendInput(2, inputs, sizeof(INPUT));
     while(PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)){
         if(msg.message == WM_SYSKEYDOWN && msg.wParam == VK_PACKET){
             TranslateMessage(&msg);
@@ -1105,16 +1093,16 @@ static void test_unicode_keys(HWND hwnd, HHOOK hook)
     }
 
     /* Press and release, non-zero key code. */
-    inputs[0].u.ki.wVk = 0x51;
-    inputs[0].u.ki.wScan = 0x123;
-    inputs[0].u.ki.dwFlags = KEYEVENTF_UNICODE;
+    inputs[0].ki.wVk = 0x51;
+    inputs[0].ki.wScan = 0x123;
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
 
-    inputs[1].u.ki.wVk = 0x51;
-    inputs[1].u.ki.wScan = 0x123;
-    inputs[1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    inputs[1].ki.wVk = 0x51;
+    inputs[1].ki.wScan = 0x123;
+    inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
 
-    reset_key_status(inputs[0].u.ki.wVk);
-    SendInput(2, (INPUT*)inputs, sizeof(INPUT));
+    reset_key_status(inputs[0].ki.wVk);
+    SendInput(2, inputs, sizeof(INPUT));
     while (PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE))
     {
         TranslateMessage(&msg);
@@ -1485,7 +1473,7 @@ static void test_GetMouseMovePointsEx(const char *argv0)
     MOUSEMOVEPOINT in;
     MOUSEMOVEPOINT out[200];
     POINT point;
-    TEST_INPUT input;
+    INPUT input;
 
     /* Get a valid content for the input struct */
     if(!GetCursorPos(&point)) {
@@ -1681,10 +1669,10 @@ static void test_GetMouseMovePointsEx(const char *argv0)
 
     input.type = INPUT_MOUSE;
     memset( &input, 0, sizeof(input) );
-    input.u.mi.dwFlags = MOUSEEVENTF_MOVE;
-    input.u.mi.dwExtraInfo = 0xdeadbeef;
-    input.u.mi.dx = -17;
-    input.u.mi.dy = 13;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    input.mi.dwExtraInfo = 0xdeadbeef;
+    input.mi.dx = -17;
+    input.mi.dy = 13;
     SendInput( 1, (INPUT *)&input, sizeof(INPUT) );
     ok( GetCursorPos( &point ), "failed to get cursor position\n" );
     ok( in.x != point.x && in.y != point.y, "cursor didn't change position after mouse_event()\n" );
@@ -3961,8 +3949,8 @@ struct get_key_state_thread_params
     int index;
 };
 
-#define check_get_keyboard_state(i, j, c, x, todo_c, todo_x) check_get_keyboard_state_(i, j, c, x, todo_c, todo_x, __LINE__)
-static void check_get_keyboard_state_(int i, int j, int c, int x, int todo_c, int todo_x, int line)
+#define check_get_keyboard_state(i, j, c, x) check_get_keyboard_state_(i, j, c, x, __LINE__)
+static void check_get_keyboard_state_(int i, int j, int c, int x, int line)
 {
     unsigned char keystate[256];
     BOOL ret;
@@ -3970,28 +3958,28 @@ static void check_get_keyboard_state_(int i, int j, int c, int x, int todo_c, in
     memset(keystate, 0, sizeof(keystate));
     ret = GetKeyboardState(keystate);
     ok_(__FILE__, line)(ret, "GetKeyboardState failed, %lu\n", GetLastError());
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
 
     /* calling it twice shouldn't change */
     memset(keystate, 0, sizeof(keystate));
     ret = GetKeyboardState(keystate);
     ok_(__FILE__, line)(ret, "GetKeyboardState failed, %lu\n", GetLastError());
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['X'] & 0x80) == !x, "%d:%d: expected that X keystate is %s\n", i, j, x ? "set" : "unset");
+    ok_(__FILE__, line)(!(keystate['C'] & 0x80) == !c, "%d:%d: expected that C keystate is %s\n", i, j, c ? "set" : "unset");
 }
 
-#define check_get_key_state(i, j, c, x, todo_c, todo_x) check_get_key_state_(i, j, c, x, todo_c, todo_x, __LINE__)
-static void check_get_key_state_(int i, int j, int c, int x, int todo_c, int todo_x, int line)
+#define check_get_key_state(i, j, c, x) check_get_key_state_(i, j, c, x, __LINE__)
+static void check_get_key_state_(int i, int j, int c, int x, int line)
 {
     SHORT state;
 
     state = GetKeyState('X');
-    todo_wine_if(todo_x) ok_(__FILE__, line)(!(state & 0x8000) == !x, "%d:%d: expected that X highest bit is %s, got %#x\n", i, j, x ? "set" : "unset", state);
+    ok_(__FILE__, line)(!(state & 0x8000) == !x, "%d:%d: expected that X highest bit is %s, got %#x\n", i, j, x ? "set" : "unset", state);
     ok_(__FILE__, line)(!(state & 0x007e), "%d:%d: expected that X undefined bits are unset, got %#x\n", i, j, state);
 
     state = GetKeyState('C');
-    todo_wine_if(todo_c) ok_(__FILE__, line)(!(state & 0x8000) == !c, "%d:%d: expected that C highest bit is %s, got %#x\n", i, j, c ? "set" : "unset", state);
+    ok_(__FILE__, line)(!(state & 0x8000) == !c, "%d:%d: expected that C highest bit is %s, got %#x\n", i, j, c ? "set" : "unset", state);
     ok_(__FILE__, line)(!(state & 0x007e), "%d:%d: expected that C undefined bits are unset, got %#x\n", i, j, state);
 }
 
@@ -4008,7 +3996,7 @@ static DWORD WINAPI get_key_state_thread(void *arg)
     int i = params->index, j;
 
     test = get_key_state_tests + i;
-    has_queue = test->peek_message;
+    has_queue = test->peek_message || test->set_keyboard_state;
 
     if (test->peek_message)
     {
@@ -4041,18 +4029,18 @@ static DWORD WINAPI get_key_state_thread(void *arg)
         if (test->set_keyboard_state) expect_c = TRUE;
         else expect_c = FALSE;
 
-        check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ i == 6, !has_queue);
-        check_get_key_state(i, j, expect_c, expect_x, /* todo */ i == 6, i != 6 && (has_queue || j == 0));
-        check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ i == 6, i != 6 && (has_queue || j == 0));
+        check_get_keyboard_state(i, j, expect_c, FALSE);
+        check_get_key_state(i, j, expect_c, expect_x);
+        check_get_keyboard_state(i, j, expect_c, expect_x);
 
         /* key released */
         ReleaseSemaphore(semaphores[0], 1, NULL);
         result = WaitForSingleObject(semaphores[1], 1000);
         ok(result == WAIT_OBJECT_0, "%d: WaitForSingleObject returned %lu\n", i, result);
 
-        check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ i == 6, has_queue || i == 6 || j > 0);
-        check_get_key_state(i, j, expect_c, FALSE, /* todo */ i == 6, FALSE);
-        check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ i == 6, FALSE);
+        check_get_keyboard_state(i, j, expect_c, expect_x);
+        check_get_key_state(i, j, expect_c, FALSE);
+        check_get_keyboard_state(i, j, expect_c, FALSE);
     }
 
     return 0;
@@ -4120,18 +4108,18 @@ static void test_GetKeyState(void)
             }
             else expect_c = FALSE;
 
-            check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, expect_c, FALSE, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, expect_c, FALSE);
+            check_get_key_state(i, j, expect_c, FALSE);
+            check_get_keyboard_state(i, j, expect_c, FALSE);
 
             if (test->peek_message_main) while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
 
             if (test->peek_message_main) expect_x = TRUE;
             else expect_x = FALSE;
 
-            check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, expect_c, expect_x, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, expect_c, expect_x);
+            check_get_key_state(i, j, expect_c, expect_x);
+            check_get_keyboard_state(i, j, expect_c, expect_x);
 
             ReleaseSemaphore(params.semaphores[1], 1, NULL);
 
@@ -4147,15 +4135,15 @@ static void test_GetKeyState(void)
                 SetKeyboardState(keystate);
             }
 
-            check_get_keyboard_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, FALSE, expect_x, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, expect_x);
+            check_get_key_state(i, j, FALSE, expect_x);
+            check_get_keyboard_state(i, j, FALSE, expect_x);
 
             if (test->peek_message_main) while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
 
-            check_get_keyboard_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
-            check_get_key_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
-            check_get_keyboard_state(i, j, FALSE, FALSE, /* todo */ FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, FALSE);
+            check_get_key_state(i, j, FALSE, FALSE);
+            check_get_keyboard_state(i, j, FALSE, FALSE);
 
             ReleaseSemaphore(params.semaphores[1], 1, NULL);
         }
@@ -4259,7 +4247,7 @@ static LRESULT WINAPI msg_source_proc( HWND hwnd, UINT message, WPARAM wp, LPARA
 static void test_input_message_source(void)
 {
     WNDCLASSA cls;
-    TEST_INPUT inputs[2];
+    INPUT inputs[2];
     HWND hwnd;
     RECT rc;
     MSG msg;
@@ -4283,20 +4271,20 @@ static void test_input_message_source(void)
     SetFocus( hwnd );
 
     inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].u.ki.dwExtraInfo = 0;
-    inputs[0].u.ki.time = 0;
-    inputs[0].u.ki.wVk = 0;
-    inputs[0].u.ki.wScan = 0x3c0;
-    inputs[0].u.ki.dwFlags = KEYEVENTF_UNICODE;
+    inputs[0].ki.dwExtraInfo = 0;
+    inputs[0].ki.time = 0;
+    inputs[0].ki.wVk = 0;
+    inputs[0].ki.wScan = 0x3c0;
+    inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
     inputs[1] = inputs[0];
-    inputs[1].u.ki.dwFlags |= KEYEVENTF_KEYUP;
+    inputs[1].ki.dwFlags |= KEYEVENTF_KEYUP;
 
     expect_src.deviceType = IMDT_UNAVAILABLE;
     expect_src.originId = IMO_UNAVAILABLE;
     SendMessageA( hwnd, WM_KEYDOWN, 0, 0 );
     SendMessageA( hwnd, WM_MOUSEMOVE, 0, 0 );
 
-    SendInput( 2, (INPUT *)inputs, sizeof(INPUT) );
+    SendInput( 2, inputs, sizeof(INPUT) );
     while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ))
     {
         expect_src.deviceType = IMDT_KEYBOARD;

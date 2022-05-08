@@ -25,9 +25,9 @@
 # @ stub BuildReasonArray
 @ stdcall CalcChildScroll(long long)
 @ stdcall CalcMenuBar(long long long long ptr) CalcMenuBar
-@ stdcall CallMsgFilter(ptr long) CallMsgFilterA
-@ stdcall CallMsgFilterA(ptr long)
-@ stdcall CallMsgFilterW(ptr long)
+@ stdcall CallMsgFilter(ptr long) NtUserCallMsgFilter
+@ stdcall CallMsgFilterA(ptr long) NtUserCallMsgFilter
+@ stdcall CallMsgFilterW(ptr long) NtUserCallMsgFilter
 @ stdcall CallNextHookEx(long long long long) NtUserCallNextHookEx
 @ stdcall CallWindowProcA(ptr long long long long)
 @ stdcall CallWindowProcW(ptr long long long long)
@@ -86,7 +86,7 @@
 @ stdcall CountClipboardFormats() NtUserCountClipboardFormats
 @ stdcall CreateAcceleratorTableA(ptr long)
 @ stdcall CreateAcceleratorTableW(ptr long) NtUserCreateAcceleratorTable
-@ stdcall CreateCaret(long long long long)
+@ stdcall CreateCaret(long long long long) NtUserCreateCaret
 @ stdcall CreateCursor(long long long long long ptr ptr)
 @ stdcall CreateDesktopA(str str ptr long long ptr)
 @ stdcall CreateDesktopW(wstr wstr ptr long long ptr)
@@ -153,7 +153,7 @@
 @ stdcall DefWindowProcA(long long long long)
 @ stdcall DefWindowProcW(long long long long)
 @ stdcall DeferWindowPos(long long long long long long long long)
-@ stdcall DeleteMenu(long long long)
+@ stdcall DeleteMenu(long long long) NtUserDeleteMenu
 @ stdcall DeregisterShellHookWindow (long)
 @ stdcall DestroyAcceleratorTable(long) NtUserDestroyAcceleratorTable
 @ stdcall DestroyCaret()
@@ -202,7 +202,7 @@
 @ stdcall DrawTextExW(long wstr long ptr long ptr)
 @ stdcall DrawTextW(long wstr long ptr long)
 @ stdcall EditWndProc(long long long long) EditWndProcA
-@ stdcall EmptyClipboard()
+@ stdcall EmptyClipboard() NtUserEmptyClipboard
 @ stdcall EnableMenuItem(long long long) NtUserEnableMenuItem
 @ stdcall EnableMouseInPointer(long)
 @ stdcall EnableNonClientDpiScaling(long)
@@ -259,8 +259,8 @@
 @ stdcall GetAutoRotationState(ptr)
 @ stdcall GetAwarenessFromDpiAwarenessContext(long)
 @ stdcall GetCapture()
-@ stdcall GetCaretBlinkTime()
-@ stdcall GetCaretPos(ptr)
+@ stdcall GetCaretBlinkTime() NtUserGetCaretBlinkTime
+@ stdcall GetCaretPos(ptr) NtUserGetCaretPos
 @ stdcall GetClassInfoA(long str ptr)
 @ stdcall GetClassInfoExA(long str ptr)
 @ stdcall GetClassInfoExW(long wstr ptr)
@@ -381,7 +381,7 @@
 @ stdcall GetSubMenu(long long)
 @ stdcall GetSysColor(long)
 @ stdcall GetSysColorBrush(long)
-@ stdcall GetSystemMenu(long long)
+@ stdcall GetSystemMenu(long long) NtUserGetSystemMenu
 @ stdcall GetSystemMetrics(long)
 @ stdcall GetSystemMetricsForDpi(long long)
 @ stdcall GetTabbedTextExtentA(long str long long ptr)
@@ -425,7 +425,7 @@
 @ stdcall GrayStringA(long long ptr long long long long long long)
 @ stdcall GrayStringW(long long ptr long long long long long long)
 # @ stub HasSystemSleepStarted
-@ stdcall HideCaret(long)
+@ stdcall HideCaret(long) NtUserHideCaret
 @ stdcall HiliteMenuItem(long long long long)
 # @ stub IMPGetIMEA
 # @ stub IMPGetIMEW
@@ -619,7 +619,7 @@
 @ stdcall ReleaseCapture()
 @ stdcall ReleaseDC(long long) NtUserReleaseDC
 @ stdcall RemoveClipboardFormatListener(long) NtUserRemoveClipboardFormatListener
-@ stdcall RemoveMenu(long long long)
+@ stdcall RemoveMenu(long long long) NtUserRemoveMenu
 @ stdcall RemovePropA(long str)
 @ stdcall RemovePropW(long wstr)
 @ stdcall ReplyMessage(long)
@@ -707,7 +707,7 @@
 @ stdcall SetSysColors(long ptr ptr) NtUserSetSysColors
 @ stdcall SetSysColorsTemp(ptr ptr long)
 @ stdcall SetSystemCursor(long long)
-@ stdcall SetSystemMenu(long long)
+@ stdcall SetSystemMenu(long long) NtUserSetSystemMenu
 @ stdcall SetSystemTimer(long long long ptr)
 @ stdcall SetTaskmanWindow (long)
 @ stdcall SetThreadDesktop(long) NtUserSetThreadDesktop
@@ -736,7 +736,7 @@
 @ stdcall SetWindowsHookExA(long long long long)
 @ stdcall SetWindowsHookExW(long long long long)
 @ stdcall SetWindowsHookW(long ptr)
-@ stdcall ShowCaret(long)
+@ stdcall ShowCaret(long) NtUserShowCaret
 @ stdcall -import ShowCursor(long) NtUserShowCursor
 @ stdcall ShowOwnedPopups(long long)
 @ stdcall ShowScrollBar(long long long)
@@ -762,12 +762,12 @@
 @ stdcall ToAsciiEx(long long ptr ptr long long)
 @ stdcall ToUnicode(long long ptr ptr long long)
 @ stdcall ToUnicodeEx(long long ptr ptr long long long) NtUserToUnicodeEx
-@ stdcall TrackMouseEvent(ptr)
+@ stdcall TrackMouseEvent(ptr) NtUserTrackMouseEvent
 @ stdcall TrackPopupMenu(long long long long long long ptr)
 @ stdcall TrackPopupMenuEx(long long long long long ptr)
 @ stdcall TranslateAccelerator(long long ptr) TranslateAcceleratorA
 @ stdcall TranslateAcceleratorA(long long ptr)
-@ stdcall TranslateAcceleratorW(long long ptr)
+@ stdcall TranslateAcceleratorW(long long ptr) NtUserTranslateAccelerator
 @ stdcall TranslateMDISysAccel(long ptr)
 @ stdcall TranslateMessage(ptr)
 # @ stub TranslateMessageEx

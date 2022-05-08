@@ -2,10 +2,14 @@
  * USER Input processing
  *
  * Copyright 1993 Bob Amstadt
+ * Copyright 1993 David Metcalfe
  * Copyright 1996 Albrecht Kleine
+ * Copyright 1996 Frans van Dorsselaer
  * Copyright 1997 David Faure
  * Copyright 1998 Morten Welinder
  * Copyright 1998 Ulrich Weigand
+ * Copyright 2001 Eric Pouech
+ * Copyright 2002 Alexandre Julliard
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -264,7 +268,8 @@ BOOL WINAPI NtUserGetCursorInfo( CURSORINFO *info )
 
 static void check_for_events( UINT flags )
 {
-    if (user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, flags, 0 ) == WAIT_TIMEOUT)
+    LARGE_INTEGER zero = { .QuadPart = 0 };
+    if (user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, flags, 0 ) == WAIT_TIMEOUT)
         flush_window_surfaces( TRUE );
 }
 
@@ -1171,6 +1176,224 @@ int WINAPI NtUserGetMouseMovePointsEx( UINT size, MOUSEMOVEPOINT *ptin, MOUSEMOV
     return copied;
 }
 
+static WORD get_key_state(void)
+{
+    WORD ret = 0;
+
+    if (get_system_metrics( SM_SWAPBUTTON ))
+    {
+        if (NtUserGetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_LBUTTON;
+        if (NtUserGetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_RBUTTON;
+    }
+    else
+    {
+        if (NtUserGetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_LBUTTON;
+        if (NtUserGetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_RBUTTON;
+    }
+    if (NtUserGetAsyncKeyState(VK_MBUTTON) & 0x80)  ret |= MK_MBUTTON;
+    if (NtUserGetAsyncKeyState(VK_SHIFT) & 0x80)    ret |= MK_SHIFT;
+    if (NtUserGetAsyncKeyState(VK_CONTROL) & 0x80)  ret |= MK_CONTROL;
+    if (NtUserGetAsyncKeyState(VK_XBUTTON1) & 0x80) ret |= MK_XBUTTON1;
+    if (NtUserGetAsyncKeyState(VK_XBUTTON2) & 0x80) ret |= MK_XBUTTON2;
+    return ret;
+}
+
+struct tracking_list
+{
+    TRACKMOUSEEVENT info;
+    POINT pos; /* center of hover rectangle */
+};
+
+/* FIXME: move tracking stuff into per-thread data */
+static struct tracking_list tracking_info;
+
+static void check_mouse_leave( HWND hwnd, int hittest )
+{
+    if (tracking_info.info.hwndTrack != hwnd)
+    {
+        if (tracking_info.info.dwFlags & TME_NONCLIENT)
+            NtUserPostMessage( tracking_info.info.hwndTrack, WM_NCMOUSELEAVE, 0, 0 );
+        else
+            NtUserPostMessage( tracking_info.info.hwndTrack, WM_MOUSELEAVE, 0, 0 );
+
+        tracking_info.info.dwFlags &= ~TME_LEAVE;
+    }
+    else
+    {
+        if (hittest == HTCLIENT)
+        {
+            if (tracking_info.info.dwFlags & TME_NONCLIENT)
+            {
+                NtUserPostMessage( tracking_info.info.hwndTrack, WM_NCMOUSELEAVE, 0, 0 );
+                tracking_info.info.dwFlags &= ~TME_LEAVE;
+            }
+        }
+        else
+        {
+            if (!(tracking_info.info.dwFlags & TME_NONCLIENT))
+            {
+                NtUserPostMessage( tracking_info.info.hwndTrack, WM_MOUSELEAVE, 0, 0 );
+                tracking_info.info.dwFlags &= ~TME_LEAVE;
+            }
+        }
+    }
+}
+
+void update_mouse_tracking_info( HWND hwnd )
+{
+    int hover_width = 0, hover_height = 0, hittest;
+    POINT pos;
+
+    TRACE( "hwnd %p\n", hwnd );
+
+    get_cursor_pos( &pos );
+    hwnd = window_from_point( hwnd, pos, &hittest );
+
+    TRACE( "point %s hwnd %p hittest %d\n", wine_dbgstr_point(&pos), hwnd, hittest );
+
+    NtUserSystemParametersInfo( SPI_GETMOUSEHOVERWIDTH, 0, &hover_width, 0 );
+    NtUserSystemParametersInfo( SPI_GETMOUSEHOVERHEIGHT, 0, &hover_height, 0 );
+
+    TRACE( "tracked pos %s, current pos %s, hover width %d, hover height %d\n",
+           wine_dbgstr_point(&tracking_info.pos), wine_dbgstr_point(&pos),
+           hover_width, hover_height );
+
+    if (tracking_info.info.dwFlags & TME_LEAVE)
+        check_mouse_leave( hwnd, hittest );
+
+    if (tracking_info.info.hwndTrack != hwnd)
+        tracking_info.info.dwFlags &= ~TME_HOVER;
+
+    if (tracking_info.info.dwFlags & TME_HOVER)
+    {
+        /* has the cursor moved outside the rectangle centered around pos? */
+        if ((abs( pos.x - tracking_info.pos.x ) > (hover_width / 2)) ||
+            (abs( pos.y - tracking_info.pos.y ) > (hover_height / 2)))
+        {
+            tracking_info.pos = pos;
+        }
+        else
+        {
+            if (hittest == HTCLIENT)
+            {
+                screen_to_client(hwnd, &pos);
+                TRACE( "client cursor pos %s\n", wine_dbgstr_point(&pos) );
+
+                NtUserPostMessage( tracking_info.info.hwndTrack, WM_MOUSEHOVER,
+                                   get_key_state(), MAKELPARAM( pos.x, pos.y ) );
+            }
+            else
+            {
+                if (tracking_info.info.dwFlags & TME_NONCLIENT)
+                    NtUserPostMessage( tracking_info.info.hwndTrack, WM_NCMOUSEHOVER,
+                                       hittest, MAKELPARAM( pos.x, pos.y ) );
+            }
+
+            /* stop tracking mouse hover */
+            tracking_info.info.dwFlags &= ~TME_HOVER;
+        }
+    }
+
+    /* stop the timer if the tracking list is empty */
+    if (!(tracking_info.info.dwFlags & (TME_HOVER | TME_LEAVE)))
+    {
+        kill_system_timer( tracking_info.info.hwndTrack, SYSTEM_TIMER_TRACK_MOUSE );
+        tracking_info.info.hwndTrack = 0;
+        tracking_info.info.dwFlags = 0;
+        tracking_info.info.dwHoverTime = 0;
+    }
+}
+
+/***********************************************************************
+ *           NtUserTrackMouseEvent    (win32u.@)
+ */
+BOOL WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info )
+{
+    DWORD hover_time;
+    int hittest;
+    HWND hwnd;
+    POINT pos;
+
+    TRACE( "size %u, flags %#x, hwnd %p, time %u\n",
+           info->cbSize, info->dwFlags, info->hwndTrack, info->dwHoverTime );
+
+    if (info->cbSize != sizeof(TRACKMOUSEEVENT))
+    {
+        WARN( "wrong size %u\n", info->cbSize );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (info->dwFlags & TME_QUERY)
+    {
+        *info = tracking_info.info;
+        info->cbSize = sizeof(TRACKMOUSEEVENT);
+        return TRUE;
+    }
+
+    if (!is_window( info->hwndTrack ))
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
+
+    hover_time = (info->dwFlags & TME_HOVER) ? info->dwHoverTime : HOVER_DEFAULT;
+
+    if (hover_time == HOVER_DEFAULT || hover_time == 0)
+        NtUserSystemParametersInfo( SPI_GETMOUSEHOVERTIME, 0, &hover_time, 0 );
+
+    get_cursor_pos( &pos );
+    hwnd = window_from_point( info->hwndTrack, pos, &hittest );
+    TRACE( "point %s hwnd %p hittest %d\n", wine_dbgstr_point(&pos), hwnd, hittest );
+
+    if (info->dwFlags & ~(TME_CANCEL | TME_HOVER | TME_LEAVE | TME_NONCLIENT))
+        FIXME( "ignoring flags %#x\n", info->dwFlags & ~(TME_CANCEL | TME_HOVER | TME_LEAVE | TME_NONCLIENT) );
+
+    if (info->dwFlags & TME_CANCEL)
+    {
+        if (tracking_info.info.hwndTrack == info->hwndTrack)
+        {
+            tracking_info.info.dwFlags &= ~(info->dwFlags & ~TME_CANCEL);
+
+            /* if we aren't tracking on hover or leave remove this entry */
+            if (!(tracking_info.info.dwFlags & (TME_HOVER | TME_LEAVE)))
+            {
+                kill_system_timer( tracking_info.info.hwndTrack, SYSTEM_TIMER_TRACK_MOUSE );
+                tracking_info.info.hwndTrack = 0;
+                tracking_info.info.dwFlags = 0;
+                tracking_info.info.dwHoverTime = 0;
+            }
+        }
+    }
+    else
+    {
+        /* In our implementation, it's possible that another window will receive
+         * WM_MOUSEMOVE and call TrackMouseEvent before TrackMouseEventProc is
+         * called. In such a situation, post the WM_MOUSELEAVE now. */
+        if ((tracking_info.info.dwFlags & TME_LEAVE) && tracking_info.info.hwndTrack != NULL)
+            check_mouse_leave(hwnd, hittest);
+
+        kill_system_timer( tracking_info.info.hwndTrack, SYSTEM_TIMER_TRACK_MOUSE );
+        tracking_info.info.hwndTrack = 0;
+        tracking_info.info.dwFlags = 0;
+        tracking_info.info.dwHoverTime = 0;
+
+        if (info->hwndTrack == hwnd)
+        {
+            /* Adding new mouse event to the tracking list */
+            tracking_info.info = *info;
+            tracking_info.info.dwHoverTime = hover_time;
+
+            /* Initialize HoverInfo variables even if not hover tracking */
+            tracking_info.pos = pos;
+
+            NtUserSetSystemTimer( tracking_info.info.hwndTrack, SYSTEM_TIMER_TRACK_MOUSE, hover_time );
+        }
+    }
+
+    return TRUE;
+}
+
 /**********************************************************************
  *		set_capture_window
  */
@@ -1548,4 +1771,384 @@ BOOL set_foreground_window( HWND hwnd, BOOL mouse )
             ret = set_active_window( hwnd, NULL, mouse, TRUE );
     }
     return ret;
+}
+
+struct
+{
+    HBITMAP bitmap;
+    unsigned int timeout;
+} caret = {0, 500};
+
+static void display_caret( HWND hwnd, const RECT *r )
+{
+    HDC dc, mem_dc;
+
+    /* do not use DCX_CACHE here, since coördinates are in logical units */
+    if (!(dc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE )))
+        return;
+    mem_dc = NtGdiCreateCompatibleDC(dc);
+    if (mem_dc)
+    {
+        HBITMAP prev_bitmap;
+
+        prev_bitmap = NtGdiSelectBitmap( mem_dc, caret.bitmap );
+        NtGdiBitBlt( dc, r->left, r->top, r->right-r->left, r->bottom-r->top, mem_dc, 0, 0, SRCINVERT, 0, 0 );
+        NtGdiSelectBitmap( mem_dc, prev_bitmap );
+        NtGdiDeleteObjectApp( mem_dc );
+    }
+    NtUserReleaseDC( hwnd, dc );
+}
+
+static void fill_rect( HDC dc, const RECT *rect, HBRUSH hbrush )
+{
+    HBRUSH prev_brush;
+
+    prev_brush = NtGdiSelectBrush( dc, hbrush );
+    NtGdiPatBlt( dc, rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top, PATCOPY );
+    if (prev_brush) NtGdiSelectBrush( dc, prev_brush );
+}
+
+static unsigned int get_caret_registry_timeout(void)
+{
+    char value_buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[11 * sizeof(WCHAR)])];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)value_buffer;
+    unsigned int ret = 500;
+    HKEY key;
+
+    if (!(key = reg_open_hkcu_key( "Control Panel\\Desktop" )))
+        return ret;
+
+    if (query_reg_ascii_value( key, "CursorBlinkRate", value, sizeof(value_buffer) ))
+        ret = wcstoul( (WCHAR *)value->Data, NULL, 10 );
+    NtClose( key );
+    return ret;
+}
+
+/*****************************************************************
+ *           NtUserCreateCaret  (win32u.@)
+ */
+BOOL WINAPI NtUserCreateCaret( HWND hwnd, HBITMAP bitmap, int width, int height )
+{
+    HBITMAP caret_bitmap = 0;
+    int old_state = 0;
+    int hidden = 0;
+    HWND prev = 0;
+    BOOL ret;
+    RECT r;
+
+    TRACE( "hwnd %p, bitmap %p, width %d, height %d\n", hwnd, bitmap, width, height );
+
+    if (!hwnd) return FALSE;
+
+    if (bitmap && bitmap != (HBITMAP)1)
+    {
+        BITMAP bitmap_data;
+
+        if (!NtGdiExtGetObjectW( bitmap, sizeof(bitmap_data), &bitmap_data )) return FALSE;
+        caret_bitmap = NtGdiCreateBitmap( bitmap_data.bmWidth, bitmap_data.bmHeight,
+                                          bitmap_data.bmPlanes, bitmap_data.bmBitsPixel, NULL );
+        if (caret_bitmap)
+        {
+            size_t size = bitmap_data.bmWidthBytes * bitmap_data.bmHeight;
+            BYTE *bits = malloc( size );
+
+            NtGdiGetBitmapBits( bitmap, size, bits );
+            NtGdiSetBitmapBits( caret_bitmap, size, bits );
+            free( bits );
+        }
+    }
+    else
+    {
+        HDC dc;
+
+        if (!width) width = get_system_metrics( SM_CXBORDER );
+        if (!height) height = get_system_metrics( SM_CYBORDER );
+
+        /* create the uniform bitmap on the fly */
+        dc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE );
+        if (dc)
+        {
+            HDC mem_dc = NtGdiCreateCompatibleDC( dc );
+            if (mem_dc)
+            {
+                if ((caret_bitmap = NtGdiCreateCompatibleBitmap( mem_dc, width, height )))
+                {
+                    HBITMAP prev_bitmap = NtGdiSelectBitmap( mem_dc, caret_bitmap );
+                    SetRect( &r, 0, 0, width, height );
+                    fill_rect( mem_dc, &r, GetStockObject( bitmap ? GRAY_BRUSH : WHITE_BRUSH ));
+                    NtGdiSelectBitmap( mem_dc, prev_bitmap );
+                }
+                NtGdiDeleteObjectApp( mem_dc );
+            }
+            NtUserReleaseDC( hwnd, dc );
+        }
+    }
+    if (!caret_bitmap) return FALSE;
+
+    SERVER_START_REQ( set_caret_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->width  = width;
+        req->height = height;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            prev      = wine_server_ptr_handle( reply->previous );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            old_state = reply->old_state;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+    if (!ret) return FALSE;
+
+    if (prev && !hidden)  /* hide the previous one */
+    {
+        /* FIXME: won't work if prev belongs to a different process */
+        kill_system_timer( prev, SYSTEM_TIMER_CARET );
+        if (old_state) display_caret( prev, &r );
+    }
+
+    if (caret.bitmap) NtGdiDeleteObjectApp( caret.bitmap );
+    caret.bitmap = caret_bitmap;
+    caret.timeout = get_caret_registry_timeout();
+    return TRUE;
+}
+
+/*******************************************************************
+ *              destroy_caret
+ */
+BOOL destroy_caret(void)
+{
+    int old_state = 0;
+    int hidden = 0;
+    HWND prev = 0;
+    BOOL ret;
+    RECT r;
+
+    SERVER_START_REQ( set_caret_window )
+    {
+        req->handle = 0;
+        req->width  = 0;
+        req->height = 0;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            prev      = wine_server_ptr_handle( reply->previous );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            old_state = reply->old_state;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && prev && !hidden)
+    {
+        /* FIXME: won't work if prev belongs to a different process */
+        kill_system_timer( prev, SYSTEM_TIMER_CARET );
+        if (old_state) display_caret( prev, &r );
+    }
+    if (caret.bitmap) NtGdiDeleteObjectApp( caret.bitmap );
+    caret.bitmap = 0;
+    return ret;
+}
+
+/*****************************************************************
+ *           NtUserGetCaretBlinkTime  (win32u.@)
+ */
+UINT WINAPI NtUserGetCaretBlinkTime(void)
+{
+    return caret.timeout;
+}
+
+/*******************************************************************
+ *              set_caret_blink_time
+ */
+BOOL set_caret_blink_time( unsigned int time )
+{
+    TRACE( "time %u\n", time );
+
+    caret.timeout = time;
+    /* FIXME: update the timer */
+    return TRUE;
+}
+
+/*****************************************************************
+ *           NtUserGetCaretPos  (win32u.@)
+ */
+BOOL WINAPI NtUserGetCaretPos( POINT *pt )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( set_caret_info )
+    {
+        req->flags  = 0;  /* don't set anything */
+        req->handle = 0;
+        req->x      = 0;
+        req->y      = 0;
+        req->hide   = 0;
+        req->state  = 0;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            pt->x = reply->old_rect.left;
+            pt->y = reply->old_rect.top;
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/*******************************************************************
+ *              set_caret_pos
+ */
+BOOL set_caret_pos( int x, int y )
+{
+    int old_state = 0;
+    int hidden = 0;
+    HWND hwnd = 0;
+    BOOL ret;
+    RECT r;
+
+    TRACE( "(%d, %d)\n", x, y );
+
+    SERVER_START_REQ( set_caret_info )
+    {
+        req->flags  = SET_CARET_POS|SET_CARET_STATE;
+        req->handle = 0;
+        req->x      = x;
+        req->y      = y;
+        req->hide   = 0;
+        req->state  = CARET_STATE_ON_IF_MOVED;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            hwnd      = wine_server_ptr_handle( reply->full_handle );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            old_state = reply->old_state;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+    if (ret && !hidden && (x != r.left || y != r.top))
+    {
+        if (old_state) display_caret( hwnd, &r );
+        r.right += x - r.left;
+        r.bottom += y - r.top;
+        r.left = x;
+        r.top = y;
+        display_caret( hwnd, &r );
+        NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, caret.timeout );
+    }
+    return ret;
+}
+
+/*****************************************************************
+ *           NtUserShowCaret  (win32u.@)
+ */
+BOOL WINAPI NtUserShowCaret( HWND hwnd )
+{
+    int hidden = 0;
+    BOOL ret;
+    RECT r;
+
+    SERVER_START_REQ( set_caret_info )
+    {
+        req->flags  = SET_CARET_HIDE | SET_CARET_STATE;
+        req->handle = wine_server_user_handle( hwnd );
+        req->x      = 0;
+        req->y      = 0;
+        req->hide   = -1;
+        req->state  = CARET_STATE_ON;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            hwnd      = wine_server_ptr_handle( reply->full_handle );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && hidden == 1)  /* hidden was 1 so it's now 0 */
+    {
+        display_caret( hwnd, &r );
+        NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, caret.timeout );
+    }
+    return ret;
+}
+
+/*****************************************************************
+ *           NtUserHideCaret  (win32u.@)
+ */
+BOOL WINAPI NtUserHideCaret( HWND hwnd )
+{
+    int old_state = 0;
+    int hidden = 0;
+    BOOL ret;
+    RECT r;
+
+    SERVER_START_REQ( set_caret_info )
+    {
+        req->flags  = SET_CARET_HIDE | SET_CARET_STATE;
+        req->handle = wine_server_user_handle( hwnd );
+        req->x      = 0;
+        req->y      = 0;
+        req->hide   = 1;
+        req->state  = CARET_STATE_OFF;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            hwnd      = wine_server_ptr_handle( reply->full_handle );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            old_state = reply->old_state;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && !hidden)
+    {
+        if (old_state) display_caret( hwnd, &r );
+        kill_system_timer( hwnd, SYSTEM_TIMER_CARET );
+    }
+    return ret;
+}
+
+void toggle_caret( HWND hwnd )
+{
+    BOOL ret;
+    RECT r;
+    int hidden = 0;
+
+    SERVER_START_REQ( set_caret_info )
+    {
+        req->flags  = SET_CARET_STATE;
+        req->handle = wine_server_user_handle( hwnd );
+        req->x      = 0;
+        req->y      = 0;
+        req->hide   = 0;
+        req->state  = CARET_STATE_TOGGLE;
+        if ((ret = !wine_server_call( req )))
+        {
+            hwnd      = wine_server_ptr_handle( reply->full_handle );
+            r.left    = reply->old_rect.left;
+            r.top     = reply->old_rect.top;
+            r.right   = reply->old_rect.right;
+            r.bottom  = reply->old_rect.bottom;
+            hidden    = reply->old_hide;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && !hidden) display_caret( hwnd, &r );
 }

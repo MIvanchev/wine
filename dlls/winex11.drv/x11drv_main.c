@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <fcntl.h>
@@ -28,6 +32,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 #include <dlfcn.h>
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
@@ -47,10 +52,8 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/list.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 WINE_DECLARE_DEBUG_CHANNEL(synchronous);
@@ -60,6 +63,7 @@ XVisualInfo default_visual = { 0 };
 XVisualInfo argb_visual = { 0 };
 Colormap default_colormap = None;
 XPixmapFormatValues **pixmap_formats;
+Atom systray_atom = 0;
 unsigned int screen_bpp;
 Window root_window;
 BOOL usexvidmode = TRUE;
@@ -82,8 +86,8 @@ BOOL shape_layered_windows = TRUE;
 int copy_default_colors = 128;
 int alloc_system_colors = 256;
 int xrender_error_base = 0;
-HMODULE x11drv_module = 0;
 char *process_name = NULL;
+WNDPROC client_foreign_window_proc = NULL;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -204,6 +208,16 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/uri-list"
 };
 
+/* We use use pointer to call NtWaitForMultipleObjects to make it go through
+ * syscall dispatcher. We need that because win32u bypasses syscall thunks and
+ * if we called NtWaitForMultipleObjects directly, it wouldn't be able to handle
+ * user APCs. This will be removed as soon as we may use syscall interface
+ * for NtUserMsgWaitForMultipleObjectsEx. */
+NTSTATUS (WINAPI *pNtWaitForMultipleObjects)( ULONG, const HANDLE *, BOOLEAN,
+                                              BOOLEAN, const LARGE_INTEGER* );
+
+static NTSTATUS CDECL unix_call( enum x11drv_funcs code, void *params );
+
 /***********************************************************************
  *		ignore_error
  *
@@ -295,7 +309,7 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
     {
         ERR( "X protocol error: serial=%ld, request_code=%d - breaking into debugger\n",
              error_evt->serial, error_evt->request_code );
-        DebugBreak();  /* force an entry in the debugger */
+        assert( 0 );
     }
     old_error_handler( display, error_evt );
     return 0;
@@ -315,7 +329,7 @@ static void init_pixmap_formats( Display *display )
                formats[i].depth, formats[i].bits_per_pixel, formats[i].scanline_pad );
         if (formats[i].depth > max) max = formats[i].depth;
     }
-    pixmap_formats = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pixmap_formats) * (max + 1) );
+    pixmap_formats = calloc( 1, sizeof(*pixmap_formats) * (max + 1) );
     for (i = 0; i < count; i++) pixmap_formats[formats[i].depth] = &formats[i];
 }
 
@@ -424,7 +438,7 @@ static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
 static void setup_options(void)
 {
     static const WCHAR x11driverW[] = {'\\','X','1','1',' ','D','r','i','v','e','r',0};
-    WCHAR buffer[MAX_PATH+16];
+    WCHAR buffer[MAX_PATH+16], *p, *appname;
     HKEY hkey, appkey = 0;
     DWORD len;
 
@@ -433,18 +447,21 @@ static void setup_options(void)
 
     /* open the app-specific key */
 
-    len = GetModuleFileNameW( 0, buffer, MAX_PATH );
+    appname = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+    if ((p = wcsrchr( appname, '/' ))) appname = p + 1;
+    if ((p = wcsrchr( appname, '\\' ))) appname = p + 1;
+    len = lstrlenW( appname );
+
     if (len && len < MAX_PATH)
     {
         HKEY tmpkey;
-        WCHAR *p, *appname = buffer;
-        if ((p = strrchrW( appname, '/' ))) appname = p + 1;
-        if ((p = strrchrW( appname, '\\' ))) appname = p + 1;
-        CharLowerW(appname);
-        len = WideCharToMultiByte( CP_UNIXCP, 0, appname, -1, NULL, 0, NULL, NULL );
-        if ((process_name = HeapAlloc( GetProcessHeap(), 0, len )))
-            WideCharToMultiByte( CP_UNIXCP, 0, appname, -1, process_name, len, NULL, NULL );
-        strcatW( appname, x11driverW );
+        int i;
+        for (i = 0; appname[i]; i++) buffer[i] = RtlDowncaseUnicodeChar( appname[i] );
+        buffer[i] = 0;
+        appname = buffer;
+        if ((process_name = malloc( len * 3 + 1 )))
+            ntdll_wcstoumbs( appname, len + 1, process_name, len * 3 + 1, FALSE );
+        memcpy( appname + i, x11driverW, sizeof(x11driverW) );
         /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\X11 Driver */
         if ((tmpkey = open_hkcu_key( "Software\\Wine\\AppDefaults" )))
         {
@@ -484,7 +501,7 @@ static void setup_options(void)
         grab_fullscreen = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "ScreenDepth", buffer, sizeof(buffer) ))
-        default_visual.depth = strtolW( buffer, NULL, 0 );
+        default_visual.depth = wcstol( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "ClientSideGraphics", buffer, sizeof(buffer) ))
         client_side_graphics = IS_OPTION_TRUE( buffer[0] );
@@ -502,13 +519,13 @@ static void setup_options(void)
         private_color_map = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "PrimaryMonitor", buffer, sizeof(buffer) ))
-        primary_monitor = strtolW( buffer, NULL, 0 );
+        primary_monitor = wcstol( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "CopyDefaultColors", buffer, sizeof(buffer) ))
-        copy_default_colors = strtolW( buffer, NULL, 0 );
+        copy_default_colors = wcstol( buffer, NULL, 0 );
 
     if (!get_config_key( hkey, appkey, "AllocSystemColors", buffer, sizeof(buffer) ))
-        alloc_system_colors = strtolW( buffer, NULL, 0 );
+        alloc_system_colors = wcstol( buffer, NULL, 0 );
 
     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
 
@@ -600,8 +617,9 @@ static void init_visuals( Display *display, int screen )
 /***********************************************************************
  *           X11DRV process initialisation routine
  */
-static BOOL process_attach(void)
+static NTSTATUS x11drv_init( void *arg )
 {
+    struct init_params *params = arg;
     Display *display;
 
     setup_options();
@@ -609,7 +627,10 @@ static BOOL process_attach(void)
     /* Open display */
 
     if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
-    if (!(display = XOpenDisplay( NULL ))) return FALSE;
+    if (!(display = XOpenDisplay( NULL ))) return STATUS_UNSUCCESSFUL;
+
+    pNtWaitForMultipleObjects = params->pNtWaitForMultipleObjects;
+    client_foreign_window_proc = params->foreign_window_proc;
 
     fcntl( ConnectionNumber(display), F_SETFD, 1 ); /* set close on exec flag */
     root_window = DefaultRootWindow( display );
@@ -647,7 +668,9 @@ static BOOL process_attach(void)
 
     init_user_driver();
     X11DRV_DisplayDevices_Init(FALSE);
-    return TRUE;
+    params->show_systray = show_systray;
+    params->unix_call = unix_call;
+    return STATUS_SUCCESS;
 }
 
 
@@ -664,7 +687,7 @@ void X11DRV_ThreadDetach(void)
         if (data->xim) XCloseIM( data->xim );
         if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
         /* clear data in case we get re-entered from user32 before the thread is truly dead */
         NtUserGetThreadInfo()->driver_data = NULL;
     }
@@ -680,7 +703,7 @@ static void set_queue_display_fd( Display *display )
     if (wine_server_fd_to_handle( ConnectionNumber(display), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {
         MESSAGE( "x11drv: Can't allocate handle for display fd\n" );
-        ExitProcess(1);
+        NtTerminateProcess( 0, 1 );
     }
     SERVER_START_REQ( set_queue_fd )
     {
@@ -691,9 +714,9 @@ static void set_queue_display_fd( Display *display )
     if (ret)
     {
         MESSAGE( "x11drv: Can't store handle for display fd\n" );
-        ExitProcess(1);
+        NtTerminateProcess( 0, 1 );
     }
-    CloseHandle( handle );
+    NtClose( handle );
 }
 
 
@@ -706,15 +729,15 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
 
     if (data) return data;
 
-    if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) )))
+    if (!(data = calloc( 1, sizeof(*data) )))
     {
         ERR( "could not create data\n" );
-        ExitProcess(1);
+        NtTerminateProcess( 0, 1 );
     }
     if (!(data->display = XOpenDisplay(NULL)))
     {
         ERR_(winediag)( "x11drv: Can't open display: %s. Please ensure that your X server is running and that $DISPLAY is set correctly.\n", XDisplayName(NULL));
-        ExitProcess(1);
+        NtTerminateProcess( 0, 1 );
     }
 
     fcntl( ConnectionNumber(data->display), F_SETFD, 1 ); /* set close on exec flag */
@@ -732,25 +755,6 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     if (use_xim) X11DRV_SetupXIM();
 
     return data;
-}
-
-
-/***********************************************************************
- *           X11DRV initialisation routine
- */
-BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
-{
-    BOOL ret = TRUE;
-
-    switch(reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( hinst );
-        x11drv_module = hinst;
-        ret = process_attach();
-        break;
-    }
-    return ret;
 }
 
 
@@ -863,7 +867,7 @@ NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNE
             if (source->device == desc->hDevice)
             {
                 list_remove( &source->entry );
-                heap_free( source );
+                free( source );
             }
         }
         goto done;
@@ -886,7 +890,7 @@ NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNE
             source->type = desc->pType[i];
         else
         {
-            source = heap_alloc( sizeof( *source ) );
+            source = malloc( sizeof( *source ) );
             if (!source)
             {
                 status = STATUS_NO_MEMORY;
@@ -928,4 +932,47 @@ NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDP
     }
     pthread_mutex_unlock( &d3dkmt_mutex );
     return STATUS_SUCCESS;
+}
+
+
+NTSTATUS x11drv_client_func( enum x11drv_client_funcs id, const void *params, ULONG size )
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    return KeUserModeCallback( id, params, size, &ret_ptr, &ret_len );
+}
+
+
+NTSTATUS x11drv_client_call( enum client_callback func, UINT arg )
+{
+    struct client_callback_params params = { .id = func, .arg = arg };
+    return x11drv_client_func( client_func_callback, &params, sizeof(params) );
+}
+
+
+const unixlib_entry_t __wine_unix_call_funcs[] =
+{
+    x11drv_clipboard_message,
+    x11drv_create_desktop,
+    x11drv_init,
+    x11drv_systray_clear,
+    x11drv_systray_dock,
+    x11drv_systray_hide,
+    x11drv_systray_init,
+    x11drv_tablet_attach_queue,
+    x11drv_tablet_get_packet,
+    x11drv_tablet_info,
+    x11drv_tablet_load_info,
+    x11drv_xim_preedit_state,
+    x11drv_xim_reset,
+};
+
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
+
+/* FIXME: Use __wine_unix_call instead */
+static NTSTATUS CDECL unix_call( enum x11drv_funcs code, void *params )
+{
+    return __wine_unix_call_funcs[code]( params );
 }

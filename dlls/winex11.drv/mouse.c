@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <math.h>
@@ -49,7 +53,6 @@
 
 #include "x11drv.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -350,6 +353,7 @@ static BOOL grab_clipping_window( const RECT *clip )
 #if HAVE_X11_EXTENSIONS_XINPUT2_H
     static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
     struct x11drv_thread_data *data = x11drv_thread_data();
+    UNICODE_STRING class_name;
     Window clip_window;
     HWND msg_hwnd = 0;
     POINT pos;
@@ -360,8 +364,10 @@ static BOOL grab_clipping_window( const RECT *clip )
     if (!data) return FALSE;
     if (!(clip_window = init_clip_window())) return TRUE;
 
-    if (!(msg_hwnd = CreateWindowW( messageW, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
-                                    GetModuleHandleW(0), NULL )))
+    RtlInitUnicodeString( &class_name, messageW );
+    if (!(msg_hwnd = NtUserCreateWindowEx( 0, &class_name, &class_name, NULL, 0, 0, 0, 0, 0,
+                                           HWND_MESSAGE, 0, NtCurrentTeb()->Peb->ImageBaseAddress,
+                                           NULL, 0, NULL, 0, FALSE )))
         return TRUE;
 
     if (keyboard_grabbed)
@@ -383,7 +389,7 @@ static BOOL grab_clipping_window( const RECT *clip )
     if (data->xi2_state != xi_enabled)
     {
         WARN( "XInput2 not supported, refusing to clip to %s\n", wine_dbgstr_rect(clip) );
-        DestroyWindow( msg_hwnd );
+        NtUserDestroyWindow( msg_hwnd );
         NtUserClipCursor( NULL );
         return TRUE;
     }
@@ -409,7 +415,7 @@ static BOOL grab_clipping_window( const RECT *clip )
     if (!clipping_cursor)
     {
         disable_xinput2();
-        DestroyWindow( msg_hwnd );
+        NtUserDestroyWindow( msg_hwnd );
         return FALSE;
     }
     clip_rect = *clip;
@@ -490,7 +496,7 @@ LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd )
     {
         TRACE( "clip hwnd reset from %p\n", hwnd );
         data->clip_hwnd = 0;
-        data->clip_reset = GetTickCount();
+        data->clip_reset = NtGetTickCount();
         disable_xinput2();
         NtUserDestroyWindow( hwnd );
     }
@@ -530,7 +536,7 @@ BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
     release_win_data( data );
     if (!fullscreen) return FALSE;
     if (!(thread_data = x11drv_thread_data())) return FALSE;
-    if (GetTickCount() - thread_data->clip_reset < 1000) return FALSE;
+    if (NtGetTickCount() - thread_data->clip_reset < 1000) return FALSE;
     if (!reset && clipping_cursor && thread_data->clip_hwnd) return FALSE;  /* already clipping */
 
     monitor = NtUserMonitorFromWindow( hwnd, MONITOR_DEFAULTTONEAREST );
@@ -768,10 +774,10 @@ static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE i
 
     /* Retrieve the number of frames to render */
     if (!NtUserGetCursorFrameInfo(icon, 0, &delay_jiffies, &nFrames)) return 0;
-    if (!(imgs = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(XcursorImage*)*nFrames ))) return 0;
+    if (!(imgs = calloc( 1, sizeof(XcursorImage*) * nFrames ))) return 0;
 
     /* Allocate all of the resources necessary to obtain a cursor frame */
-    if (!(info = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( BITMAPINFO, bmiColors[256] )))) goto cleanup;
+    if (!(info = malloc( FIELD_OFFSET( BITMAPINFO, bmiColors[256] )))) goto cleanup;
     info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info->bmiHeader.biWidth = width;
     info->bmiHeader.biHeight = -height;
@@ -825,7 +831,7 @@ static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE i
         images->images[images->nimage] = imgs[images->nimage];
     cursor = pXcursorImagesLoadCursor( gdi_display, images );
     pXcursorImagesDestroy( images ); /* Note: this frees each individual frame (calls XcursorImageDestroy) */
-    HeapFree( GetProcessHeap(), 0, imgs );
+    free( imgs );
     imgs = NULL;
 
 cleanup:
@@ -834,12 +840,12 @@ cleanup:
         /* Failed to produce a cursor, free previously allocated frames */
         for (i=0; i<nFrames && imgs[i]; i++)
             pXcursorImageDestroy( imgs[i] );
-        HeapFree( GetProcessHeap(), 0, imgs );
+        free( imgs );
     }
     /* Cleanup all of the resources used to obtain the frame data */
     if (hbmColor) NtGdiDeleteObjectApp( hbmColor );
     if (hbmMask) NtGdiDeleteObjectApp( hbmMask );
-    HeapFree( GetProcessHeap(), 0, info );
+    free( info );
     return cursor;
 }
 
@@ -904,16 +910,12 @@ static const struct system_cursors riched20_cursors[] =
     { 0 }
 };
 
-static const struct
+static const struct system_cursors *module_cursors[] =
 {
-    const struct system_cursors *cursors;
-    WCHAR name[16];
-} module_cursors[] =
-{
-    { user32_cursors, {'u','s','e','r','3','2','.','d','l','l',0} },
-    { comctl32_cursors, {'c','o','m','c','t','l','3','2','.','d','l','l',0} },
-    { ole32_cursors, {'o','l','e','3','2','.','d','l','l',0} },
-    { riched20_cursors, {'r','i','c','h','e','d','2','0','.','d','l','l',0} }
+    user32_cursors,
+    comctl32_cursors,
+    ole32_cursors,
+    riched20_cursors,
 };
 
 struct cursor_font_fallback
@@ -1030,11 +1032,9 @@ static int find_fallback_shape( const char *name )
  */
 static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
 {
-    static const WCHAR idW[] = {'%','h','u',0};
     const struct system_cursors *cursors;
     unsigned int i;
     Cursor cursor = 0;
-    HMODULE module;
     HKEY key;
     const char * const *names = NULL;
     WCHAR *p, name[MAX_PATH * 2];
@@ -1042,12 +1042,17 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
 
     if (!info->szModName[0]) return 0;
 
-    p = strrchrW( info->szModName, '\\' );
-    strcpyW( name, p ? p + 1 : info->szModName );
-    p = name + strlenW( name );
+    p = wcsrchr( info->szModName, '\\' );
+    wcscpy( name, p ? p + 1 : info->szModName );
+    p = name + lstrlenW( name );
     *p++ = ',';
-    if (info->szResName[0]) strcpyW( p, info->szResName );
-    else sprintfW( p, idW, info->wResID );
+    if (info->szResName[0]) wcscpy( p, info->szResName );
+    else
+    {
+        char buf[16];
+        sprintf( buf, "%hu", info->wResID );
+        asciiz_to_unicode( p, buf );
+    }
     valueA[0] = 0;
 
     /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver\Cursors */
@@ -1061,20 +1066,18 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
         {
             const WCHAR *valueW = (const WCHAR *)value->Data;
             if (!valueW[0]) return 0; /* force standard cursor */
-            if (!WideCharToMultiByte( CP_UNIXCP, 0, valueW, -1, valueA, sizeof(valueA), NULL, NULL ))
+            if (!ntdll_wcstoumbs( valueW, lstrlenW(valueW) + 1, valueA, sizeof(valueA), FALSE ))
                 valueA[0] = 0;
             goto done;
         }
     }
 
     if (info->szResName[0]) goto done;  /* only integer resources are supported here */
-    if (!(module = GetModuleHandleW( info->szModName ))) goto done;
+    i = x11drv_client_func( client_func_is_system_module, info->szModName,
+                            (lstrlenW( info->szModName ) + 1) * sizeof(WCHAR) );
+    if (i == system_module_none) goto done;
 
-    for (i = 0; i < ARRAY_SIZE( module_cursors ); i++)
-        if (GetModuleHandleW( module_cursors[i].name ) == module) break;
-    if (i == ARRAY_SIZE( module_cursors )) goto done;
-
-    cursors = module_cursors[i].cursors;
+    cursors = module_cursors[i];
     for (i = 0; cursors[i].id; i++)
         if (cursors[i].id == info->wResID)
         {
@@ -1137,7 +1140,7 @@ static Cursor create_xlib_monochrome_cursor( HDC hdc, const ICONINFOEXW *icon, i
     info->bmiHeader.biClrUsed = 0;
     info->bmiHeader.biClrImportant = 0;
 
-    if (!(mask_bits = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto done;
+    if (!(mask_bits = malloc( info->bmiHeader.biSizeImage ))) goto done;
     if (!NtGdiGetDIBitsInternal( hdc, icon->hbmMask, 0, height * 2, mask_bits, info,
                                  DIB_RGB_COLORS, 0, 0 )) goto done;
 
@@ -1194,8 +1197,29 @@ static Cursor create_xlib_monochrome_cursor( HDC hdc, const ICONINFOEXW *icon, i
     XFreePixmap( gdi_display, mask_pixmap );
 
 done:
-    HeapFree( GetProcessHeap(), 0, mask_bits );
+    free( mask_bits );
     return cursor;
+}
+
+static BOOL get_icon_info( HICON handle, ICONINFOEXW *ret )
+{
+    UNICODE_STRING module, res_name;
+    ICONINFO info;
+
+    module.Buffer = ret->szModName;
+    module.MaximumLength = sizeof(ret->szModName) - sizeof(WCHAR);
+    res_name.Buffer = ret->szResName;
+    res_name.MaximumLength = sizeof(ret->szResName) - sizeof(WCHAR);
+    if (!NtUserGetIconInfo( handle, &info, &module, &res_name, NULL, 0 )) return FALSE;
+    ret->fIcon    = info.fIcon;
+    ret->xHotspot = info.xHotspot;
+    ret->yHotspot = info.yHotspot;
+    ret->hbmColor = info.hbmColor;
+    ret->hbmMask  = info.hbmMask;
+    ret->wResID   = res_name.Length ? 0 : LOWORD( res_name.Buffer );
+    ret->szModName[module.Length] = 0;
+    ret->szResName[res_name.Length] = 0;
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1213,8 +1237,7 @@ static Cursor create_xlib_load_mono_cursor( HDC hdc, HANDLE handle, int width, i
     if (!(mono = CopyImage( handle, IMAGE_CURSOR, width, height, LR_MONOCHROME | LR_COPYFROMRESOURCE )))
         return None;
 
-    info.cbSize = sizeof(info);
-    if (GetIconInfoExW( mono, &info ))
+    if (get_icon_info( mono, &info ))
     {
         if (!info.hbmColor)
         {
@@ -1268,14 +1291,14 @@ static Cursor create_xlib_color_cursor( HDC hdc, const ICONINFOEXW *icon, int wi
     info->bmiHeader.biClrUsed = 0;
     info->bmiHeader.biClrImportant = 0;
 
-    if (!(mask_bits = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto done;
+    if (!(mask_bits = malloc( info->bmiHeader.biSizeImage ))) goto done;
     if (!NtGdiGetDIBitsInternal( hdc, icon->hbmMask, 0, height, mask_bits, info,
                                  DIB_RGB_COLORS, 0, 0 )) goto done;
 
     info->bmiHeader.biBitCount = 32;
     info->bmiHeader.biSizeImage = width * height * 4;
-    if (!(color_bits = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage ))) goto done;
-    if (!(xor_bits = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, width_bytes * height ))) goto done;
+    if (!(color_bits = malloc( info->bmiHeader.biSizeImage ))) goto done;
+    if (!(xor_bits = calloc( 1, width_bytes * height ))) goto done;
     NtGdiGetDIBitsInternal( hdc, icon->hbmColor, 0, height, color_bits, info, DIB_RGB_COLORS, 0, 0 );
 
     /* compute fg/bg color and xor bitmap based on average of the color values */
@@ -1363,9 +1386,9 @@ static Cursor create_xlib_color_cursor( HDC hdc, const ICONINFOEXW *icon, int wi
     XFreePixmap( gdi_display, xor_pixmap );
 
 done:
-    HeapFree( GetProcessHeap(), 0, color_bits );
-    HeapFree( GetProcessHeap(), 0, xor_bits );
-    HeapFree( GetProcessHeap(), 0, mask_bits );
+    free( color_bits );
+    free( xor_bits );
+    free( mask_bits );
     return cursor;
 }
 
@@ -1383,8 +1406,7 @@ static Cursor create_cursor( HANDLE handle )
 
     if (!handle) return get_empty_cursor();
 
-    info.cbSize = sizeof(info);
-    if (!GetIconInfoExW( handle, &info )) return 0;
+    if (!get_icon_info( handle, &info )) return 0;
 
     if (use_system_cursors && (cursor = create_xcursor_system_cursor( &info )))
     {
@@ -1445,9 +1467,9 @@ void X11DRV_DestroyCursorIcon( HCURSOR handle )
 void X11DRV_SetCursor( HCURSOR handle )
 {
     if (InterlockedExchangePointer( (void **)&last_cursor, handle ) != handle ||
-        GetTickCount() - last_cursor_change > 100)
+        NtGetTickCount() - last_cursor_change > 100)
     {
-        last_cursor_change = GetTickCount();
+        last_cursor_change = NtGetTickCount();
         if (cursor_window) send_notify_message( cursor_window, WM_X11DRV_SET_CURSOR, 0, (LPARAM)handle );
     }
 }
@@ -1640,16 +1662,16 @@ void move_resize_window( HWND hwnd, int dir )
             input.u.mi.dy          = pos.y;
             input.u.mi.mouseData   = button_up_data[button - 1];
             input.u.mi.dwFlags     = button_up_flags[button - 1] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
-            input.u.mi.time        = GetTickCount();
+            input.u.mi.time        = NtGetTickCount();
             input.u.mi.dwExtraInfo = 0;
             __wine_send_input( hwnd, &input, NULL );
         }
 
         while (NtUserPeekMessage( &msg, 0, 0, 0, PM_REMOVE ))
         {
-            if (!CallMsgFilterW( &msg, MSGF_SIZE ))
+            if (!NtUserCallMsgFilter( &msg, MSGF_SIZE ))
             {
-                TranslateMessage( &msg );
+                NtUserTranslateMessage( &msg, 0 );
                 NtUserDispatchMessage( &msg );
             }
         }

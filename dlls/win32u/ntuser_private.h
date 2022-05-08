@@ -32,29 +32,20 @@ struct hardware_msg_data;
 
 struct user_callbacks
 {
-    BOOL (WINAPI *pAdjustWindowRectEx)( RECT *, DWORD, BOOL, DWORD );
-    HANDLE (WINAPI *pCopyImage)( HANDLE, UINT, INT, INT, UINT );
-    BOOL (WINAPI *pDestroyCaret)(void);
     BOOL (WINAPI *pEndMenu)(void);
-    BOOL (WINAPI *pHideCaret)( HWND hwnd );
     BOOL (WINAPI *pImmProcessKey)(HWND, HKL, UINT, LPARAM, DWORD);
     BOOL (WINAPI *pImmTranslateMessage)(HWND, UINT, WPARAM, LPARAM);
-    BOOL (WINAPI *pSetSystemMenu)( HWND hwnd, HMENU menu );
-    BOOL (WINAPI *pShowCaret)( HWND hwnd );
-    void (CDECL *free_menu_items)( void *ptr );
     void (CDECL *free_win_ptr)( struct tagWND *win );
+    HMENU (CDECL *get_sys_menu)( HWND hwnd, HMENU popup );
     HWND (CDECL *is_menu_active)(void);
     void (CDECL *notify_ime)( HWND hwnd, UINT param );
     BOOL (CDECL *post_dde_message)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
                                     DWORD type );
     BOOL (CDECL *process_rawinput_message)( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data );
     BOOL (CDECL *rawinput_device_get_usages)(HANDLE handle, USHORT *usage_page, USHORT *usage);
-    void (CDECL *register_builtin_classes)(void);
     void (WINAPI *set_standard_scroll_painted)( HWND hwnd, INT bar, BOOL visible );
-    void (CDECL *toggle_caret)( HWND hwnd );
     BOOL (CDECL *unpack_dde_message)( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
                                       void **buffer, size_t size );
-    void (CDECL *update_mouse_tracking_info)( HWND hwnd );
     BOOL (WINAPI *register_imm)( HWND hwnd );
     void (WINAPI *unregister_imm)( HWND hwnd );
 };
@@ -296,6 +287,7 @@ extern void spy_exit_message( INT flag, HWND hwnd, UINT msg,
                               LRESULT lreturn, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 
 /* class.c */
+extern HINSTANCE user32_module DECLSPEC_HIDDEN;
 WNDPROC alloc_winproc( WNDPROC func, BOOL ansi ) DECLSPEC_HIDDEN;
 WINDOWPROC *get_winproc_ptr( WNDPROC handle ) DECLSPEC_HIDDEN;
 BOOL is_winproc_unicode( WNDPROC proc, BOOL def_val ) DECLSPEC_HIDDEN;
@@ -308,6 +300,7 @@ WNDPROC get_winproc( WNDPROC proc, BOOL ansi ) DECLSPEC_HIDDEN;
 void get_winproc_params( struct win_proc_params *params ) DECLSPEC_HIDDEN;
 struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
 struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
+extern void register_builtin_classes(void) DECLSPEC_HIDDEN;
 
 /* cursoricon.c */
 HICON alloc_cursoricon_handle( BOOL is_icon ) DECLSPEC_HIDDEN;

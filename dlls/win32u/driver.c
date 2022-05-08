@@ -784,50 +784,14 @@ static void nulldrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rec
 {
 }
 
-/* helper for kernel32->ntdll timeout format conversion */
-static inline LARGE_INTEGER *get_nt_timeout( LARGE_INTEGER *time, DWORD timeout )
+static NTSTATUS nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
+                                                     const LARGE_INTEGER *timeout,
+                                                     DWORD mask, DWORD flags )
 {
-    if (timeout == INFINITE) return NULL;
-    time->QuadPart = (ULONGLONG)timeout * -10000;
-    return time;
-}
+    if (!count && timeout && !timeout->QuadPart) return WAIT_TIMEOUT;
 
-static HANDLE normalize_std_handle( HANDLE handle )
-{
-    if (handle == (HANDLE)STD_INPUT_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdInput;
-    if (handle == (HANDLE)STD_OUTPUT_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdOutput;
-    if (handle == (HANDLE)STD_ERROR_HANDLE)
-        return NtCurrentTeb()->Peb->ProcessParameters->hStdError;
-
-    return handle;
-}
-
-static DWORD nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
-                                                  DWORD mask, DWORD flags )
-{
-    NTSTATUS status;
-    HANDLE hloc[MAXIMUM_WAIT_OBJECTS];
-    LARGE_INTEGER time;
-    unsigned int i;
-
-    if (!count && !timeout) return WAIT_TIMEOUT;
-    if (count > MAXIMUM_WAIT_OBJECTS)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return WAIT_FAILED;
-    }
-    for (i = 0; i < count; i++) hloc[i] = normalize_std_handle( handles[i] );
-
-    status = NtWaitForMultipleObjects( count, hloc, !(flags & MWMO_WAITALL), !!(flags & MWMO_ALERTABLE),
-                                       get_nt_timeout( &time, timeout ) );
-    if (HIWORD(status))  /* is it an error code? */
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        status = WAIT_FAILED;
-    }
-    return status;
+    return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
+                                     !!(flags & MWMO_ALERTABLE), timeout );
 }
 
 static void nulldrv_ReleaseDC( HWND hwnd, HDC hdc )

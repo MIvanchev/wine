@@ -30,6 +30,58 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
+typedef struct
+{
+    UINT    cbSize;
+    UINT    fMask;
+    UINT    fType;
+    UINT    fState;
+    UINT    wID;
+    UINT32  hSubMenu;
+    UINT32  hbmpChecked;
+    UINT32  hbmpUnchecked;
+    UINT32  dwItemData;
+    UINT32  dwTypeData;
+    UINT    cch;
+    UINT32  hbmpItem;
+} MENUITEMINFOW32;
+
+typedef struct
+{
+    UINT32  hwnd;
+    UINT    message;
+    UINT32  wParam;
+    UINT32  lParam;
+    DWORD   time;
+    POINT   pt;
+} MSG32;
+
+static MSG *msg_32to64( MSG *msg, MSG32 *msg32 )
+{
+    if (!msg32) return NULL;
+
+    msg->hwnd    = UlongToHandle( msg32->hwnd );
+    msg->message = msg32->message;
+    msg->wParam  = msg32->wParam;
+    msg->lParam  = msg32->lParam;
+    msg->time    = msg32->time;
+    msg->pt      = msg32->pt;
+    return msg;
+}
+
+static MSG32 *msg_64to32( MSG *msg, MSG32 *msg32 )
+{
+    if (!msg32) return NULL;
+
+    msg32->hwnd    = HandleToUlong( msg->hwnd );
+    msg32->message = msg->message;
+    msg32->wParam  = msg->wParam;
+    msg32->lParam  = msg->lParam;
+    msg32->time    = msg->time;
+    msg32->pt      = msg->pt;
+    return msg32;
+}
+
 NTSTATUS WINAPI wow64_NtUserInitializeClientPfnArrays( UINT *args )
 {
     FIXME( "\n" );
@@ -539,6 +591,18 @@ NTSTATUS WINAPI wow64_NtUserUnhookWindowsHookEx( UINT *args )
     return NtUserUnhookWindowsHookEx( handle );
 }
 
+NTSTATUS WINAPI wow64_NtUserCallMsgFilter( UINT *args )
+{
+    MSG32 *msg32 = get_ptr( &args );
+    INT code = get_ulong( &args );
+    MSG msg;
+    BOOL ret;
+
+    ret = NtUserCallMsgFilter( msg_32to64( &msg, msg32 ), code );
+    msg_64to32( &msg, msg32 );
+    return ret;
+}
+
 NTSTATUS WINAPI wow64_NtUserGetForegroundWindow( UINT *args )
 {
     return HandleToUlong( NtUserGetForegroundWindow() );
@@ -608,6 +672,18 @@ NTSTATUS WINAPI wow64_NtUserKillTimer( UINT *args )
     return NtUserKillTimer( hwnd, id );
 }
 
+NTSTATUS WINAPI wow64_NtUserGetCaretBlinkTime( UINT *args )
+{
+    return NtUserGetCaretBlinkTime();
+}
+
+NTSTATUS WINAPI wow64_NtUserGetCaretPos( UINT *args )
+{
+    POINT *pt = get_ptr( &args );
+
+    return NtUserGetCaretPos( pt );
+}
+
 NTSTATUS WINAPI wow64_NtUserCopyAcceleratorTable( UINT *args )
 {
     HACCEL src = get_handle( &args );
@@ -639,6 +715,15 @@ NTSTATUS WINAPI wow64_NtUserCheckMenuItem( UINT *args )
     UINT flags = get_ulong( &args );
 
     return NtUserCheckMenuItem( handle, id, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserDeleteMenu( UINT *args )
+{
+    HMENU menu = get_handle( &args );
+    UINT id = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+
+    return NtUserDeleteMenu( menu, id, flags );
 }
 
 NTSTATUS WINAPI wow64_NtUserGetMenuItemRect( UINT *args )
@@ -695,4 +780,51 @@ NTSTATUS WINAPI wow64_NtUserThunkedMenuInfo( UINT *args )
     }
 
     return NtUserThunkedMenuInfo( menu, info32 ? &info : NULL );
+}
+
+NTSTATUS WINAPI wow64_NtUserThunkedMenuItemInfo( UINT *args )
+{
+    HMENU handle = get_handle( &args );
+    UINT pos = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+    UINT method = get_ulong( &args );
+    MENUITEMINFOW32 *info32 = get_ptr( &args );
+    UNICODE_STRING32 *str32 = get_ptr( &args );
+    MENUITEMINFOW info = { sizeof(info) }, *info_ptr;
+    UNICODE_STRING str;
+
+    if (info32)
+    {
+        info.cbSize = sizeof(info);
+        info.fMask = info32->fMask;
+        switch (method)
+        {
+        case NtUserSetMenuItemInfo:
+        case NtUserInsertMenuItem:
+            info.fType = info32->fType;
+            info.fState = info32->fState;
+            info.wID = info32->wID;
+            info.hSubMenu = UlongToHandle( info32->hSubMenu );
+            info.hbmpChecked = UlongToHandle( info32->hbmpUnchecked );
+            info.dwItemData = info32->dwItemData;
+            info.dwTypeData = UlongToPtr( info32->dwTypeData );
+            info.cch = info32->cch;
+            info.hbmpItem = UlongToHandle( info32->hbmpItem );
+            break;
+        }
+        info_ptr = &info;
+    }
+    else info_ptr = NULL;
+
+    return NtUserThunkedMenuItemInfo( handle, pos, flags, method, info_ptr,
+                                      unicode_str_32to64( &str, str32 ));
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoveMenu( UINT *args )
+{
+    HMENU handle = get_handle( &args );
+    UINT id = get_ulong( &args );
+    UINT flags = get_ulong( &args );
+
+    return NtUserRemoveMenu( handle, id, flags );
 }

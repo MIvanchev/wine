@@ -82,6 +82,8 @@ extern BOOL process_rawinput_message( MSG *msg, UINT hw_id,
                                       const struct hardware_msg_data *msg_data ) DECLSPEC_HIDDEN;
 extern BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
                                 void **buffer, size_t size ) DECLSPEC_HIDDEN;
+extern void free_cached_data( UINT format, HANDLE handle ) DECLSPEC_HIDDEN;
+extern HANDLE render_synthesized_format( UINT format, UINT from ) DECLSPEC_HIDDEN;
 
 extern void CLIPBOARD_ReleaseOwner( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL FOCUS_MouseActivate( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -99,8 +101,6 @@ extern HBRUSH SYSCOLOR_Get55AABrush(void) DECLSPEC_HIDDEN;
 extern void SYSPARAMS_Init(void) DECLSPEC_HIDDEN;
 extern void USER_CheckNotLock(void) DECLSPEC_HIDDEN;
 extern BOOL USER_IsExitingThread( DWORD tid ) DECLSPEC_HIDDEN;
-extern void CDECL toggle_caret( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void CDECL update_mouse_tracking_info( HWND hwnd ) DECLSPEC_HIDDEN;
 
 typedef LRESULT (*winproc_callback_t)( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                        LRESULT *result, void *arg );
@@ -124,6 +124,7 @@ BOOL WINAPI User32CallSendAsyncCallback( const struct send_async_params *params,
 BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, ULONG size );
 BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size );
 BOOL WINAPI User32CallWindowsHook( const struct win_hook_params *params, ULONG size );
+BOOL WINAPI User32RegisterBuiltinClasses( const struct win_hook_params *params, ULONG size );
 
 /* message spy definitions */
 

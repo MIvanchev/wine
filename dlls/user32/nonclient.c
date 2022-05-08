@@ -916,7 +916,7 @@ static void  NC_DrawCaption( HDC  hdc, RECT *rect, HWND hwnd, DWORD  style,
         UINT state;
 
         /* Go get the sysmenu */
-        hSysMenu = GetSystemMenu(hwnd, FALSE);
+        hSysMenu = NtUserGetSystemMenu(hwnd, FALSE);
         state = GetMenuState(hSysMenu, SC_CLOSE, MF_BYCOMMAND);
 
         /* Draw a grayed close button if disabled or if SC_CLOSE is not there */
@@ -1213,7 +1213,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
     BOOL pressed = TRUE;
     UINT state;
     DWORD wndStyle = GetWindowLongW( hwnd, GWL_STYLE);
-    HMENU hSysMenu = GetSystemMenu(hwnd, FALSE);
+    HMENU hSysMenu = NtUserGetSystemMenu(hwnd, FALSE);
 
     void  (*paintButton)(HWND, HDC, BOOL, BOOL);
 
@@ -1249,7 +1249,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         BOOL oldstate = pressed;
 
         if (!GetMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST )) break;
-        if (CallMsgFilterW( &msg, MSGF_MAX )) continue;
+        if (NtUserCallMsgFilter( &msg, MSGF_MAX )) continue;
 
         if(msg.message == WM_LBUTTONUP)
             break;
@@ -1291,7 +1291,7 @@ static void NC_TrackCloseButton (HWND hwnd, WPARAM wParam, LPARAM lParam)
     MSG msg;
     HDC hdc;
     BOOL pressed = TRUE;
-    HMENU hSysMenu = GetSystemMenu(hwnd, FALSE);
+    HMENU hSysMenu = NtUserGetSystemMenu(hwnd, FALSE);
     UINT state;
 
     if(hSysMenu == 0)
@@ -1314,7 +1314,7 @@ static void NC_TrackCloseButton (HWND hwnd, WPARAM wParam, LPARAM lParam)
         BOOL oldstate = pressed;
 
         if (!GetMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST )) break;
-        if (CallMsgFilterW( &msg, MSGF_MAX )) continue;
+        if (NtUserCallMsgFilter( &msg, MSGF_MAX )) continue;
 
         if(msg.message == WM_LBUTTONUP)
             break;
@@ -1464,7 +1464,7 @@ LRESULT NC_HandleNCRButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
         for (;;)
         {
             if (!GetMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST )) break;
-            if (CallMsgFilterW( &msg, MSGF_MAX )) continue;
+            if (NtUserCallMsgFilter( &msg, MSGF_MAX )) continue;
             if (msg.message == WM_RBUTTONUP)
             {
                 hittest = NC_HandleNCHitTest( hwnd, msg.pt );
@@ -1508,7 +1508,7 @@ LRESULT NC_HandleNCLButtonDblClk( HWND hwnd, WPARAM wParam, LPARAM lParam )
 
     case HTSYSMENU:
         {
-            HMENU hSysMenu = GetSystemMenu(hwnd, FALSE);
+            HMENU hSysMenu = NtUserGetSystemMenu(hwnd, FALSE);
             UINT state = GetMenuState(hSysMenu, SC_CLOSE, MF_BYCOMMAND);
 
             /* If the close item of the sysmenu is disabled or not present do nothing */

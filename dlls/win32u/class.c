@@ -66,7 +66,7 @@ static pthread_mutex_t winproc_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct list class_list = LIST_INIT( class_list );
 
-static HINSTANCE user32_module;
+HINSTANCE user32_module = 0;
 
 /* find an existing winproc for a given function and type */
 /* FIXME: probably should do something more clever than a linear search */
@@ -443,12 +443,12 @@ ATOM WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *nam
     class->hCursor       = wc->hCursor;
     class->hbrBackground = wc->hbrBackground;
     class->winproc       = alloc_winproc( wc->lpfnWndProc, ansi );
-    class->menu_name     = *client_menu_name;
-    if (wc->hIcon && !wc->hIconSm && user_callbacks)
-        class->hIconSmIntern = user_callbacks->pCopyImage( wc->hIcon, IMAGE_ICON,
-                                                           get_system_metrics( SM_CXSMICON ),
-                                                           get_system_metrics( SM_CYSMICON ),
-                                                           LR_COPYFROMRESOURCE );
+    if (client_menu_name) class->menu_name = *client_menu_name;
+    if (wc->hIcon && !wc->hIconSm)
+        class->hIconSmIntern = CopyImage( wc->hIcon, IMAGE_ICON,
+                                          get_system_metrics( SM_CXSMICON ),
+                                          get_system_metrics( SM_CYSMICON ),
+                                          LR_COPYFROMRESOURCE );
     release_class_ptr( class );
     return atom;
 }
@@ -699,20 +699,20 @@ static ULONG_PTR set_class_long( HWND hwnd, INT offset, LONG_PTR newval, UINT si
             NtUserDestroyCursor( class->hIconSmIntern, 0 );
             class->hIconSmIntern = NULL;
         }
-        if (newval && !class->hIconSm && user_callbacks)
-            class->hIconSmIntern = user_callbacks->pCopyImage( (HICON)newval, IMAGE_ICON,
-                                                               get_system_metrics( SM_CXSMICON ),
-                                                               get_system_metrics( SM_CYSMICON ),
-                      LR_COPYFROMRESOURCE );
+        if (newval && !class->hIconSm)
+            class->hIconSmIntern = CopyImage( (HICON)newval, IMAGE_ICON,
+                                              get_system_metrics( SM_CXSMICON ),
+                                              get_system_metrics( SM_CYSMICON ),
+                                              LR_COPYFROMRESOURCE );
         class->hIcon = (HICON)newval;
         break;
     case GCLP_HICONSM:
         retval = (ULONG_PTR)class->hIconSm;
-        if (retval && !newval && class->hIcon && user_callbacks)
-            class->hIconSmIntern = user_callbacks->pCopyImage( class->hIcon, IMAGE_ICON,
-                                                               get_system_metrics( SM_CXSMICON ),
-                                                               get_system_metrics( SM_CYSMICON ),
-                                                               LR_COPYFROMRESOURCE );
+        if (retval && !newval && class->hIcon)
+            class->hIconSmIntern = CopyImage( class->hIcon, IMAGE_ICON,
+                                              get_system_metrics( SM_CXSMICON ),
+                                              get_system_metrics( SM_CYSMICON ),
+                                              LR_COPYFROMRESOURCE );
         else if (newval && class->hIconSmIntern)
         {
             NtUserDestroyCursor( class->hIconSmIntern, 0 );
@@ -971,4 +971,20 @@ WORD get_class_word( HWND hwnd, INT offset )
         SetLastError( ERROR_INVALID_INDEX );
     release_class_ptr( class );
     return retvalue;
+}
+
+static void register_builtins(void)
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    KeUserModeCallback( NtUserRegisterBuiltinClasses, NULL, 0, &ret_ptr, &ret_len );
+}
+
+/***********************************************************************
+ *           register_builtin_classes
+ */
+void register_builtin_classes(void)
+{
+    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
+    pthread_once( &init_once, register_builtins );
 }

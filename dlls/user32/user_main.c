@@ -159,30 +159,41 @@ static void CDECL free_win_ptr( WND *win )
 
 static const struct user_callbacks user_funcs =
 {
-    AdjustWindowRectEx,
-    CopyImage,
-    DestroyCaret,
     EndMenu,
-    HideCaret,
     ImmProcessKey,
     ImmTranslateMessage,
-    SetSystemMenu,
-    ShowCaret,
-    free_menu_items,
     free_win_ptr,
+    MENU_GetSysMenu,
     MENU_IsMenuActive,
     notify_ime,
     post_dde_message,
     process_rawinput_message,
     rawinput_device_get_usages,
-    register_builtin_classes,
     SCROLL_SetStandardScrollPainted,
-    toggle_caret,
     unpack_dde_message,
-    update_mouse_tracking_info,
     register_imm,
     unregister_imm,
 };
+
+static NTSTATUS WINAPI User32CopyImage( const struct copy_image_params *params, ULONG size )
+{
+    HANDLE ret = CopyImage( params->hwnd, params->type, params->dx, params->dy, params->flags );
+    return HandleToUlong( ret );
+}
+
+static NTSTATUS WINAPI User32FreeCachedClipboardData( const struct free_cached_data_params *params,
+                                                      ULONG size )
+{
+    free_cached_data( params->format, params->handle );
+    return 0;
+}
+
+static NTSTATUS WINAPI User32RenderSsynthesizedFormat( const struct render_synthesized_format_params *params,
+                                                       ULONG size )
+{
+    render_synthesized_format( params->format, params->from );
+    return 0;
+}
 
 static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
 {
@@ -196,7 +207,11 @@ static const void *kernel_callback_table[NtUserCallCount] =
     User32CallWinEventHook,
     User32CallWindowProc,
     User32CallWindowsHook,
+    User32CopyImage,
+    User32FreeCachedClipboardData,
     User32LoadDriver,
+    User32RegisterBuiltinClasses,
+    User32RenderSsynthesizedFormat,
 };
 
 

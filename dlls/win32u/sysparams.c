@@ -2782,7 +2782,7 @@ static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
                   debugstr_a( entry->hdr.regval ));
             /* fall through */
         case 0: /* use the default GUI font */
-            NtGdiExtGetObjectW( get_stock_object( DEFAULT_GUI_FONT ), sizeof(font), &font );
+            NtGdiExtGetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(font), &font );
             font.lfHeight = map_from_system_dpi( font.lfHeight );
             font.lfWeight = entry->font.weight;
             entry->font.val = font;
@@ -2821,7 +2821,7 @@ static BOOL set_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
 /* initialize a font (binary) parameter */
 static BOOL init_font_entry( union sysparam_all_entry *entry )
 {
-    NtGdiExtGetObjectW( get_stock_object( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
+    NtGdiExtGetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
     entry->font.val.lfHeight = map_from_system_dpi( entry->font.val.lfHeight );
     entry->font.val.lfWeight = entry->font.weight;
     get_real_fontname( &entry->font.val, entry->font.fullname );
@@ -4653,6 +4653,9 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 {
     switch(code)
     {
+    case NtUserCallNoParam_DestroyCaret:
+        return destroy_caret();
+
     case NtUserCallNoParam_GetDesktopWindow:
         return HandleToUlong( get_desktop_window() );
 
@@ -4669,10 +4672,6 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 
     case NtUserThreadDetach:
         thread_detach();
-        return 0;
-
-    case NtUserUpdateClipboard:
-        user_driver->pUpdateClipboard();
         return 0;
 
     default:
@@ -4719,6 +4718,9 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     case NtUserCallOneParam_GetIconParam:
         return get_icon_param( UlongToHandle(arg) );
 
+    case NtUserCallOneParam_GetMenuItemCount:
+        return get_menu_item_count( UlongToHandle(arg) );
+
     case NtUserCallOneParam_GetSysColor:
         return get_sys_color( arg );
 
@@ -4747,6 +4749,9 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 
     case NtUserCallOneParam_MessageBeep:
         return message_beep( arg );
+
+    case NtUserCallOneParam_SetCaretBlinkTime:
+        return set_caret_blink_time( arg );
 
     /* temporary exports */
     case NtUserCallHooks:
@@ -4803,6 +4808,9 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
 
     case NtUserCallTwoParam_ReplyMessage:
         return reply_message_result( arg1, (MSG *)arg2 );
+
+    case NtUserCallTwoParam_SetCaretPos:
+        return set_caret_pos( arg1, arg2 );
 
     case NtUserCallTwoParam_SetIconParam:
         return set_icon_param( UlongToHandle(arg1), arg2 );

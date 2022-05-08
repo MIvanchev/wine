@@ -217,7 +217,7 @@ static BOOL is_close_enabled(HWND hwnd, HMENU hSysMenu)
 {
     if (GetClassLongW(hwnd, GCL_STYLE) & CS_NOCLOSE) return FALSE;
 
-    if (!hSysMenu) hSysMenu = GetSystemMenu(hwnd, FALSE);
+    if (!hSysMenu) hSysMenu = NtUserGetSystemMenu( hwnd, FALSE );
     if (hSysMenu)
     {
         UINT state = GetMenuState(hSysMenu, SC_CLOSE, MF_BYCOMMAND);
@@ -417,7 +417,7 @@ static LRESULT MDI_RefreshMenu(MDICLIENTINFO *ci)
                     if (mii.wID == ci->idFirstChild)
                     {
                         TRACE("removing %u items including separator\n", count - i);
-                        while (RemoveMenu(ci->hWindowMenu, i, MF_BYPOSITION))
+                        while (NtUserRemoveMenu( ci->hWindowMenu, i, MF_BYPOSITION ))
                             /* nothing */;
 
                         break;
@@ -835,7 +835,7 @@ static BOOL MDI_AugmentFrameMenu( HWND frame, HWND hChild )
     if (!menu) return FALSE;
 
     /* create a copy of sysmenu popup and insert it into frame menu bar */
-    if (!(hSysPopup = GetSystemMenu(hChild, FALSE)))
+    if (!(hSysPopup = NtUserGetSystemMenu( hChild, FALSE )))
     {
         TRACE("child %p doesn't have a system menu\n", hChild);
         return FALSE;
@@ -935,7 +935,7 @@ static BOOL MDI_RestoreFrameMenu( HWND frame, HWND hChild )
 		     TRUE,
 		     &menuInfo);
 
-    RemoveMenu(menu,0,MF_BYPOSITION);
+    NtUserRemoveMenu( menu, 0, MF_BYPOSITION );
 
     if ( (menuInfo.fType & MFT_BITMAP)           &&
 	 (LOWORD(menuInfo.dwTypeData)!=0)        &&
@@ -945,11 +945,11 @@ static BOOL MDI_RestoreFrameMenu( HWND frame, HWND hChild )
     }
 
     /* close */
-    DeleteMenu(menu, SC_CLOSE, MF_BYCOMMAND);
+    NtUserDeleteMenu( menu, SC_CLOSE, MF_BYCOMMAND );
     /* restore */
-    DeleteMenu(menu, SC_RESTORE, MF_BYCOMMAND);
+    NtUserDeleteMenu( menu, SC_RESTORE, MF_BYCOMMAND );
     /* minimize */
-    DeleteMenu(menu, SC_MINIMIZE, MF_BYCOMMAND);
+    NtUserDeleteMenu( menu, SC_MINIMIZE, MF_BYCOMMAND );
 
     DrawMenuBar(frame);
 

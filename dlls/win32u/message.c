@@ -1897,8 +1897,9 @@ static inline void check_for_driver_events( UINT msg )
 {
     if (get_user_thread_info()->message_count > 200)
     {
+        LARGE_INTEGER zero = { .QuadPart = 0 };
         flush_window_surfaces( FALSE );
-        user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_ALLINPUT, 0 );
+        user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, QS_ALLINPUT, 0 );
     }
     else if (msg == WM_TIMER || msg == WM_SYSTIMER)
     {
@@ -1908,9 +1909,18 @@ static inline void check_for_driver_events( UINT msg )
     else get_user_thread_info()->message_count++;
 }
 
+/* helper for kernel32->ntdll timeout format conversion */
+static inline LARGE_INTEGER *get_nt_timeout( LARGE_INTEGER *time, DWORD timeout )
+{
+    if (timeout == INFINITE) return NULL;
+    time->QuadPart = (ULONGLONG)timeout * -10000;
+    return time;
+}
+
 /* wait for message or signaled handle */
 static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
 {
+    LARGE_INTEGER time;
     DWORD ret, lock;
     void *ret_ptr;
     ULONG ret_len;
@@ -1918,7 +1928,13 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
     if (enable_thunk_lock)
         lock = KeUserModeCallback( NtUserThunkLock, NULL, 0, &ret_ptr, &ret_len );
 
-    ret = user_driver->pMsgWaitForMultipleObjectsEx( count, handles, timeout, mask, flags );
+    ret = user_driver->pMsgWaitForMultipleObjectsEx( count, handles, get_nt_timeout( &time, timeout ),
+                                                     mask, flags );
+    if (HIWORD(ret))  /* is it an error code? */
+    {
+        SetLastError( RtlNtStatusToDosError(ret) );
+        ret = WAIT_FAILED;
+    }
     if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
     if ((mask & QS_INPUT) == QS_INPUT) get_user_thread_info()->message_count = 0;
 
@@ -1963,6 +1979,18 @@ static DWORD wait_objects( DWORD count, const HANDLE *handles, DWORD timeout,
     return ret;
 }
 
+static HANDLE normalize_std_handle( HANDLE handle )
+{
+    if (handle == (HANDLE)STD_INPUT_HANDLE)
+        return NtCurrentTeb()->Peb->ProcessParameters->hStdInput;
+    if (handle == (HANDLE)STD_OUTPUT_HANDLE)
+        return NtCurrentTeb()->Peb->ProcessParameters->hStdOutput;
+    if (handle == (HANDLE)STD_ERROR_HANDLE)
+        return NtCurrentTeb()->Peb->ProcessParameters->hStdError;
+
+    return handle;
+}
+
 /***********************************************************************
  *           NtUserMsgWaitForMultipleObjectsEx   (win32u.@)
  */
@@ -1979,7 +2007,7 @@ DWORD WINAPI NtUserMsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handl
     }
 
     /* add the queue to the handle list */
-    for (i = 0; i < count; i++) wait_handles[i] = handles[i];
+    for (i = 0; i < count; i++) wait_handles[i] = normalize_std_handle( handles[i] );
     wait_handles[count] = get_server_queue_handle();
 
     return wait_objects( count+1, wait_handles, timeout,
@@ -2474,13 +2502,11 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
         switch (msg->wParam)
         {
             case SYSTEM_TIMER_CARET:
-                if (!user_callbacks) break;
-                user_callbacks->toggle_caret( msg->hwnd );
+                toggle_caret( msg->hwnd );
                 return 0;
 
             case SYSTEM_TIMER_TRACK_MOUSE:
-                if (!user_callbacks) break;
-                user_callbacks->update_mouse_tracking_info( msg->hwnd );
+                update_mouse_tracking_info( msg->hwnd );
                 return 0;
         }
     }

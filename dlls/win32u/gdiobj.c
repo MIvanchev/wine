@@ -586,7 +586,10 @@ static void init_gdi_shared(void)
     NtCurrentTeb()->Peb->GdiSharedHandleTable = gdi_shared;
 }
 
-HGDIOBJ get_stock_object( INT obj )
+/***********************************************************************
+ *           GetStockObject    (win32u.so)
+ */
+HGDIOBJ WINAPI GetStockObject( INT obj )
 {
     assert( obj >= 0 && obj <= STOCK_LAST + 1 && obj != 9 );
 
@@ -1144,6 +1147,7 @@ static struct unix_funcs unix_funcs =
     NtUserClipCursor,
     NtUserCloseClipboard,
     NtUserCountClipboardFormats,
+    NtUserCreateCaret,
     NtUserCreateWindowEx,
     NtUserDeferWindowPosAndBand,
     NtUserDestroyCursor,
@@ -1151,6 +1155,7 @@ static struct unix_funcs unix_funcs =
     NtUserDestroyWindow,
     NtUserDispatchMessage,
     NtUserDrawIconEx,
+    NtUserEmptyClipboard,
     NtUserEnableMenuItem,
     NtUserEndDeferWindowPosEx,
     NtUserEndPaint,
@@ -1161,6 +1166,7 @@ static struct unix_funcs unix_funcs =
     NtUserFlashWindowEx,
     NtUserGetAsyncKeyState,
     NtUserGetClassInfoEx,
+    NtUserGetClipboardData,
     NtUserGetCursorInfo,
     NtUserGetDCEx,
     NtUserGetDisplayConfigBufferSizes,
@@ -1170,14 +1176,17 @@ static struct unix_funcs unix_funcs =
     NtUserGetMessage,
     NtUserGetPriorityClipboardFormat,
     NtUserGetQueueStatus,
+    NtUserGetSystemMenu,
     NtUserGetUpdateRect,
     NtUserGetUpdateRgn,
     NtUserGetUpdatedClipboardFormats,
+    NtUserHideCaret,
     NtUserIsClipboardFormatAvailable,
     NtUserMapVirtualKeyEx,
     NtUserMessageCall,
     NtUserMoveWindow,
     NtUserMsgWaitForMultipleObjectsEx,
+    NtUserOpenClipboard,
     NtUserPeekMessage,
     NtUserPostMessage,
     NtUserPostThreadMessage,
@@ -1190,6 +1199,7 @@ static struct unix_funcs unix_funcs =
     NtUserSendInput,
     NtUserSetActiveWindow,
     NtUserSetCapture,
+    NtUserSetClipboardData,
     NtUserSetClassLong,
     NtUserSetClassLongPtr,
     NtUserSetClassWord,
@@ -1202,17 +1212,21 @@ static struct unix_funcs unix_funcs =
     NtUserSetMenu,
     NtUserSetParent,
     NtUserSetSysColors,
+    NtUserSetSystemMenu,
     NtUserSetWindowLong,
     NtUserSetWindowLongPtr,
     NtUserSetWindowPos,
     NtUserSetWindowRgn,
     NtUserSetWindowWord,
+    NtUserShowCaret,
     NtUserShowCursor,
     NtUserShowWindow,
     NtUserShowWindowAsync,
     NtUserSystemParametersInfo,
     NtUserSystemParametersInfoForDpi,
     NtUserToUnicodeEx,
+    NtUserTrackMouseEvent,
+    NtUserTranslateAccelerator,
     NtUserTranslateMessage,
     NtUserUnregisterClass,
     NtUserUnregisterHotKey,

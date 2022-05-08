@@ -104,7 +104,6 @@ extern LRESULT StaticWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HIDDE
 struct tagCLASS;  /* opaque structure */
 struct tagWND;
 extern ATOM get_int_atom_value( UNICODE_STRING *name ) DECLSPEC_HIDDEN;
-extern void register_builtin_classes(void) DECLSPEC_HIDDEN;
 extern void register_desktop_class(void) DECLSPEC_HIDDEN;
 
 /* defwnd proc */
@@ -121,7 +120,7 @@ extern void MENU_TrackMouseMenuBar( HWND hwnd, INT ht, POINT pt ) DECLSPEC_HIDDE
 extern void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar ) DECLSPEC_HIDDEN;
 extern UINT MENU_DrawMenuBar( HDC hDC, LPRECT lprect, HWND hwnd ) DECLSPEC_HIDDEN;
 extern void MENU_EndMenu(HWND) DECLSPEC_HIDDEN;
-extern void free_menu_items( void *ptr ) DECLSPEC_HIDDEN;
+extern HMENU MENU_GetSysMenu( HWND hWnd, HMENU hPopupMenu ) DECLSPEC_HIDDEN;
 
 /* nonclient area */
 extern LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip) DECLSPEC_HIDDEN;

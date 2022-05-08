@@ -3307,13 +3307,10 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
                            &new_window_rect, &new_client_rect, valid_rects ))
         goto done;
 
-    if (user_callbacks)
-    {
-        if (winpos->flags & SWP_HIDEWINDOW)
-            user_callbacks->pHideCaret( winpos->hwnd );
-        else if (winpos->flags & SWP_SHOWWINDOW)
-            user_callbacks->pShowCaret( winpos->hwnd );
-    }
+    if (winpos->flags & SWP_HIDEWINDOW)
+        NtUserHideCaret( winpos->hwnd );
+    else if (winpos->flags & SWP_SHOWWINDOW)
+        NtUserShowCaret( winpos->hwnd );
 
     if (!(winpos->flags & (SWP_NOACTIVATE|SWP_HIDEWINDOW)))
     {
@@ -3686,9 +3683,7 @@ static MINMAXINFO get_min_max_info( HWND hwnd )
         adjusted_style = style;
 
     get_client_rect( NtUserGetAncestor( hwnd, GA_PARENT ), &rc );
-    if (user_callbacks)
-        user_callbacks->pAdjustWindowRectEx( &rc, adjusted_style,
-                                             (style & WS_POPUP) && get_menu( hwnd ), exstyle);
+    AdjustWindowRectEx( &rc, adjusted_style, (style & WS_POPUP) && get_menu( hwnd ), exstyle );
 
     xinc = -rc.left;
     yinc = -rc.top;
@@ -4407,7 +4402,7 @@ static void send_destroy_message( HWND hwnd )
     info.cbSize = sizeof(info);
     if (NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ))
     {
-        if (hwnd == info.hwndCaret && user_callbacks) user_callbacks->pDestroyCaret();
+        if (hwnd == info.hwndCaret) destroy_caret();
         if (hwnd == info.hwndActive) activate_other_window( hwnd );
     }
 
@@ -4735,7 +4730,7 @@ static WND *create_window_handle( HWND parent, HWND owner, UNICODE_STRING *name,
             else assert( full_parent == thread_info->top_window );
             if (full_parent && !user_driver->pCreateDesktopWindow( thread_info->top_window ))
                 ERR( "failed to create desktop window\n" );
-            if (user_callbacks) user_callbacks->register_builtin_classes();
+            register_builtin_classes();
         }
         else  /* HWND_MESSAGE parent */
         {
@@ -4850,9 +4845,10 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
                                   HWND parent, HMENU menu, HINSTANCE instance, void *params,
                                   DWORD flags, CBT_CREATEWNDW *cbtc, DWORD unk, BOOL ansi )
 {
-    CREATESTRUCTW cs, *client_cs = cbtc->lpcs;
+    CREATESTRUCTW cs, *client_cs, cs_buf;
     UINT win_dpi, thread_dpi = get_thread_dpi();
     DPI_AWARENESS_CONTEXT context;
+    CBT_CREATEWNDW cbtc_buf;
     HWND hwnd, owner = 0;
     INT sw = SW_SHOW;
     RECT rect;
@@ -4860,8 +4856,24 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
 
     static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
 
+    /* FIXME: We should pass a packed struct to client instead of using client_cs */
+    if (cbtc)
+    {
+        client_cs = cbtc->lpcs;
+        cs.lpszName  = client_cs->lpszName;
+        cs.lpszClass = client_cs->lpszClass;
+        cs.hInstance = client_cs->hInstance; /* may be different than instance for win16 */
+    }
+    else
+    {
+        cbtc = &cbtc_buf;
+        client_cs = cbtc->lpcs = &cs_buf;
+        cs.lpszName = window_name ? window_name->Buffer : NULL;
+        cs.lpszClass = class_name->Buffer;
+        cs.hInstance = instance;
+    }
+
     cs.lpCreateParams = params;
-    cs.hInstance  = client_cs->hInstance; /* may be different than instance for win16 */
     cs.hMenu      = menu;
     cs.hwndParent = parent;
     cs.style      = style;
@@ -4870,10 +4882,6 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
     cs.y  = y;
     cs.cx = cx;
     cs.cy = cy;
-    /* We use client_cs to pass original class and name pointers,
-     * that's probably not how native handles it. */
-    cs.lpszName  = client_cs->lpszName;
-    cs.lpszClass = client_cs->lpszClass;
 
     /* Find the parent window */
     if (parent == HWND_MESSAGE)
