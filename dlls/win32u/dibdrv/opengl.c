@@ -34,7 +34,7 @@
 #include "wine/wgl.h"
 #include "wine/wgl_driver.h"
 
-#ifdef SONAME_LIBOSMESA
+#ifdef HAVE_LIBOSMESA
 
 #include "wine/debug.h"
 
@@ -60,62 +60,38 @@ struct wgl_context
 
 static struct opengl_funcs opengl_funcs;
 
-#define USE_GL_FUNC(name) #name,
-static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
+#define USE_GL_FUNC(name) &name,
+static void *opengl_func_ptrs[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
-static OSMesaContext (*pOSMesaCreateContextExt)( GLenum format, GLint depthBits, GLint stencilBits,
-                                                 GLint accumBits, OSMesaContext sharelist );
-static void (*pOSMesaDestroyContext)( OSMesaContext ctx );
-static void * (*pOSMesaGetProcAddress)( const char *funcName );
-static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum type,
-                                        GLsizei width, GLsizei height );
-static void (*pOSMesaPixelStore)( GLint pname, GLint value );
+OSMesaContext OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
+                                      GLint accumBits, OSMesaContext sharelist );
+void OSMesaDestroyContext( OSMesaContext ctx );
+void* OSMesaGetProcAddress( const char *funcName );
+GLboolean OSMesaMakeCurrent( OSMesaContext ctx, void *buffer, GLenum type,
+                             GLsizei width, GLsizei height );
+void OSMesaPixelStore( GLint pname, GLint value );
+
+#define pOSMesaCreateContextExt OSMesaCreateContextExt
+#define pOSMesaDestroyContext   OSMesaDestroyContext
+#define pOSMesaGetProcAddress   OSMesaGetProcAddress
+#define pOSMesaMakeCurrent      OSMesaMakeCurrent
+#define pOSMesaPixelStore       OSMesaPixelStore
 
 static BOOL init_opengl(void)
 {
     static BOOL init_done = FALSE;
-    static void *osmesa_handle;
     unsigned int i;
 
-    if (init_done) return (osmesa_handle != NULL);
+    if (init_done) return TRUE;
     init_done = TRUE;
 
-    osmesa_handle = dlopen( SONAME_LIBOSMESA, RTLD_NOW );
-    if (osmesa_handle == NULL)
+    for (i = 0; i < ARRAY_SIZE( opengl_func_ptrs ); i++)
     {
-        ERR( "Failed to load OSMesa: %s\n", dlerror() );
-        return FALSE;
-    }
-
-#define LOAD_FUNCPTR(f) do if (!(p##f = dlsym( osmesa_handle, #f ))) \
-    { \
-        ERR( "%s not found in %s (%s), disabling.\n", #f, SONAME_LIBOSMESA, dlerror() ); \
-        goto failed; \
-    } while(0)
-
-    LOAD_FUNCPTR(OSMesaCreateContextExt);
-    LOAD_FUNCPTR(OSMesaDestroyContext);
-    LOAD_FUNCPTR(OSMesaGetProcAddress);
-    LOAD_FUNCPTR(OSMesaMakeCurrent);
-    LOAD_FUNCPTR(OSMesaPixelStore);
-#undef LOAD_FUNCPTR
-
-    for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
-    {
-        if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
-        {
-            ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], SONAME_LIBOSMESA );
-            goto failed;
-        }
+        ((void **)&opengl_funcs.gl)[i] = opengl_func_ptrs[i];
     }
 
     return TRUE;
-
-failed:
-    dlclose( osmesa_handle );
-    osmesa_handle = NULL;
-    return FALSE;
 }
 
 /***********************************************************************
@@ -219,11 +195,11 @@ const struct osmesa_funcs *init_opengl_lib(void)
     return &osmesa_funcs;
 }
 
-#else  /* SONAME_LIBOSMESA */
+#else  /* HAVE_LIBOSMESA */
 
 const struct osmesa_funcs *init_opengl_lib(void)
 {
     return NULL;
 }
 
-#endif  /* SONAME_LIBOSMESA */
+#endif  /* HAVE_LIBOSMESA */

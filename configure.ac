@@ -1331,8 +1331,8 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 			    $X_LIBS -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)])
         if test "x$with_osmesa" != "xno"
         then
-            WINE_CHECK_SONAME(OSMesa,OSMesaGetProcAddress,,,[$X_LIBS -lm $X_EXTRA_LIBS])
-            WINE_NOTICE_WITH(osmesa,[test "x$ac_cv_lib_soname_OSMesa" = "x"],
+            WINE_CHECK_LIB(OSMesa,OSMesaGetProcAddress)
+            WINE_NOTICE_WITH(osmesa,[test "x$ac_cv_lib_OSMesa_OSMesaGetProcAddress" != "xyes"],
                              [libOSMesa ${notice_platform}development files not found (or too old), OpenGL rendering in bitmaps won't be supported.])
         fi
     fi
@@ -1370,7 +1370,7 @@ WINE_NOTICE_WITH(opencl,[test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" != xyes],
 dnl **** Check for libpcap ****
 if test "$ac_cv_header_pcap_pcap_h" = "yes"
 then
-    AC_CHECK_LIB(pcap,pcap_create,[AC_SUBST(PCAP_LIBS,["-lpcap"])])
+    WINE_CHECK_LIB(pcap,pcap_create)
 fi
 WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_pcap_pcap_create" != xyes],
                  [pcap ${notice_platform}development files not found, wpcap won't be supported.],
