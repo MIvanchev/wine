@@ -1418,7 +1418,7 @@ if test "x$with_sane" != "xno"
 then
     WINE_PACKAGE_FLAGS(SANE,[sane-backends],,[`${SANE_CONFIG:-sane-config} --cflags 2>/dev/null`],[`${SANE_CONFIG:-sane-config} --ldflags 2>/dev/null`],
         [AC_CHECK_HEADER(sane/sane.h,
-            [AC_CHECK_LIB(sane,sane_init,[:],,[$SANE_LIBS])])])
+            [AC_CHECK_LIB(sane,sane_init,[SANE_LIBS="$SANE_LIBS -lstdc++"],,[$SANE_LIBS -lstdc++])])])
 fi
 WINE_NOTICE_WITH(sane,[test "$ac_cv_lib_sane_sane_init" != "yes"],
                  [libsane ${notice_platform}development files not found, scanners won't be supported.],
@@ -1688,7 +1688,7 @@ then
     [AC_CHECK_HEADERS([capi20.h linux/capi.h],,,[#define __user])
     if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
     then
-        AC_CHECK_LIB(capi20,capi20_register,[:],[CAPI20_LIBS=""],[$CAPI20_LIBS])
+        AC_CHECK_LIB(capi20,capi20_register,[CAPI20_LIBS="$CAPI20_LIBS -ldl -lpthread -lrt"],[CAPI20_LIBS=""],[$CAPI20_LIBS -ldl -lpthread -lrt])
     fi])
 fi
 WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_capi20_capi20_register" != xyes],
