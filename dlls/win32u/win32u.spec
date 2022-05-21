@@ -187,7 +187,7 @@
 @ stub NtGdiDdDDICheckOcclusion
 @ stub NtGdiDdDDICheckSharedResourceAccess
 @ stdcall NtGdiDdDDICheckVidPnExclusiveOwnership(ptr)
-@ stdcall -syscall NtGdiDdDDICloseAdapter(ptr)
+@ stdcall NtGdiDdDDICloseAdapter(ptr)
 @ stub NtGdiDdDDIConfigureSharedResource
 @ stub NtGdiDdDDICreateAllocation
 @ stub NtGdiDdDDICreateBundleObject
@@ -268,9 +268,9 @@
 @ stub NtGdiDdDDINetDispStartMiracastDisplayDevice
 @ stub NtGdiDdDDINetDispStopMiracastDisplayDevice
 @ stub NtGdiDdDDIOfferAllocations
-@ stdcall -syscall NtGdiDdDDIOpenAdapterFromDeviceName(ptr)
+@ stdcall NtGdiDdDDIOpenAdapterFromDeviceName(ptr)
 @ stdcall -syscall NtGdiDdDDIOpenAdapterFromHdc(ptr)
-@ stdcall -syscall NtGdiDdDDIOpenAdapterFromLuid(ptr)
+@ stdcall NtGdiDdDDIOpenAdapterFromLuid(ptr)
 @ stub NtGdiDdDDIOpenBundleObjectNtHandleFromName
 @ stub NtGdiDdDDIOpenKeyedMutex
 @ stub NtGdiDdDDIOpenKeyedMutex2
@@ -307,7 +307,7 @@
 @ stub NtGdiDdDDIQueryResourceInfoFromNtHandle
 @ stdcall -syscall NtGdiDdDDIQueryStatistics(ptr)
 @ stub NtGdiDdDDIQueryVidPnExclusiveOwnership
-@ stub NtGdiDdDDIQueryVideoMemoryInfo
+@ stdcall NtGdiDdDDIQueryVideoMemoryInfo(ptr)
 @ stub NtGdiDdDDIReclaimAllocations
 @ stub NtGdiDdDDIReclaimAllocations2
 @ stub NtGdiDdDDIReleaseKeyedMutex
@@ -1014,7 +1014,7 @@
 @ stub NtUserGetWindowFeedbackSetting
 @ stub NtUserGetWindowGroupId
 @ stub NtUserGetWindowMinimizeRect
-@ stub NtUserGetWindowPlacement
+@ stdcall NtUserGetWindowPlacement(long ptr)
 @ stub NtUserGetWindowProcessHandle
 @ stdcall -syscall NtUserGetWindowRgnEx(long long long)
 @ stub NtUserGhostWindowFromHungWindow
@@ -1201,7 +1201,7 @@
 @ stub NtUserSetInputServiceState
 @ stub NtUserSetInteractiveControlFocus
 @ stub NtUserSetInteractiveCtrlRotationAngle
-@ stub NtUserSetInternalWindowPos
+@ stdcall NtUserSetInternalWindowPos(long long ptr ptr)
 @ stdcall -syscall NtUserSetKeyboardState(ptr)
 @ stdcall NtUserSetLayeredWindowAttributes(ptr long long long)
 @ stub NtUserSetMagnificationDesktopMagnifierOffsetsDWMUpdated
@@ -1248,7 +1248,7 @@
 @ stub NtUserSetWindowGroup
 @ stdcall NtUserSetWindowLong(long long long long)
 @ stdcall NtUserSetWindowLongPtr(long long long long)
-@ stub NtUserSetWindowPlacement
+@ stdcall NtUserSetWindowPlacement(long ptr)
 @ stdcall NtUserSetWindowPos(long long long long long long long)
 @ stdcall NtUserSetWindowRgn(long long long)
 @ stub NtUserSetWindowRgnEx

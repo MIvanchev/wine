@@ -671,6 +671,12 @@ NTSTATUS WINAPI NtGdiDdDDICheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNE
     return unix_funcs->pNtGdiDdDDICheckVidPnExclusiveOwnership( desc );
 }
 
+NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
+{
+    if (!unix_funcs) return STATUS_NOT_SUPPORTED;
+    return unix_funcs->pNtGdiDdDDICloseAdapter( desc );
+}
+
 NTSTATUS WINAPI NtGdiDdDDICreateDCFromMemory( D3DKMT_CREATEDCFROMMEMORY *desc )
 {
     if (!unix_funcs) return STATUS_NOT_SUPPORTED;
@@ -693,6 +699,24 @@ NTSTATUS WINAPI NtGdiDdDDIEscape( const D3DKMT_ESCAPE *desc )
 {
     if (!unix_funcs) return STATUS_NOT_SUPPORTED;
     return unix_funcs->pNtGdiDdDDIEscape( desc );
+}
+
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromDeviceName( D3DKMT_OPENADAPTERFROMDEVICENAME *desc )
+{
+    if (!unix_funcs) return STATUS_NOT_SUPPORTED;
+    return unix_funcs->pNtGdiDdDDIOpenAdapterFromDeviceName( desc );
+}
+
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc )
+{
+    if (!unix_funcs) return STATUS_NOT_SUPPORTED;
+    return unix_funcs->pNtGdiDdDDIOpenAdapterFromLuid( desc );
+}
+
+NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )
+{
+    if (!unix_funcs) return STATUS_NOT_SUPPORTED;
+    return unix_funcs->pNtGdiDdDDIQueryVideoMemoryInfo( desc );
 }
 
 NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
@@ -999,6 +1023,12 @@ BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *ou
     return unix_funcs->pNtUserGetUpdatedClipboardFormats( formats, size, out_size );
 }
 
+BOOL WINAPI NtUserGetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *placement )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserGetWindowPlacement( hwnd, placement );
+}
+
 BOOL WINAPI NtUserIsClipboardFormatAvailable( UINT format )
 {
     if (!unix_funcs) return FALSE;
@@ -1161,6 +1191,12 @@ HWND WINAPI NtUserSetFocus( HWND hwnd )
     return unix_funcs->pNtUserSetFocus( hwnd );
 }
 
+void WINAPI NtUserSetInternalWindowPos( HWND hwnd, UINT cmd, RECT *rect, POINT *pt )
+{
+    if (!unix_funcs) return;
+    return unix_funcs->pNtUserSetInternalWindowPos( hwnd, cmd, rect, pt );
+}
+
 BOOL WINAPI NtUserSetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
 {
     if (!unix_funcs) return FALSE;
@@ -1201,6 +1237,12 @@ LONG_PTR WINAPI NtUserSetWindowLongPtr( HWND hwnd, INT offset, LONG_PTR newval, 
 {
     if (!unix_funcs) return 0;
     return unix_funcs->pNtUserSetWindowLongPtr( hwnd, offset, newval, ansi );
+}
+
+BOOL WINAPI NtUserSetWindowPlacement( HWND hwnd, const WINDOWPLACEMENT *wpl )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserSetWindowPlacement( hwnd, wpl );
 }
 
 BOOL WINAPI NtUserSetWindowPos( HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags )

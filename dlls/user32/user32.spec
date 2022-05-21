@@ -412,7 +412,7 @@
 @ stdcall GetWindowModuleFileName(long ptr long) GetWindowModuleFileNameA
 @ stdcall GetWindowModuleFileNameA(long ptr long)
 @ stdcall GetWindowModuleFileNameW(long ptr long)
-@ stdcall GetWindowPlacement(long ptr)
+@ stdcall GetWindowPlacement(long ptr) NtUserGetWindowPlacement
 @ stdcall GetWindowRect(long ptr)
 @ stdcall GetWindowRgn(long long)
 @ stdcall GetWindowRgnBox(long ptr)
@@ -673,7 +673,7 @@
 @ stdcall SetFocus(long) NtUserSetFocus
 @ stdcall SetForegroundWindow(long)
 @ stdcall SetGestureConfig(ptr long long ptr long)
-@ stdcall SetInternalWindowPos(long long ptr ptr)
+@ stdcall SetInternalWindowPos(long long ptr ptr) NtUserSetInternalWindowPos
 @ stdcall SetKeyboardState(ptr) NtUserSetKeyboardState
 @ stdcall SetLastErrorEx(long long)
 @ stdcall SetLayeredWindowAttributes(ptr long long long) NtUserSetLayeredWindowAttributes
@@ -725,7 +725,7 @@
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrW(long long long)
 @ stdcall SetWindowLongW(long long long)
-@ stdcall SetWindowPlacement(long ptr)
+@ stdcall SetWindowPlacement(long ptr) NtUserSetWindowPlacement
 @ stdcall SetWindowPos(long long long long long long long) NtUserSetWindowPos
 @ stdcall SetWindowRgn(long long long) NtUserSetWindowRgn
 @ stdcall SetWindowStationUser(long long)

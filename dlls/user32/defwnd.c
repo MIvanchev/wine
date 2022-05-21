@@ -180,9 +180,6 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         NC_HandleNCCalcSize( hwnd, wParam, (RECT *)lParam );
         break;
 
-    case WM_WINDOWPOSCHANGING:
-        return WINPOS_HandleWindowPosChanging( hwnd, (WINDOWPOS *)lParam );
-
     case WM_WINDOWPOSCHANGED:
         DEFWND_HandleWindowPosChanged( hwnd, (const WINDOWPOS *)lParam );
         break;
@@ -262,98 +259,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     case WM_NCACTIVATE:
         return NC_HandleNCActivate( hwnd, wParam, lParam );
 
-    case WM_NCDESTROY:
-        return NtUserMessageCall( hwnd, msg, wParam, lParam, 0, NtUserDefWindowProc, FALSE );
-
     case WM_PRINT:
         DEFWND_Print(hwnd, (HDC)wParam, lParam);
-        return 0;
-
-    case WM_PAINTICON:
-    case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = NtUserBeginPaint( hwnd, &ps );
-            if( hdc )
-            {
-              HICON hIcon;
-              if (IsIconic(hwnd) && ((hIcon = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON))) )
-              {
-                  RECT rc;
-                  int x, y;
-
-                  GetClientRect( hwnd, &rc );
-                  x = (rc.right - rc.left - GetSystemMetrics(SM_CXICON))/2;
-                  y = (rc.bottom - rc.top - GetSystemMetrics(SM_CYICON))/2;
-                  TRACE("Painting class icon: vis rect=(%s)\n",
-                        wine_dbgstr_rect(&ps.rcPaint));
-                  DrawIcon( hdc, x, y, hIcon );
-              }
-              NtUserEndPaint( hwnd, &ps );
-            }
-            return 0;
-        }
-
-    case WM_SYNCPAINT:
-        NtUserRedrawWindow ( hwnd, NULL, 0, RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN );
-        return 0;
-
-    case WM_SETREDRAW:
-        if (wParam) WIN_SetStyle( hwnd, WS_VISIBLE, 0 );
-        else
-        {
-            NtUserRedrawWindow( hwnd, NULL, 0, RDW_ALLCHILDREN | RDW_VALIDATE );
-            WIN_SetStyle( hwnd, 0, WS_VISIBLE );
-        }
-        return 0;
-
-    case WM_CLOSE:
-        NtUserDestroyWindow( hwnd );
-        return 0;
-
-    case WM_MOUSEACTIVATE:
-        if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD)
-        {
-            LONG ret = SendMessageW( GetParent(hwnd), WM_MOUSEACTIVATE, wParam, lParam );
-            if (ret) return ret;
-        }
-
-        /* Caption clicks are handled by NC_HandleNCLButtonDown() */
-        return ( HIWORD(lParam) == WM_LBUTTONDOWN && LOWORD(lParam) == HTCAPTION ? MA_NOACTIVATE : MA_ACTIVATE );
-
-    case WM_ACTIVATE:
-        /* The default action in Windows is to set the keyboard focus to
-         * the window, if it's being activated and not minimized */
-        if (LOWORD(wParam) != WA_INACTIVE) {
-            if (!IsIconic(hwnd)) NtUserSetFocus( hwnd );
-        }
-        break;
-
-    case WM_MOUSEWHEEL:
-        if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD)
-            return SendMessageW( GetParent(hwnd), WM_MOUSEWHEEL, wParam, lParam );
-        break;
-
-    case WM_ERASEBKGND:
-    case WM_ICONERASEBKGND:
-        {
-            RECT rect;
-            HDC hdc = (HDC)wParam;
-            HBRUSH hbr = (HBRUSH)GetClassLongPtrW( hwnd, GCLP_HBRBACKGROUND );
-            if (!hbr) return 0;
-
-            if (GetClassLongW( hwnd, GCL_STYLE ) & CS_PARENTDC)
-            {
-                /* can't use GetClipBox with a parent DC or we fill the whole parent */
-                GetClientRect( hwnd, &rect );
-                DPtoLP( hdc, (LPPOINT)&rect, 2 );
-            }
-            else GetClipBox( hdc, &rect );
-            FillRect( hdc, &rect, hbr );
-            return 1;
-        }
-
-    case WM_GETDLGCODE:
         return 0;
 
     case WM_CTLCOLORMSGBOX:
@@ -524,30 +431,6 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             return res;
         }
 
-    case WM_GETICON:
-        {
-            HICON ret;
-            WND *wndPtr = WIN_GetPtr( hwnd );
-
-            switch(wParam)
-            {
-            case ICON_SMALL:
-                ret = wndPtr->hIconSmall;
-                break;
-            case ICON_BIG:
-                ret = wndPtr->hIcon;
-                break;
-            case ICON_SMALL2:
-                ret = wndPtr->hIconSmall ? wndPtr->hIconSmall : wndPtr->hIconSmall2;
-                break;
-            default:
-                ret = 0;
-                break;
-            }
-            WIN_ReleasePtr( wndPtr );
-            return (LRESULT)ret;
-        }
-
     case WM_HELP:
         SendMessageW( GetParent(hwnd), msg, wParam, lParam );
         break;
@@ -613,6 +496,9 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             HeapFree(GetProcessHeap(),0,win_array);
             break;
         }
+
+    default:
+        return NtUserMessageCall( hwnd, msg, wParam, lParam, 0, NtUserDefWindowProc, FALSE );
 
     }
 

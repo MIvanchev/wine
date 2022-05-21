@@ -31,6 +31,17 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
 
+void fill_rect( HDC dc, const RECT *rect, HBRUSH hbrush )
+{
+    HBRUSH prev_brush;
+
+    if (hbrush <= (HBRUSH)(COLOR_MENUBAR + 1)) hbrush = get_sys_color_brush( HandleToULong(hbrush) - 1 );
+
+    prev_brush = NtGdiSelectBrush( dc, hbrush );
+    NtGdiPatBlt( dc, rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top, PATCOPY );
+    if (prev_brush) NtGdiSelectBrush( dc, prev_brush );
+}
+
 /***********************************************************************
  *           AdjustWindowRectEx (win32u.so)
  */
@@ -112,6 +123,33 @@ static BOOL set_window_text( HWND hwnd, const void *text, BOOL ansi )
     return TRUE;
 }
 
+static HICON get_window_icon( HWND hwnd, WPARAM type )
+{
+    HICON ret;
+    WND *win;
+
+    if (!(win = get_win_ptr( hwnd ))) return 0;
+
+    switch(type)
+    {
+    case ICON_SMALL:
+        ret = win->hIconSmall;
+        break;
+    case ICON_BIG:
+        ret = win->hIcon;
+        break;
+    case ICON_SMALL2:
+        ret = win->hIconSmall ? win->hIconSmall : win->hIconSmall2;
+        break;
+    default:
+        ret = 0;
+        break;
+    }
+
+    release_win_ptr( win );
+    return ret;
+}
+
 static HICON set_window_icon( HWND hwnd, WPARAM type, HICON icon )
 {
     HICON ret = 0;
@@ -157,6 +195,25 @@ static HICON set_window_icon( HWND hwnd, WPARAM type, HICON icon )
 
     user_driver->pSetWindowIcon( hwnd, type, icon );
     return ret;
+}
+
+static LONG handle_window_pos_changing( HWND hwnd, WINDOWPOS *winpos )
+{
+    LONG style = get_window_long( hwnd, GWL_STYLE );
+
+    if (winpos->flags & SWP_NOSIZE) return 0;
+    if ((style & WS_THICKFRAME) || ((style & (WS_POPUP | WS_CHILD)) == 0))
+    {
+        MINMAXINFO info = get_min_max_info( hwnd );
+        winpos->cx = min( winpos->cx, info.ptMaxTrackSize.x );
+        winpos->cy = min( winpos->cy, info.ptMaxTrackSize.y );
+        if (!(style & WS_MINIMIZE))
+        {
+            winpos->cx = max( winpos->cx, info.ptMinTrackSize.x );
+            winpos->cy = max( winpos->cy, info.ptMinTrackSize.y );
+        }
+    }
+    return 0;
 }
 
 static LRESULT handle_sys_command( HWND hwnd, WPARAM wparam, LPARAM lparam )
@@ -216,8 +273,97 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
             if (user_callbacks) user_callbacks->free_win_ptr( win );
             win->pScroll = NULL;
             release_win_ptr( win );
-            return 0;
+            break;
         }
+
+    case WM_WINDOWPOSCHANGING:
+        return handle_window_pos_changing( hwnd, (WINDOWPOS *)lparam );
+
+    case WM_PAINTICON:
+    case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = NtUserBeginPaint( hwnd, &ps );
+            if (hdc)
+            {
+                HICON icon;
+                if (is_iconic(hwnd) && ((icon = UlongToHandle( get_class_long( hwnd, GCLP_HICON, FALSE )))))
+                {
+                    RECT rc;
+                    int x, y;
+
+                    get_client_rect( hwnd, &rc );
+                    x = (rc.right - rc.left - get_system_metrics( SM_CXICON )) / 2;
+                    y = (rc.bottom - rc.top - get_system_metrics( SM_CYICON )) / 2;
+                    TRACE( "Painting class icon: vis rect=(%s)\n", wine_dbgstr_rect(&ps.rcPaint) );
+                    NtUserDrawIconEx( hdc, x, y, icon, 0, 0, 0, 0, DI_NORMAL | DI_COMPAT | DI_DEFAULTSIZE );
+                }
+                NtUserEndPaint( hwnd, &ps );
+            }
+            break;
+        }
+
+    case WM_SYNCPAINT:
+        NtUserRedrawWindow ( hwnd, NULL, 0, RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN );
+        return 0;
+
+    case WM_SETREDRAW:
+        if (wparam) set_window_style( hwnd, WS_VISIBLE, 0 );
+        else
+        {
+            NtUserRedrawWindow( hwnd, NULL, 0, RDW_ALLCHILDREN | RDW_VALIDATE );
+            set_window_style( hwnd, 0, WS_VISIBLE );
+        }
+        return 0;
+
+    case WM_CLOSE:
+        NtUserDestroyWindow( hwnd );
+        return 0;
+
+    case WM_MOUSEACTIVATE:
+        if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
+        {
+            result = send_message( get_parent(hwnd), WM_MOUSEACTIVATE, wparam, lparam );
+            if (result) break;
+        }
+
+        /* Caption clicks are handled by NC_HandleNCLButtonDown() */
+        result = HIWORD(lparam) == WM_LBUTTONDOWN && LOWORD(lparam) == HTCAPTION ?
+            MA_NOACTIVATE : MA_ACTIVATE;
+        break;
+
+    case WM_ACTIVATE:
+        /* The default action in Windows is to set the keyboard focus to
+         * the window, if it's being activated and not minimized */
+        if (LOWORD(wparam) != WA_INACTIVE && !is_iconic( hwnd )) NtUserSetFocus( hwnd );
+        break;
+
+    case WM_MOUSEWHEEL:
+        if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
+            result = send_message( get_parent( hwnd ), WM_MOUSEWHEEL, wparam, lparam );
+        break;
+
+    case WM_ERASEBKGND:
+    case WM_ICONERASEBKGND:
+        {
+            RECT rect;
+            HDC hdc = (HDC)wparam;
+            HBRUSH hbr = UlongToHandle( get_class_long( hwnd, GCLP_HBRBACKGROUND, FALSE ));
+            if (!hbr) break;
+
+            if (get_class_long( hwnd, GCL_STYLE, FALSE ) & CS_PARENTDC)
+            {
+                /* can't use GetClipBox with a parent DC or we fill the whole parent */
+                get_client_rect( hwnd, &rect );
+                NtGdiTransformPoints( hdc, (POINT *)&rect, (POINT *)&rect, 1, NtGdiDPtoLP );
+            }
+            else NtGdiGetAppClipBox( hdc, &rect );
+            fill_rect( hdc, &rect, hbr );
+            return 1;
+        }
+
+    case WM_GETDLGCODE:
+        break;
 
     case WM_SETTEXT:
         result = set_window_text( hwnd, (void *)lparam, ansi );
@@ -227,10 +373,55 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
         result = (LRESULT)set_window_icon( hwnd, wparam, (HICON)lparam );
         break;
 
+    case WM_GETICON:
+        result = (LRESULT)get_window_icon( hwnd, wparam );
+        break;
+
     case WM_SYSCOMMAND:
         result = handle_sys_command( hwnd, wparam, lparam );
         break;
     }
 
     return result;
+}
+
+LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    static const WCHAR wine_display_device_guidW[] =
+        {'_','_','w','i','n','e','_','d','i','s','p','l','a','y','_','d','e','v','i','c','e',
+         '_','g','u','i','d',0};
+
+    switch (msg)
+    {
+    case WM_NCCREATE:
+    {
+        CREATESTRUCTW *cs = (CREATESTRUCTW *)lparam;
+        const GUID *guid = cs->lpCreateParams;
+
+        if (guid)
+        {
+            ATOM atom = 0;
+            char buffer[37];
+            WCHAR bufferW[37];
+
+            if (NtUserGetAncestor( hwnd, GA_PARENT )) return FALSE;  /* refuse to create non-desktop window */
+
+            sprintf( buffer, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                     (unsigned int)guid->Data1, guid->Data2, guid->Data3,
+                     guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+                     guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
+            NtAddAtom( bufferW, asciiz_to_unicode( bufferW, buffer ) - sizeof(WCHAR), &atom );
+            NtUserSetProp( hwnd, wine_display_device_guidW, ULongToHandle( atom ) );
+        }
+        return TRUE;
+    }
+    case WM_NCCALCSIZE:
+        return 0;
+
+    default:
+        if (msg >= WM_USER && hwnd == get_desktop_window())
+            return user_driver->pDesktopWindowProc( hwnd, msg, wparam, lparam );
+    }
+
+    return default_window_proc( hwnd, msg, wparam, lparam, FALSE );
 }

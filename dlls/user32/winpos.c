@@ -44,10 +44,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 #define ON_BOTTOM_BORDER(hit) \
  (((hit) == HTBOTTOM) || ((hit) == HTBOTTOMLEFT) || ((hit) == HTBOTTOMRIGHT))
 
-#define PLACE_MIN		0x0001
-#define PLACE_MAX		0x0002
-#define PLACE_RECT		0x0004
-
 
 /***********************************************************************
  *		SwitchToThisWindow (USER32.@)
@@ -106,101 +102,6 @@ int WINAPI GetWindowRgnBox( HWND hwnd, LPRECT prect )
 BOOL WINAPI GetClientRect( HWND hwnd, LPRECT rect )
 {
     return NtUserGetClientRect( hwnd, rect );
-}
-
-
-/***********************************************************************
- *           list_children_from_point
- *
- * Get the list of children that can contain point from the server.
- * Point is in screen coordinates.
- * Returned list must be freed by caller.
- */
-static HWND *list_children_from_point( HWND hwnd, POINT pt )
-{
-    HWND *list;
-    int i, size = 128;
-
-    for (;;)
-    {
-        int count = 0;
-
-        if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) break;
-
-        SERVER_START_REQ( get_window_children_from_point )
-        {
-            req->parent = wine_server_user_handle( hwnd );
-            req->x = pt.x;
-            req->y = pt.y;
-            req->dpi = get_thread_dpi();
-            wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
-            if (!wine_server_call( req )) count = reply->count;
-        }
-        SERVER_END_REQ;
-        if (count && count < size)
-        {
-            /* start from the end since HWND is potentially larger than user_handle_t */
-            for (i = count - 1; i >= 0; i--)
-                list[i] = wine_server_ptr_handle( ((user_handle_t *)list)[i] );
-            list[count] = 0;
-            return list;
-        }
-        HeapFree( GetProcessHeap(), 0, list );
-        if (!count) break;
-        size = count + 1;  /* restart with a large enough buffer */
-    }
-    return NULL;
-}
-
-
-/***********************************************************************
- *           WINPOS_WindowFromPoint
- *
- * Find the window and hittest for a given point.
- */
-HWND WINPOS_WindowFromPoint( HWND hwndScope, POINT pt, INT *hittest )
-{
-    int i, res;
-    HWND ret, *list;
-    POINT win_pt;
-
-    if (!hwndScope) hwndScope = GetDesktopWindow();
-
-    *hittest = HTNOWHERE;
-
-    if (!(list = list_children_from_point( hwndScope, pt ))) return 0;
-
-    /* now determine the hittest */
-
-    for (i = 0; list[i]; i++)
-    {
-        LONG style = GetWindowLongW( list[i], GWL_STYLE );
-
-        /* If window is minimized or disabled, return at once */
-        if (style & WS_DISABLED)
-        {
-            *hittest = HTERROR;
-            break;
-        }
-        /* Send WM_NCCHITTEST (if same thread) */
-        if (!WIN_IsCurrentThread( list[i] ))
-        {
-            *hittest = HTCLIENT;
-            break;
-        }
-        win_pt = point_thread_to_win_dpi( list[i], pt );
-        res = SendMessageW( list[i], WM_NCHITTEST, 0, MAKELPARAM( win_pt.x, win_pt.y ));
-        if (res != HTTRANSPARENT)
-        {
-            *hittest = res;  /* Found the window */
-            break;
-        }
-        /* continue search with next window in z-order */
-    }
-    ret = list[i];
-    HeapFree( GetProcessHeap(), 0, list );
-    TRACE( "scope %p (%d,%d) returning %p\n", hwndScope, pt.x, pt.y, ret );
-    return ret;
 }
 
 
@@ -315,33 +216,6 @@ BOOL WINAPI BringWindowToTop( HWND hwnd )
 }
 
 
-/*******************************************************************
- *           get_work_rect
- *
- * Get the work area that a maximized window can cover, depending on style.
- */
-static BOOL get_work_rect( HWND hwnd, RECT *rect )
-{
-    HMONITOR monitor = MonitorFromWindow( hwnd, MONITOR_DEFAULTTOPRIMARY );
-    MONITORINFO mon_info;
-    DWORD style;
-
-    if (!monitor) return FALSE;
-
-    mon_info.cbSize = sizeof(mon_info);
-    GetMonitorInfoW( monitor, &mon_info );
-    *rect = mon_info.rcMonitor;
-
-    style = GetWindowLongW( hwnd, GWL_STYLE );
-    if (style & WS_MAXIMIZEBOX)
-    {
-        if ((style & WS_CAPTION) == WS_CAPTION || !(style & (WS_CHILD | WS_POPUP)))
-            *rect = mon_info.rcWork;
-    }
-    return TRUE;
-}
-
-
 /***********************************************************************
  *		GetInternalWindowPos (USER32.@)
  */
@@ -351,190 +225,13 @@ UINT WINAPI GetInternalWindowPos( HWND hwnd, LPRECT rectWnd,
     WINDOWPLACEMENT wndpl;
 
     wndpl.length = sizeof(wndpl);
-    if (GetWindowPlacement( hwnd, &wndpl ))
+    if (NtUserGetWindowPlacement( hwnd, &wndpl ))
     {
 	if (rectWnd) *rectWnd = wndpl.rcNormalPosition;
 	if (ptIcon)  *ptIcon = wndpl.ptMinPosition;
 	return wndpl.showCmd;
     }
     return 0;
-}
-
-
-static RECT get_maximized_work_rect( HWND hwnd )
-{
-    RECT work_rect = { 0 };
-
-    if ((GetWindowLongW( hwnd, GWL_STYLE ) & (WS_MINIMIZE | WS_MAXIMIZE)) == WS_MAXIMIZE)
-    {
-        if (!get_work_rect( hwnd, &work_rect ))
-            work_rect = get_primary_monitor_rect();
-    }
-    return work_rect;
-}
-
-
-/*******************************************************************
- *           update_maximized_pos
- *
- * For top level windows covering the work area, we might have to
- * "forget" the maximized position. Windows presumably does this
- * to avoid situations where the border style changes, which would
- * lead the window to be outside the screen, or the window gets
- * reloaded on a different screen, and the "saved" position no
- * longer applies to it (despite being maximized).
- *
- * Some applications (e.g. Imperiums: Greek Wars) depend on this.
- */
-static void update_maximized_pos( WND *wnd, RECT *work_rect )
-{
-    if (wnd->parent && wnd->parent != GetDesktopWindow())
-        return;
-
-    if (wnd->dwStyle & WS_MAXIMIZE)
-    {
-        if (wnd->window_rect.left  <= work_rect->left  && wnd->window_rect.top    <= work_rect->top &&
-            wnd->window_rect.right >= work_rect->right && wnd->window_rect.bottom >= work_rect->bottom)
-            wnd->max_pos.x = wnd->max_pos.y = -1;
-    }
-    else
-        wnd->max_pos.x = wnd->max_pos.y = -1;
-}
-
-
-/***********************************************************************
- *		GetWindowPlacement (USER32.@)
- *
- * Win95:
- * Fails if wndpl->length of Win95 (!) apps is invalid.
- */
-BOOL WINAPI GetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *wndpl )
-{
-    return NtUserGetWindowPlacement( hwnd, wndpl );
-}
-
-/* make sure the specified rect is visible on screen */
-static void make_rect_onscreen( RECT *rect )
-{
-    MONITORINFO info;
-    HMONITOR monitor = MonitorFromRect( rect, MONITOR_DEFAULTTONEAREST );
-
-    info.cbSize = sizeof(info);
-    if (!monitor || !GetMonitorInfoW( monitor, &info )) return;
-    /* FIXME: map coordinates from rcWork to rcMonitor */
-    if (rect->right <= info.rcWork.left)
-    {
-        rect->right += info.rcWork.left - rect->left;
-        rect->left = info.rcWork.left;
-    }
-    else if (rect->left >= info.rcWork.right)
-    {
-        rect->left += info.rcWork.right - rect->right;
-        rect->right = info.rcWork.right;
-    }
-    if (rect->bottom <= info.rcWork.top)
-    {
-        rect->bottom += info.rcWork.top - rect->top;
-        rect->top = info.rcWork.top;
-    }
-    else if (rect->top >= info.rcWork.bottom)
-    {
-        rect->top += info.rcWork.bottom - rect->bottom;
-        rect->bottom = info.rcWork.bottom;
-    }
-}
-
-/* make sure the specified point is visible on screen */
-static void make_point_onscreen( POINT *pt )
-{
-    RECT rect;
-
-    SetRect( &rect, pt->x, pt->y, pt->x + 1, pt->y + 1 );
-    make_rect_onscreen( &rect );
-    pt->x = rect.left;
-    pt->y = rect.top;
-}
-
-
-/***********************************************************************
- *           WINPOS_SetPlacement
- */
-static BOOL WINPOS_SetPlacement( HWND hwnd, const WINDOWPLACEMENT *wndpl, UINT flags )
-{
-    DWORD style;
-    RECT work_rect = get_maximized_work_rect( hwnd );
-    WND *pWnd = WIN_GetPtr( hwnd );
-    WINDOWPLACEMENT wp = *wndpl;
-
-    if (flags & PLACE_MIN) make_point_onscreen( &wp.ptMinPosition );
-    if (flags & PLACE_MAX) make_point_onscreen( &wp.ptMaxPosition );
-    if (flags & PLACE_RECT) make_rect_onscreen( &wp.rcNormalPosition );
-
-    TRACE( "%p: setting min %d,%d max %d,%d normal %s flags %x adjusted to min %d,%d max %d,%d normal %s\n",
-           hwnd, wndpl->ptMinPosition.x, wndpl->ptMinPosition.y,
-           wndpl->ptMaxPosition.x, wndpl->ptMaxPosition.y,
-           wine_dbgstr_rect(&wndpl->rcNormalPosition), flags,
-           wp.ptMinPosition.x, wp.ptMinPosition.y, wp.ptMaxPosition.x, wp.ptMaxPosition.y,
-           wine_dbgstr_rect(&wp.rcNormalPosition) );
-
-    if (!pWnd || pWnd == WND_OTHER_PROCESS || pWnd == WND_DESKTOP) return FALSE;
-
-    if (flags & PLACE_MIN) pWnd->min_pos = point_thread_to_win_dpi( hwnd, wp.ptMinPosition );
-    if (flags & PLACE_MAX)
-    {
-        pWnd->max_pos = point_thread_to_win_dpi( hwnd, wp.ptMaxPosition );
-        update_maximized_pos( pWnd, &work_rect );
-    }
-    if (flags & PLACE_RECT) pWnd->normal_rect = rect_thread_to_win_dpi( hwnd, wp.rcNormalPosition );
-
-    style = pWnd->dwStyle;
-
-    WIN_ReleasePtr( pWnd );
-
-    if( style & WS_MINIMIZE )
-    {
-        if (flags & PLACE_MIN)
-        {
-            NtUserSetWindowPos( hwnd, 0, wp.ptMinPosition.x, wp.ptMinPosition.y, 0, 0,
-                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-        }
-    }
-    else if( style & WS_MAXIMIZE )
-    {
-        if (flags & PLACE_MAX)
-            NtUserSetWindowPos( hwnd, 0, wp.ptMaxPosition.x, wp.ptMaxPosition.y, 0, 0,
-                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-    }
-    else if( flags & PLACE_RECT )
-        NtUserSetWindowPos( hwnd, 0, wp.rcNormalPosition.left, wp.rcNormalPosition.top,
-                            wp.rcNormalPosition.right - wp.rcNormalPosition.left,
-                            wp.rcNormalPosition.bottom - wp.rcNormalPosition.top,
-                            SWP_NOZORDER | SWP_NOACTIVATE );
-
-    NtUserShowWindow( hwnd, wndpl->showCmd );
-
-    if (IsIconic( hwnd ))
-    {
-        /* SDK: ...valid only the next time... */
-        if( wndpl->flags & WPF_RESTORETOMAXIMIZED )
-            win_set_flags( hwnd, WIN_RESTORE_MAX, 0 );
-    }
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		SetWindowPlacement (USER32.@)
- *
- * Win95:
- * Fails if wndpl->length of Win95 (!) apps is invalid.
- */
-BOOL WINAPI SetWindowPlacement( HWND hwnd, const WINDOWPLACEMENT *wpl )
-{
-    UINT flags = PLACE_MAX | PLACE_RECT;
-    if (!wpl) return FALSE;
-    if (wpl->flags & WPF_SETMINPOSITION) flags |= PLACE_MIN;
-    return WINPOS_SetPlacement( hwnd, wpl, flags );
 }
 
 
@@ -561,33 +258,6 @@ BOOL WINAPI AnimateWindow(HWND hwnd, DWORD dwTime, DWORD dwFlags)
 	NtUserShowWindow( hwnd, (dwFlags & AW_HIDE) ? SW_HIDE : ((dwFlags & AW_ACTIVATE) ? SW_SHOW : SW_SHOWNA) );
 
 	return TRUE;
-}
-
-/***********************************************************************
- *		SetInternalWindowPos (USER32.@)
- */
-void WINAPI SetInternalWindowPos( HWND hwnd, UINT showCmd,
-                                    LPRECT rect, LPPOINT pt )
-{
-    WINDOWPLACEMENT wndpl;
-    UINT flags;
-
-    wndpl.length  = sizeof(wndpl);
-    wndpl.showCmd = showCmd;
-    wndpl.flags = flags = 0;
-
-    if( pt )
-    {
-        flags |= PLACE_MIN;
-        wndpl.flags |= WPF_SETMINPOSITION;
-        wndpl.ptMinPosition = *pt;
-    }
-    if( rect )
-    {
-        flags |= PLACE_RECT;
-        wndpl.rcNormalPosition = *rect;
-    }
-    WINPOS_SetPlacement( hwnd, &wndpl, flags );
 }
 
 
@@ -650,31 +320,6 @@ void WINPOS_ActivateOtherWindow(HWND hwnd)
         if (SetForegroundWindow( hwndTo )) return;
     }
     if (!NtUserSetActiveWindow( hwndTo )) NtUserSetActiveWindow( 0 );
-}
-
-
-/***********************************************************************
- *           WINPOS_HandleWindowPosChanging
- *
- * Default handling for a WM_WINDOWPOSCHANGING. Called from DefWindowProc().
- */
-LONG WINPOS_HandleWindowPosChanging( HWND hwnd, WINDOWPOS *winpos )
-{
-    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
-
-    if (winpos->flags & SWP_NOSIZE) return 0;
-    if ((style & WS_THICKFRAME) || ((style & (WS_POPUP | WS_CHILD)) == 0))
-    {
-	MINMAXINFO info = NtUserGetMinMaxInfo( hwnd );
-        winpos->cx = min( winpos->cx, info.ptMaxTrackSize.x );
-        winpos->cy = min( winpos->cy, info.ptMaxTrackSize.y );
-	if (!(style & WS_MINIMIZE))
-	{
-            winpos->cx = max( winpos->cx, info.ptMinTrackSize.x );
-            winpos->cy = max( winpos->cy, info.ptMinTrackSize.y );
-	}
-    }
-    return 0;
 }
 
 

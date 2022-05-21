@@ -181,6 +181,7 @@ struct render_synthesized_format_params
 /* NtUserMessageCall codes */
 enum
 {
+    NtUserDesktopWindowProc   = 0x029d,
     NtUserDefWindowProc       = 0x029e,
     NtUserCallWindowProc      = 0x02ab,
     NtUserSendMessage         = 0x02b1,
@@ -577,6 +578,7 @@ HDESK   WINAPI NtUserGetThreadDesktop( DWORD thread );
 INT     WINAPI NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase );
 BOOL    WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size );
 BOOL    WINAPI NtUserGetUpdateRect( HWND hwnd, RECT *rect, BOOL erase );
+BOOL    WINAPI NtUserGetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *placement );
 int     WINAPI NtUserGetWindowRgnEx( HWND hwnd, HRGN hrgn, UINT unk );
 BOOL    WINAPI NtUserHideCaret( HWND hwnd );
 NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const struct user_client_procs *client_procsA,
@@ -625,6 +627,7 @@ BOOL    WINAPI NtUserSetCursorIconData( HCURSOR cursor, UNICODE_STRING *module, 
                                         struct cursoricon_desc *desc );
 BOOL    WINAPI NtUserSetCursorPos( INT x, INT y );
 HWND    WINAPI NtUserSetFocus( HWND hwnd );
+void    WINAPI NtUserSetInternalWindowPos( HWND hwnd, UINT cmd, RECT *rect, POINT *pt );
 BOOL    WINAPI NtUserSetKeyboardState( BYTE *state );
 BOOL    WINAPI NtUserSetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags );
 BOOL    WINAPI NtUserSetMenu( HWND hwnd, HMENU menu );
@@ -641,6 +644,7 @@ BOOL    WINAPI NtUserSetThreadDesktop( HDESK handle );
 UINT_PTR WINAPI NtUserSetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance );
 LONG    WINAPI NtUserSetWindowLong( HWND hwnd, INT offset, LONG newval, BOOL ansi );
 LONG_PTR WINAPI NtUserSetWindowLongPtr( HWND hwnd, INT offset, LONG_PTR newval, BOOL ansi );
+BOOL    WINAPI NtUserSetWindowPlacement( HWND hwnd, const WINDOWPLACEMENT *wpl );
 BOOL    WINAPI NtUserSetWindowPos( HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags );
 int     WINAPI NtUserSetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw );
 WORD    WINAPI NtUserSetWindowWord( HWND hwnd, INT offset, WORD newval );
@@ -998,7 +1002,6 @@ enum
     NtUserCallHwndParam_GetWindowLongW,
     NtUserCallHwndParam_GetWindowLongPtrA,
     NtUserCallHwndParam_GetWindowLongPtrW,
-    NtUserCallHwndParam_GetWindowPlacement,
     NtUserCallHwndParam_GetWindowRect,
     NtUserCallHwndParam_GetWindowRelative,
     NtUserCallHwndParam_GetWindowThread,
@@ -1089,12 +1092,6 @@ static inline LONG_PTR NtUserGetWindowLongPtrW( HWND hwnd, INT offset )
 static inline LONG NtUserGetWindowLongW( HWND hwnd, INT offset )
 {
     return NtUserCallHwndParam( hwnd, offset, NtUserCallHwndParam_GetWindowLongW );
-}
-
-static inline BOOL NtUserGetWindowPlacement( HWND hwnd, WINDOWPLACEMENT *wndpl )
-{
-    return NtUserCallHwndParam( hwnd, (UINT_PTR)wndpl,
-                                NtUserCallHwndParam_GetWindowPlacement );
 }
 
 static inline BOOL NtUserGetWindowRect( HWND hwnd, RECT *rect )
