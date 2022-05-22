@@ -26,6 +26,7 @@
 
 #include <sys/types.h>
 #include <dlfcn.h>
+#include <link.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -60,38 +61,115 @@ struct wgl_context
 
 static struct opengl_funcs opengl_funcs;
 
-#define USE_GL_FUNC(name) &name,
-static void *opengl_func_ptrs[] = { ALL_WGL_FUNCS };
+#define USE_GL_FUNC(name) #name,
+static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
-OSMesaContext OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
-                                      GLint accumBits, OSMesaContext sharelist );
-void OSMesaDestroyContext( OSMesaContext ctx );
-void* OSMesaGetProcAddress( const char *funcName );
-GLboolean OSMesaMakeCurrent( OSMesaContext ctx, void *buffer, GLenum type,
-                             GLsizei width, GLsizei height );
-void OSMesaPixelStore( GLint pname, GLint value );
+static OSMesaContext (*pOSMesaCreateContextExt)( GLenum format, GLint depthBits, GLint stencilBits,
+                                                 GLint accumBits, OSMesaContext sharelist );
+static void (*pOSMesaDestroyContext)( OSMesaContext ctx );
+static void * (*pOSMesaGetProcAddress)( const char *funcName );
+static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum type,
+                                        GLsizei width, GLsizei height );
+static void (*pOSMesaPixelStore)( GLint pname, GLint value );
 
-#define pOSMesaCreateContextExt OSMesaCreateContextExt
-#define pOSMesaDestroyContext   OSMesaDestroyContext
-#define pOSMesaGetProcAddress   OSMesaGetProcAddress
-#define pOSMesaMakeCurrent      OSMesaMakeCurrent
-#define pOSMesaPixelStore       OSMesaPixelStore
+/* OpenGL (and OSMesa, really, it's the same blob) are statically linked in
+ * winex11.so so to avoid linking them a second time we load winex11.so
+ * through a dirty hack and import the symbols from there.
+ */
+
+static int load_osmesa_funcs_from_winex11( struct dl_phdr_info *info,
+                                           size_t size, void *data )
+{
+    const char *filename;
+    char *buf;
+    void *handle;
+    size_t dirname_with_sep_len;
+    int i;
+    int ret = 0;
+
+    /* Find out where we loaded the library containing this code and try to
+     * load winex11.so from the same location.
+     */
+
+    filename = strrchr(info->dlpi_name, '/');
+    if (filename == NULL)
+        filename = info->dlpi_name;
+    else
+        filename++;
+
+    if (!strcmp(filename, "win32u.so"))
+    {
+        ret = 1;
+
+        dirname_with_sep_len = strlen(info->dlpi_name) - strlen(filename);
+
+        /* TODO: Check for size_t limits. */
+        buf = malloc(dirname_with_sep_len + strlen("winex11.so") + 1);
+        if (buf == NULL)
+        {
+            ERR( "Failed to allocate memory for path string while initializing OSMesa.\n" );
+            goto failed_malloc;
+        }
+        /* Using strcpy here causes an error so 2x str(n)cat... */
+        buf[0] = '\0';
+        strncat(buf, info->dlpi_name, dirname_with_sep_len);
+        strcat(buf, "winex11.so");
+        handle = dlopen(buf, RTLD_LAZY | RTLD_LOCAL);
+        free(buf);
+
+        if (handle == NULL)
+        {
+            ERR( "Failed to load winex11.so in order to initialize OSMesa: %s\n", dlerror() );
+            goto failed_dlopen;
+        }
+
+#define LOAD_FUNCPTR(f) do if (!(p##f = dlsym( handle, #f ))) \
+    { \
+        ERR( "%s not found in %s (%s), disabling.\n", #f, "winex11.so", dlerror() ); \
+        goto failed_dlsym; \
+    } while(0)
+
+        LOAD_FUNCPTR(OSMesaCreateContextExt);
+        LOAD_FUNCPTR(OSMesaDestroyContext);
+        LOAD_FUNCPTR(OSMesaGetProcAddress);
+        LOAD_FUNCPTR(OSMesaMakeCurrent);
+        LOAD_FUNCPTR(OSMesaPixelStore);
+#undef LOAD_FUNCPTR
+
+        for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
+        {
+            if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
+            {
+                ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], "winex11.so" );
+                goto failed_dlsym;
+            }
+        }
+
+        *((BOOL*) data) = TRUE;
+    }
+
+    goto success;
+
+failed_dlsym:
+    dlclose(handle);
+failed_malloc:
+failed_dlopen:
+success:
+    return ret;
+}
 
 static BOOL init_opengl(void)
 {
     static BOOL init_done = FALSE;
-    unsigned int i;
+    static BOOL init_status = FALSE;
 
-    if (init_done) return TRUE;
+    if (init_done) return init_status;
     init_done = TRUE;
 
-    for (i = 0; i < ARRAY_SIZE( opengl_func_ptrs ); i++)
-    {
-        ((void **)&opengl_funcs.gl)[i] = opengl_func_ptrs[i];
-    }
+    dl_iterate_phdr(load_osmesa_funcs, &init_status);
 
-    return TRUE;
+    return init_status;
 }
 
 /***********************************************************************

@@ -386,6 +386,25 @@ static void (*pglFinish)(void);
 static void (*pglFlush)(void);
 static const GLubyte *(*pglGetString)(GLenum name);
 
+#ifdef HAVE_OSMESA
+
+typedef struct osmesa_context *OSMesaContext;
+
+/* OSMesa prototypes so the OSMesa symbols will not be stripped away */
+OSMesaContext OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
+                                      GLint accumBits, OSMesaContext sharelist );
+void OSMesaDestroyContext( OSMesaContext ctx );
+void* OSMesaGetProcAddress( const char *funcName );
+GLboolean OSMesaMakeCurrent( OSMesaContext ctx, void *buffer, GLenum type,
+                             GLsizei width, GLsizei height );
+void OSMesaPixelStore( GLint pname, GLint value );
+
+void* OSMesa_funcs[] = { OSMesaCreateContextExt, OSMesaDestroyContext,
+                         OSMesaGetProcAddress, OSMesaMakeCurrent,
+                         OSMesaPixelStore };
+
+#endif /* HAVE_OSMESA */
+
 static void wglFinish(void);
 static void wglFlush(void);
 static const GLubyte *wglGetString(GLenum name);
