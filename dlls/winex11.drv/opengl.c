@@ -386,7 +386,7 @@ static void (*pglFinish)(void);
 static void (*pglFlush)(void);
 static const GLubyte *(*pglGetString)(GLenum name);
 
-#ifdef HAVE_OSMESA
+#ifdef HAVE_LIBOSMESA
 
 typedef struct osmesa_context *OSMesaContext;
 
@@ -403,7 +403,7 @@ void* OSMesa_funcs[] = { OSMesaCreateContextExt, OSMesaDestroyContext,
                          OSMesaGetProcAddress, OSMesaMakeCurrent,
                          OSMesaPixelStore };
 
-#endif /* HAVE_OSMESA */
+#endif /* HAVE_LIBOSMESA */
 
 static void wglFinish(void);
 static void wglFlush(void);

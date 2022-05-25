@@ -78,14 +78,15 @@ static void (*pOSMesaPixelStore)( GLint pname, GLint value );
  * through a dirty hack and import the symbols from there.
  */
 
-static int load_osmesa_funcs_from_winex11( struct dl_phdr_info *info,
-                                           size_t size, void *data )
+#define BYPASS_LIBRARY "winex11.so"
+
+static int find_handle_to_winex11( struct dl_phdr_info *info,
+                                   size_t size, void *data )
 {
     const char *filename;
     char *buf;
     void *handle;
     size_t dirname_with_sep_len;
-    int i;
     int ret = 0;
 
     /* Find out where we loaded the library containing this code and try to
@@ -105,7 +106,7 @@ static int load_osmesa_funcs_from_winex11( struct dl_phdr_info *info,
         dirname_with_sep_len = strlen(info->dlpi_name) - strlen(filename);
 
         /* TODO: Check for size_t limits. */
-        buf = malloc(dirname_with_sep_len + strlen("winex11.so") + 1);
+        buf = malloc(dirname_with_sep_len + strlen(BYPASS_LIBRARY) + 1);
         if (buf == NULL)
         {
             ERR( "Failed to allocate memory for path string while initializing OSMesa.\n" );
@@ -114,7 +115,7 @@ static int load_osmesa_funcs_from_winex11( struct dl_phdr_info *info,
         /* Using strcpy here causes an error so 2x str(n)cat... */
         buf[0] = '\0';
         strncat(buf, info->dlpi_name, dirname_with_sep_len);
-        strcat(buf, "winex11.so");
+        strcat(buf, BYPASS_LIBRARY);
         handle = dlopen(buf, RTLD_LAZY | RTLD_LOCAL);
         free(buf);
 
@@ -124,35 +125,11 @@ static int load_osmesa_funcs_from_winex11( struct dl_phdr_info *info,
             goto failed_dlopen;
         }
 
-#define LOAD_FUNCPTR(f) do if (!(p##f = dlsym( handle, #f ))) \
-    { \
-        ERR( "%s not found in %s (%s), disabling.\n", #f, "winex11.so", dlerror() ); \
-        goto failed_dlsym; \
-    } while(0)
-
-        LOAD_FUNCPTR(OSMesaCreateContextExt);
-        LOAD_FUNCPTR(OSMesaDestroyContext);
-        LOAD_FUNCPTR(OSMesaGetProcAddress);
-        LOAD_FUNCPTR(OSMesaMakeCurrent);
-        LOAD_FUNCPTR(OSMesaPixelStore);
-#undef LOAD_FUNCPTR
-
-        for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
-        {
-            if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
-            {
-                ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], "winex11.so" );
-                goto failed_dlsym;
-            }
-        }
-
-        *((BOOL*) data) = TRUE;
+        *((void**) data) = handle;
     }
 
     goto success;
 
-failed_dlsym:
-    dlclose(handle);
 failed_malloc:
 failed_dlopen:
 success:
@@ -162,15 +139,48 @@ success:
 static BOOL init_opengl(void)
 {
     static BOOL init_done = FALSE;
-    static BOOL init_status = FALSE;
+    static void *osmesa_handle;
+    unsigned int i;
 
-    if (init_done) return init_status;
+    if (init_done) return (osmesa_handle != NULL);
     init_done = TRUE;
 
-    dl_iterate_phdr(load_osmesa_funcs, &init_status);
+    dl_iterate_phdr(find_handle_to_winex11, &osmesa_handle);
+    if (osmesa_handle == NULL)
+    {
+        return FALSE;
+    }
 
-    return init_status;
+#define LOAD_FUNCPTR(f) do if (!(p##f = dlsym( osmesa_handle, #f ))) \
+    { \
+        ERR( "%s not found in %s (%s), disabling.\n", #f, BYPASS_LIBRARY, dlerror() ); \
+        goto failed; \
+    } while(0)
+
+    LOAD_FUNCPTR(OSMesaCreateContextExt);
+    LOAD_FUNCPTR(OSMesaDestroyContext);
+    LOAD_FUNCPTR(OSMesaGetProcAddress);
+    LOAD_FUNCPTR(OSMesaMakeCurrent);
+    LOAD_FUNCPTR(OSMesaPixelStore);
+#undef LOAD_FUNCPTR
+
+    for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
+    {
+        if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
+        {
+            ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], BYPASS_LIBRARY );
+            goto failed;
+        }
+    }
+
+    return TRUE;
+
+failed:
+    dlclose( osmesa_handle );
+    osmesa_handle = NULL;
+    return FALSE;
 }
+
 
 /***********************************************************************
  *		osmesa_get_gl_funcs
