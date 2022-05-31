@@ -27,7 +27,7 @@
 
 #include "config.h"
 
-#if defined(SONAME_LIBKRB5) && defined(SONAME_LIBGSSAPI_KRB5)
+#if defined(HAVE_LIBKRB5) && defined(HAVE_LIBGSSAPI_KRB5)
 
 #include <stdarg.h>
 #include <sys/types.h>
@@ -59,87 +59,38 @@
 WINE_DEFAULT_DEBUG_CHANNEL(kerberos);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-static void *libkrb5_handle;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p_##f
-MAKE_FUNCPTR( krb5_cc_close );
-MAKE_FUNCPTR( krb5_cc_default );
-MAKE_FUNCPTR( krb5_cc_end_seq_get );
-MAKE_FUNCPTR( krb5_cc_initialize );
-MAKE_FUNCPTR( krb5_cc_next_cred );
-MAKE_FUNCPTR( krb5_cc_start_seq_get );
-MAKE_FUNCPTR( krb5_cc_store_cred );
-MAKE_FUNCPTR( krb5_cccol_cursor_free );
-MAKE_FUNCPTR( krb5_cccol_cursor_new );
-MAKE_FUNCPTR( krb5_cccol_cursor_next );
-MAKE_FUNCPTR( krb5_decode_ticket );
-MAKE_FUNCPTR( krb5_free_context );
-MAKE_FUNCPTR( krb5_free_cred_contents );
-MAKE_FUNCPTR( krb5_free_principal );
-MAKE_FUNCPTR( krb5_free_ticket );
-MAKE_FUNCPTR( krb5_free_unparsed_name );
-MAKE_FUNCPTR( krb5_get_init_creds_opt_alloc );
-MAKE_FUNCPTR( krb5_get_init_creds_opt_free );
-MAKE_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache );
-MAKE_FUNCPTR( krb5_get_init_creds_password );
-MAKE_FUNCPTR( krb5_init_context );
-MAKE_FUNCPTR( krb5_is_config_principal );
-MAKE_FUNCPTR( krb5_parse_name_flags );
-MAKE_FUNCPTR( krb5_unparse_name_flags );
-#undef MAKE_FUNCPTR
+#define p_krb5_cc_close                             krb5_cc_close
+#define p_krb5_cc_default                           krb5_cc_default
+#define p_krb5_cc_end_seq_get                       krb5_cc_end_seq_get
+#define p_krb5_cc_initialize                        krb5_cc_initialize
+#define p_krb5_cc_next_cred                         krb5_cc_next_cred
+#define p_krb5_cc_start_seq_get                     krb5_cc_start_seq_get
+#define p_krb5_cc_store_cred                        krb5_cc_store_cred
+#define p_krb5_cccol_cursor_free                    krb5_cccol_cursor_free
+#define p_krb5_cccol_cursor_new                     krb5_cccol_cursor_new
+#define p_krb5_cccol_cursor_next                    krb5_cccol_cursor_next
+#define p_krb5_decode_ticket                        krb5_decode_ticket
+#define p_krb5_free_context                         krb5_free_context
+#define p_krb5_free_cred_contents                   krb5_free_cred_contents
+#define p_krb5_free_principal                       krb5_free_principal
+#define p_krb5_free_ticket                          krb5_free_ticket
+#define p_krb5_free_unparsed_name                   krb5_free_unparsed_name
+#define p_krb5_get_init_creds_opt_alloc             krb5_get_init_creds_opt_alloc
+#define p_krb5_get_init_creds_opt_free              krb5_get_init_creds_opt_free
+#define p_krb5_get_init_creds_opt_set_out_ccache    krb5_get_init_creds_opt_set_out_ccache
+#define p_krb5_get_init_creds_password              krb5_get_init_creds_password
+#define p_krb5_init_context                         krb5_init_context
+#define p_krb5_is_config_principal                  krb5_is_config_principal
+#define p_krb5_parse_name_flags                     krb5_parse_name_flags
+#define p_krb5_unparse_name_flags                   krb5_unparse_name_flags
 
 static BOOL load_krb5(void)
 {
-    if (!(libkrb5_handle = dlopen( SONAME_LIBKRB5, RTLD_NOW )))
-    {
-        WARN_(winediag)( "failed to load %s, Kerberos support will be disabled\n", SONAME_LIBKRB5 );
-        return FALSE;
-    }
-
-#define LOAD_FUNCPTR(f) \
-    if (!(p_##f = dlsym( libkrb5_handle, #f ))) \
-    { \
-        ERR( "failed to load %s\n", #f ); \
-        goto fail; \
-    }
-
-    LOAD_FUNCPTR( krb5_cc_close )
-    LOAD_FUNCPTR( krb5_cc_default )
-    LOAD_FUNCPTR( krb5_cc_end_seq_get )
-    LOAD_FUNCPTR( krb5_cc_initialize )
-    LOAD_FUNCPTR( krb5_cc_next_cred )
-    LOAD_FUNCPTR( krb5_cc_start_seq_get )
-    LOAD_FUNCPTR( krb5_cc_store_cred )
-    LOAD_FUNCPTR( krb5_cccol_cursor_free )
-    LOAD_FUNCPTR( krb5_cccol_cursor_new )
-    LOAD_FUNCPTR( krb5_cccol_cursor_next )
-    LOAD_FUNCPTR( krb5_decode_ticket )
-    LOAD_FUNCPTR( krb5_free_context )
-    LOAD_FUNCPTR( krb5_free_cred_contents )
-    LOAD_FUNCPTR( krb5_free_principal )
-    LOAD_FUNCPTR( krb5_free_ticket )
-    LOAD_FUNCPTR( krb5_free_unparsed_name )
-    LOAD_FUNCPTR( krb5_get_init_creds_opt_alloc )
-    LOAD_FUNCPTR( krb5_get_init_creds_opt_free )
-    LOAD_FUNCPTR( krb5_get_init_creds_opt_set_out_ccache )
-    LOAD_FUNCPTR( krb5_get_init_creds_password )
-    LOAD_FUNCPTR( krb5_init_context )
-    LOAD_FUNCPTR( krb5_is_config_principal )
-    LOAD_FUNCPTR( krb5_parse_name_flags )
-    LOAD_FUNCPTR( krb5_unparse_name_flags )
-#undef LOAD_FUNCPTR
     return TRUE;
-
-fail:
-    dlclose( libkrb5_handle );
-    libkrb5_handle = NULL;
-    return FALSE;
 }
 
 static void unload_krb5(void)
 {
-    dlclose( libkrb5_handle );
-    libkrb5_handle = NULL;
 }
 
 static NTSTATUS krb5_error_to_status( krb5_error_code err )
@@ -349,67 +300,27 @@ done:
     return status;
 }
 
-static void *libgssapi_krb5_handle;
-
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
-MAKE_FUNCPTR( gss_accept_sec_context );
-MAKE_FUNCPTR( gss_acquire_cred );
-MAKE_FUNCPTR( gss_delete_sec_context );
-MAKE_FUNCPTR( gss_display_status );
-MAKE_FUNCPTR( gss_get_mic );
-MAKE_FUNCPTR( gss_import_name );
-MAKE_FUNCPTR( gss_init_sec_context );
-MAKE_FUNCPTR( gss_inquire_context );
-MAKE_FUNCPTR( gss_release_buffer );
-MAKE_FUNCPTR( gss_release_cred );
-MAKE_FUNCPTR( gss_release_iov_buffer );
-MAKE_FUNCPTR( gss_release_name );
-MAKE_FUNCPTR( gss_unwrap );
-MAKE_FUNCPTR( gss_unwrap_iov );
-MAKE_FUNCPTR( gss_verify_mic );
-MAKE_FUNCPTR( gss_wrap );
-MAKE_FUNCPTR( gss_wrap_iov );
-#undef MAKE_FUNCPTR
+#define pgss_accept_sec_context gss_accept_sec_context
+#define pgss_acquire_cred       gss_acquire_cred
+#define pgss_delete_sec_context gss_delete_sec_context
+#define pgss_display_status     gss_display_status
+#define pgss_get_mic            gss_get_mic
+#define pgss_import_name        gss_import_name
+#define pgss_init_sec_context   gss_init_sec_context
+#define pgss_inquire_context    gss_inquire_context
+#define pgss_release_buffer     gss_release_buffer
+#define pgss_release_cred       gss_release_cred
+#define pgss_release_iov_buffer gss_release_iov_buffer
+#define pgss_release_name       gss_release_name
+#define pgss_unwrap             gss_unwrap
+#define pgss_unwrap_iov         gss_unwrap_iov
+#define pgss_verify_mic         gss_verify_mic
+#define pgss_wrap               gss_wrap
+#define pgss_wrap_iov           gss_wrap_iov
 
 static BOOL load_gssapi_krb5(void)
 {
-    if (!(libgssapi_krb5_handle = dlopen( SONAME_LIBGSSAPI_KRB5, RTLD_NOW )))
-    {
-        WARN_(winediag)( "failed to load %s, Kerberos support will be disabled\n", SONAME_LIBGSSAPI_KRB5 );
-        return FALSE;
-    }
-
-#define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( libgssapi_krb5_handle, #f ))) \
-    { \
-        ERR( "failed to load %s\n", #f ); \
-        goto fail; \
-    }
-
-    LOAD_FUNCPTR( gss_accept_sec_context)
-    LOAD_FUNCPTR( gss_acquire_cred)
-    LOAD_FUNCPTR( gss_delete_sec_context)
-    LOAD_FUNCPTR( gss_display_status)
-    LOAD_FUNCPTR( gss_get_mic)
-    LOAD_FUNCPTR( gss_import_name)
-    LOAD_FUNCPTR( gss_init_sec_context)
-    LOAD_FUNCPTR( gss_inquire_context)
-    LOAD_FUNCPTR( gss_release_buffer)
-    LOAD_FUNCPTR( gss_release_cred)
-    LOAD_FUNCPTR( gss_release_iov_buffer)
-    LOAD_FUNCPTR( gss_release_name)
-    LOAD_FUNCPTR( gss_unwrap)
-    LOAD_FUNCPTR( gss_unwrap_iov)
-    LOAD_FUNCPTR( gss_verify_mic)
-    LOAD_FUNCPTR( gss_wrap )
-    LOAD_FUNCPTR( gss_wrap_iov )
-#undef LOAD_FUNCPTR
     return TRUE;
-
-fail:
-    dlclose( libgssapi_krb5_handle );
-    libgssapi_krb5_handle = NULL;
-    return FALSE;
 }
 
 static BOOL is_dce_style_context( gss_ctx_id_t ctx )
@@ -1033,7 +944,6 @@ static NTSTATUS verify_signature( void *args )
 static NTSTATUS process_attach( void *args )
 {
     if (load_krb5() && load_gssapi_krb5()) return STATUS_SUCCESS;
-    if (libkrb5_handle) unload_krb5();
     return STATUS_DLL_NOT_FOUND;
 }
 
@@ -1053,4 +963,4 @@ unixlib_entry_t __wine_unix_call_funcs[] =
     verify_signature,
 };
 
-#endif /* defined(SONAME_LIBKRB5) && defined(SONAME_LIBGSSAPI_KRB5) */
+#endif /* defined(HAVE_LIBKRB5) && defined(HAVE_LIBGSSAPI_KRB5) */

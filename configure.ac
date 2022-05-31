@@ -1743,14 +1743,14 @@ then
         [AC_CHECK_HEADERS([krb5/krb5.h])
          if test "$ac_cv_header_krb5_krb5_h" = "yes"
          then
-             WINE_CHECK_SONAME(krb5,krb5_is_config_principal,,[KRB5_CFLAGS=""],[$KRB5_LIBS])
+             WINE_CHECK_LIB(krb5,krb5_is_config_principal,,,[-ldl -lresolv])
          else
              KRB5_CFLAGS=""
          fi])
 fi
-WINE_NOTICE_WITH(krb5,[test "x$ac_cv_lib_soname_krb5" = "x"],
+WINE_NOTICE_WITH(krb5,[test "x$ac_cv_lib_krb5_krb5_is_config_principal" != "xyes"],
                  [libkrb5 ${notice_platform}development files not found (or too old), Kerberos won't be supported.])
-test "x$ac_cv_lib_soname_krb5" != "x" || with_gssapi=${with_gssapi:-no}
+test "x$ac_cv_lib_krb5_krb5_is_config_principal" != "x" || with_gssapi=${with_gssapi:-no}
 
 dnl **** Check for gssapi ****
 if test "x$with_gssapi" != "xno"
@@ -1761,12 +1761,12 @@ then
         [AC_CHECK_HEADERS([gssapi/gssapi.h gssapi/gssapi_ext.h])
         if test "$ac_cv_header_gssapi_gssapi_h" = "yes" -a "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
         then
-            WINE_CHECK_SONAME(gssapi_krb5, gss_init_sec_context,,[GSSAPI_CFLAGS=""],[$GSSAPI_LIBS])
+            WINE_CHECK_LIB(gssapi_krb5, gss_init_sec_context,,,[$GSSAPI_LIBS -ldl -lresolv])
         else
             GSSAPI_CFLAGS=""
         fi])
 fi
-WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_soname_gssapi_krb5" = "x"],
+WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_gssapi_krb5_gss_init_sec_context" != "xyes"],
                  [libgssapi_krb5 ${notice_platform}development files not found (or too old), no Kerberos SSP support.])
 
 dnl **** Check for OpenAL 1.1 ****
@@ -2063,18 +2063,19 @@ dnl **** Check for OpenLDAP ***
 if test "x$with_ldap" != "xno"
 then
     dnl Actually there's no pkg-config support for ldap, but this way we can still override the flags
-    WINE_PACKAGE_FLAGS(LDAP,[openldap],[-lldap -llber],,,
+    WINE_PACKAGE_FLAGS(LDAP,[ldap],,,,
         [AC_CHECK_HEADERS([ldap.h lber.h])
         if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
         then
             AC_CHECK_TYPE(LDAPSortKey,
                 [AC_CHECK_LIB(ldap, ldap_initialize,
                     [AC_CHECK_LIB(lber, ber_init,
-                        [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])],
+                        [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])
+                         LDAP_LIBS="$LDAP_LIBS $PTHREAD_LIBS"],
                         [LDAP_LIBS=""],
                         [$PTHREAD_LIBS $LDAP_LIBS])],
                     [LDAP_LIBS=""],
-                    [$PTHREAD_LIBS $LDAP_LIBS])],
+                    [$LDAP_LIBS $PTHREAD_LIBS])],
                 [LDAP_LIBS=""],
                 [#include <ldap.h>])
         else

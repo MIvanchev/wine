@@ -1,6 +1,7 @@
 MODULE    = kerberos.dll
 UNIXLIB   = kerberos.so
 EXTRAINCL = $(KRB5_CFLAGS) $(GSSAPI_CFLAGS)
+EXTRALIBS = $(KRB5_LIBS) $(GSSAPI_KRB5_LIBS)
 
 C_SRCS = \
 	krb5_ap.c \
