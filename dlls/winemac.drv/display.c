@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -27,7 +31,6 @@
 #include "ddrawi.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(display);
 
@@ -264,7 +267,7 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
 
     pixel_encoding = CGDisplayModeCopyPixelEncoding(display_mode);
     len = CFStringGetLength(pixel_encoding);
-    buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+    buf = malloc((len + 1) * sizeof(WCHAR));
     CFStringGetCharacters(pixel_encoding, CFRangeMake(0, len), (UniChar*)buf);
     buf[len] = 0;
     CFRelease(pixel_encoding);
@@ -275,7 +278,7 @@ static BOOL write_display_settings(HKEY parent_hkey, CGDirectDisplayID displayID
     ret = TRUE;
 
 fail:
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     if (display_mode) CGDisplayModeRelease(display_mode);
     NtClose(display_hkey);
     if (!ret)
@@ -359,7 +362,7 @@ static void free_display_mode_descriptor(struct display_mode_descriptor* desc)
     {
         if (desc->pixel_encoding)
             CFRelease(desc->pixel_encoding);
-        HeapFree(GetProcessHeap(), 0, desc);
+        free(desc);
     }
 }
 
@@ -384,7 +387,7 @@ static struct display_mode_descriptor* create_original_display_mode_descriptor(C
     if (!(hkey = reg_open_key(NULL, nameW, asciiz_to_unicode(nameW, display_key))))
         return NULL;
 
-    desc = HeapAlloc(GetProcessHeap(), 0, sizeof(*desc));
+    desc = malloc(sizeof(*desc));
     desc->pixel_encoding = NULL;
 
     if (!read_dword(hkey, "Width", &desc->width) ||
@@ -761,10 +764,10 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display, BOOL include_uns
         CFRelease(modes);
 
         count = CFDictionaryGetCount(modes_by_size);
-        mode_array = HeapAlloc(GetProcessHeap(), 0, count * sizeof(mode_array[0]));
+        mode_array = malloc(count * sizeof(mode_array[0]));
         CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void **)mode_array);
         modes = CFArrayCreate(NULL, (const void **)mode_array, count, &kCFTypeArrayCallBacks);
-        HeapFree(GetProcessHeap(), 0, mode_array);
+        free(mode_array);
         CFRelease(modes_by_size);
     }
     else
@@ -806,7 +809,7 @@ static BOOL get_primary_adapter(WCHAR *name)
     DWORD i;
 
     dd.cb = sizeof(dd);
-    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
+    for (i = 0; !NtUserEnumDisplayDevices(NULL, i, &dd, 0); ++i)
     {
         if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
         {
@@ -856,9 +859,11 @@ LONG macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
 
     if (!devname && !devmode)
     {
+        UNICODE_STRING str;
         memset(&default_mode, 0, sizeof(default_mode));
         default_mode.dmSize = sizeof(default_mode);
-        if (!EnumDisplaySettingsExW(primary_adapter, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
+        RtlInitUnicodeString(&str, primary_adapter);
+        if (!NtUserEnumDisplaySettings(&str, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
         {
             ERR("Default mode not found for %s!\n", wine_dbgstr_w(primary_adapter));
             return DISP_CHANGE_BADMODE;
@@ -990,7 +995,7 @@ better:
         }
         else if (flags & (CDS_TEST | CDS_NORESET))
             ret = DISP_CHANGE_SUCCESSFUL;
-        else if (lstrcmpiW(primary_adapter, devname))
+        else if (wcsicmp(primary_adapter, devname))
         {
             FIXME("Changing non-primary adapter settings is currently unsupported.\n");
             ret = DISP_CHANGE_SUCCESSFUL;
@@ -1009,7 +1014,7 @@ better:
                 height *= 2;
             }
 
-            SendMessageW(GetDesktopWindow(), WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
+            send_message(NtUserGetDesktopWindow(), WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
                          MAKELPARAM(width, height));
             ret = DISP_CHANGE_SUCCESSFUL;
         }
@@ -1259,7 +1264,7 @@ BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
     }
 
     mac_entries = CGDisplayGammaTableCapacity(displays[0].displayID);
-    red = HeapAlloc(GetProcessHeap(), 0, mac_entries * sizeof(red[0]) * 3);
+    red = malloc(mac_entries * sizeof(red[0]) * 3);
     if (!red)
         goto done;
     green = red + mac_entries;
@@ -1314,7 +1319,7 @@ BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
     ret = TRUE;
 
 done:
-    HeapFree(GetProcessHeap(), 0, red);
+    free(red);
     macdrv_free_displays(displays);
     return ret;
 }
@@ -1346,7 +1351,7 @@ BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
         return FALSE;
     }
 
-    red = HeapAlloc(GetProcessHeap(), 0, win_entries * sizeof(red[0]) * 3);
+    red = malloc(win_entries * sizeof(red[0]) * 3);
     if (!red)
         goto done;
     green = red + win_entries;
@@ -1364,7 +1369,7 @@ BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
         WARN("failed to set display gamma table: %d\n", err);
 
 done:
-    HeapFree(GetProcessHeap(), 0, red);
+    free(red);
     macdrv_free_displays(displays);
     return (err == kCGErrorSuccess);
 }
@@ -1378,16 +1383,19 @@ static void init_registry_display_settings(void)
 {
     DEVMODEW dm = {.dmSize = sizeof(dm)};
     DISPLAY_DEVICEW dd = {sizeof(dd)};
+    UNICODE_STRING str;
     DWORD i = 0;
     LONG ret;
 
-    while (EnumDisplayDevicesW(NULL, i++, &dd, 0))
+    while (!NtUserEnumDisplayDevices(NULL, i++, &dd, 0))
     {
+        RtlInitUnicodeString(&str, dd.DeviceName);
+
         /* Skip if the device already has registry display settings */
-        if (EnumDisplaySettingsExW(dd.DeviceName, ENUM_REGISTRY_SETTINGS, &dm, 0))
+        if (NtUserEnumDisplaySettings(&str, ENUM_REGISTRY_SETTINGS, &dm, 0))
             continue;
 
-        if (!EnumDisplaySettingsExW(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm, 0))
+        if (!NtUserEnumDisplaySettings(&str, ENUM_CURRENT_SETTINGS, &dm, 0))
         {
             ERR("Failed to query current display settings for %s.\n", wine_dbgstr_w(dd.DeviceName));
             continue;
@@ -1397,8 +1405,8 @@ static void init_registry_display_settings(void)
               wine_dbgstr_w(dd.DeviceName), dm.dmPelsWidth, dm.dmPelsHeight, dm.dmBitsPerPel,
               dm.dmDisplayFrequency, dm.dmPosition.x, dm.dmPosition.y);
 
-        ret = ChangeDisplaySettingsExW(dd.DeviceName, &dm, NULL,
-                                       CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
+        ret = NtUserChangeDisplaySettings(&str, &dm, NULL,
+                                          CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
         if (ret != DISP_CHANGE_SUCCESSFUL)
             ERR("Failed to save registry display settings for %s, returned %d.\n",
                 wine_dbgstr_w(dd.DeviceName), ret);
@@ -1412,7 +1420,7 @@ static void init_registry_display_settings(void)
  */
 void macdrv_displays_changed(const macdrv_event *event)
 {
-    HWND hwnd = GetDesktopWindow();
+    HWND hwnd = NtUserGetDesktopWindow();
 
     /* A system display change will get delivered to all GUI-attached threads,
        so the desktop-window-owning thread will get it and all others should
@@ -1420,7 +1428,7 @@ void macdrv_displays_changed(const macdrv_event *event)
        will only get delivered to the activated process.  So, it needs to
        process it (by sending it to the desktop window). */
     if (event->displays_changed.activating ||
-        GetWindowThreadProcessId(hwnd, NULL) == GetCurrentThreadId())
+        NtUserGetWindowThread(hwnd, NULL) == GetCurrentThreadId())
     {
         CGDirectDisplayID mainDisplay = CGMainDisplayID();
         CGDisplayModeRef mode = CGDisplayCopyDisplayMode(mainDisplay);
@@ -1442,7 +1450,7 @@ void macdrv_displays_changed(const macdrv_event *event)
             height *= 2;
         }
 
-        SendMessageW(hwnd, WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
+        send_message(hwnd, WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
                      MAKELPARAM(width, height));
     }
 }

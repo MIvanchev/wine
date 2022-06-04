@@ -43,14 +43,14 @@
 
 /* avoid conflict with field names in included win32 headers */
 #undef Status
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
+
+#include "x11drv.h"
 #include "wingdi.h"
 #include "winuser.h"
 
-#include "x11drv.h"
 #include "wine/debug.h"
 #include "wine/server.h"
 #include "mwm.h"
@@ -1913,7 +1913,6 @@ BOOL X11DRV_CreateWindow( HWND hwnd )
                                            CWOverrideRedirect | CWEventMask, &attr );
         XFlush( data->display );
         NtUserSetProp( hwnd, clip_window_prop, (HANDLE)data->clip_window );
-        x11drv_client_call( client_clipboard_init, 0 );
         X11DRV_DisplayDevices_RegisterEventHandlers();
     }
     return TRUE;

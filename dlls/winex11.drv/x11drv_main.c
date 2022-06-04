@@ -45,14 +45,12 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "winreg.h"
 
 #define VK_NO_PROTOTYPES
 #define WINE_VK_HOST
 
 #include "x11drv.h"
+#include "winreg.h"
 #include "xcomposite.h"
 #include "wine/server.h"
 #include "wine/debug.h"
@@ -1261,7 +1259,6 @@ NTSTATUS x11drv_client_call( enum client_callback func, UINT arg )
 
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
-    x11drv_clipboard_message,
     x11drv_create_desktop,
     x11drv_init,
     x11drv_systray_clear,

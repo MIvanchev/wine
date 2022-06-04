@@ -1337,11 +1337,10 @@ static BOOL render_format( UINT id )
 
     for (i = 0; i < nb_current_x11_formats; i++)
     {
-        struct set_clipboard_params params;
+        struct set_clipboard_params params = { 0 };
         if (current_x11_formats[i]->id != id) continue;
         if (!(params.data = import_selection( display, import_window, current_selection,
                                               current_x11_formats[i], &params.size ))) continue;
-        params.seqno = 0;
         NtUserSetClipboardData( id, 0, &params );
         if (params.size) free( params.data );
         return TRUE;
@@ -2209,7 +2208,7 @@ static void xfixes_init(void)
 
 
 /**************************************************************************
- *		clipboard_thread
+ *		clipboard_init
  *
  * Thread running inside the desktop process to manage the clipboard
  */
@@ -2244,20 +2243,18 @@ static BOOL clipboard_init( HWND hwnd )
 /**************************************************************************
  *           x11drv_clipboard_message
  */
-NTSTATUS x11drv_clipboard_message( void *arg )
+LRESULT X11DRV_ClipboardWindowProc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    struct clipboard_message_params *params = arg;
-
-    switch (params->msg)
+    switch (msg)
     {
     case WM_NCCREATE:
-        return clipboard_init( params->hwnd );
+        return clipboard_init( hwnd );
     case WM_CLIPBOARDUPDATE:
         if (is_clipboard_owner) break;  /* ignore our own changes */
         acquire_selection( thread_init_display() );
         break;
     case WM_RENDERFORMAT:
-        if (render_format( params->wparam )) rendered_formats++;
+        if (render_format( wparam )) rendered_formats++;
         break;
     case WM_TIMER:
         if (!is_clipboard_owner) break;
@@ -2266,12 +2263,11 @@ NTSTATUS x11drv_clipboard_message( void *arg )
     case WM_DESTROYCLIPBOARD:
         TRACE( "WM_DESTROYCLIPBOARD: lost ownership\n" );
         is_clipboard_owner = FALSE;
-        NtUserKillTimer( params->hwnd, 1 );
+        NtUserKillTimer( hwnd, 1 );
         break;
     }
 
-    return NtUserMessageCall( params->hwnd, params->msg, params->wparam, params->lparam,
-                              NULL, NtUserDefWindowProc, FALSE );
+    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserDefWindowProc, FALSE );
 }
 
 

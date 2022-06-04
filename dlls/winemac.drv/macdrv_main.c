@@ -19,6 +19,11 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <Security/AuthSession.h>
@@ -27,10 +32,7 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "macdrv.h"
-#include "winuser.h"
-#include "winreg.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
 
@@ -45,8 +47,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
     ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
 
 C_ASSERT(NUM_EVENT_TYPES <= sizeof(macdrv_event_mask) * 8);
-
-DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 
 int topmost_float_inactive = TOPMOST_FLOAT_INACTIVE_NONFULLSCREEN;
 int capture_displays_for_fullscreen = 0;
@@ -65,11 +65,12 @@ int cursor_clipping_locks_windows = TRUE;
 int use_precise_scrolling = TRUE;
 int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
 int retina_enabled = FALSE;
-HMODULE macdrv_module = 0;
 int enable_app_nap = FALSE;
 
 CFDictionaryRef localized_strings;
 
+NTSTATUS (WINAPI *pNtWaitForMultipleObjects)(ULONG,const HANDLE*,BOOLEAN,
+                                             BOOLEAN,const LARGE_INTEGER*);
 
 /**************************************************************************
  *              debugstr_cf
@@ -316,9 +317,9 @@ static void setup_options(void)
     {
         static const WCHAR noneW[] = {'n','o','n','e',0};
         static const WCHAR allW[] = {'a','l','l',0};
-        if (!lstrcmpW(buffer, noneW))
+        if (!wcscmp(buffer, noneW))
             topmost_float_inactive = TOPMOST_FLOAT_INACTIVE_NONE;
-        else if (!lstrcmpW(buffer, allW))
+        else if (!wcscmp(buffer, allW))
             topmost_float_inactive = TOPMOST_FLOAT_INACTIVE_ALL;
         else
             topmost_float_inactive = TOPMOST_FLOAT_INACTIVE_NONFULLSCREEN;
@@ -374,9 +375,9 @@ static void setup_options(void)
     {
         static const WCHAR transparentW[] = {'t','r','a','n','s','p','a','r','e','n','t',0};
         static const WCHAR behindW[] = {'b','e','h','i','n','d',0};
-        if (!lstrcmpW(buffer, transparentW))
+        if (!wcscmp(buffer, transparentW))
             gl_surface_mode = GL_SURFACE_IN_FRONT_TRANSPARENT;
-        else if (!lstrcmpW(buffer, behindW))
+        else if (!wcscmp(buffer, behindW))
             gl_surface_mode = GL_SURFACE_BEHIND;
         else
             gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
@@ -398,25 +399,9 @@ static void setup_options(void)
 /***********************************************************************
  *              load_strings
  */
-static void load_strings(HINSTANCE instance)
+static void load_strings(struct localized_string *str)
 {
-    static const unsigned int ids[] = {
-        STRING_MENU_WINE,
-        STRING_MENU_ITEM_HIDE_APPNAME,
-        STRING_MENU_ITEM_HIDE,
-        STRING_MENU_ITEM_HIDE_OTHERS,
-        STRING_MENU_ITEM_SHOW_ALL,
-        STRING_MENU_ITEM_QUIT_APPNAME,
-        STRING_MENU_ITEM_QUIT,
-
-        STRING_MENU_WINDOW,
-        STRING_MENU_ITEM_MINIMIZE,
-        STRING_MENU_ITEM_ZOOM,
-        STRING_MENU_ITEM_ENTER_FULL_SCREEN,
-        STRING_MENU_ITEM_BRING_ALL_TO_FRONT,
-    };
     CFMutableDictionaryRef dict;
-    int i;
 
     dict = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
                                      &kCFTypeDictionaryValueCallBacks);
@@ -426,56 +411,59 @@ static void load_strings(HINSTANCE instance)
         return;
     }
 
-    for (i = 0; i < ARRAY_SIZE(ids); i++)
+    while (str->id)
     {
-        LPCWSTR str;
-        int len = LoadStringW(instance, ids[i], (LPWSTR)&str, 0);
-        if (str && len)
+        if (str->str && str->len)
         {
-            CFNumberRef key = CFNumberCreate(NULL, kCFNumberIntType, &ids[i]);
-            CFStringRef value = CFStringCreateWithCharacters(NULL, (UniChar*)str, len);
+            CFNumberRef key = CFNumberCreate(NULL, kCFNumberIntType, &str->id);
+            CFStringRef value = CFStringCreateWithCharacters(NULL, (UniChar*)str->str, str->len);
             if (key && value)
                 CFDictionarySetValue(dict, key, value);
             else
-                ERR("Failed to add string ID 0x%04x %s\n", ids[i], debugstr_wn(str, len));
+                ERR("Failed to add string ID 0x%04x %s\n", str->id, debugstr_wn(str->str, str->len));
         }
         else
-            ERR("Failed to load string ID 0x%04x\n", ids[i]);
+            ERR("Failed to load string ID 0x%04x\n", str->id);
+        str++;
     }
 
     localized_strings = dict;
 }
 
 
+static NTSTATUS CDECL unix_call( enum macdrv_funcs code, void *params );
+
+
 /***********************************************************************
- *              process_attach
+ *              macdrv_init
  */
-static BOOL process_attach(void)
+static NTSTATUS macdrv_init(void *arg)
 {
+    struct init_params *params = arg;
     SessionAttributeBits attributes;
     OSStatus status;
 
     status = SessionGetInfo(callerSecuritySession, NULL, &attributes);
     if (status != noErr || !(attributes & sessionHasGraphicAccess))
-        return FALSE;
+        return STATUS_UNSUCCESSFUL;
 
     init_win_context();
     setup_options();
-    load_strings(macdrv_module);
-
-    if ((thread_data_tls_index = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
+    load_strings(params->strings);
 
     macdrv_err_on = ERR_ON(macdrv);
-    if (macdrv_start_cocoa_app(GetTickCount64()))
+    if (macdrv_start_cocoa_app(NtGetTickCount()))
     {
         ERR("Failed to start Cocoa app main loop\n");
-        return FALSE;
+        return STATUS_UNSUCCESSFUL;
     }
 
     init_user_driver();
     macdrv_init_display_devices(FALSE);
 
-    return TRUE;
+    pNtWaitForMultipleObjects = params->pNtWaitForMultipleObjects;
+    params->unix_call = unix_call;
+    return STATUS_SUCCESS;
 }
 
 
@@ -491,9 +479,9 @@ void macdrv_ThreadDetach(void)
         macdrv_destroy_event_queue(data->queue);
         if (data->keyboard_layout_uchr)
             CFRelease(data->keyboard_layout_uchr);
-        HeapFree(GetProcessHeap(), 0, data);
+        free(data);
         /* clear data in case we get re-entered from user32 before the thread is truly dead */
-        TlsSetValue(thread_data_tls_index, NULL);
+        NtUserGetThreadInfo()->driver_data = 0;
     }
 }
 
@@ -511,7 +499,7 @@ static void set_queue_display_fd(int fd)
     if (wine_server_fd_to_handle(fd, GENERIC_READ | SYNCHRONIZE, 0, &handle))
     {
         MESSAGE("macdrv: Can't allocate handle for event queue fd\n");
-        ExitProcess(1);
+        NtTerminateProcess(0, 1);
     }
     SERVER_START_REQ(set_queue_fd)
     {
@@ -522,9 +510,9 @@ static void set_queue_display_fd(int fd)
     if (ret)
     {
         MESSAGE("macdrv: Can't store handle for event queue fd\n");
-        ExitProcess(1);
+        NtTerminateProcess(0, 1);
     }
-    CloseHandle(handle);
+    NtClose(handle);
 }
 
 
@@ -538,16 +526,16 @@ struct macdrv_thread_data *macdrv_init_thread_data(void)
 
     if (data) return data;
 
-    if (!(data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
+    if (!(data = calloc(1, sizeof(*data))))
     {
         ERR("could not create data\n");
-        ExitProcess(1);
+        NtTerminateProcess(0, 1);
     }
 
     if (!(data->queue = macdrv_create_event_queue(macdrv_handle_event)))
     {
         ERR("macdrv: Can't create event queue.\n");
-        ExitProcess(1);
+        NtTerminateProcess(0, 1);
     }
 
     macdrv_get_input_source_info(&data->keyboard_layout_uchr, &data->keyboard_type, &data->iso_keyboard, &input_source);
@@ -556,30 +544,12 @@ struct macdrv_thread_data *macdrv_init_thread_data(void)
     macdrv_compute_keyboard_layout(data);
 
     set_queue_display_fd(macdrv_get_event_queue_fd(data->queue));
-    TlsSetValue(thread_data_tls_index, data);
+    NtUserGetThreadInfo()->driver_data = data;
 
-    ActivateKeyboardLayout(data->active_keyboard_layout, 0);
+    NtUserActivateKeyboardLayout(data->active_keyboard_layout, 0);
     return data;
 }
 
-
-/***********************************************************************
- *              DllMain
- */
-BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
-{
-    BOOL ret = TRUE;
-
-    switch(reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( hinst );
-        macdrv_module = hinst;
-        ret = process_attach();
-        break;
-    }
-    return ret;
-}
 
 /***********************************************************************
  *              SystemParametersInfo (MACDRV.@)
@@ -643,4 +613,58 @@ BOOL macdrv_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, 
         break;
     }
     return FALSE;
+}
+
+
+NTSTATUS macdrv_client_func(enum macdrv_client_funcs id, const void *params, ULONG size)
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    return KeUserModeCallback(id, params, size, &ret_ptr, &ret_len);
+}
+
+
+static NTSTATUS macdrv_ime_clear(void *arg)
+{
+    macdrv_clear_ime_text();
+    return 0;
+}
+
+
+static NTSTATUS macdrv_ime_using_input_method(void *arg)
+{
+    return macdrv_using_input_method();
+}
+
+
+static NTSTATUS macdrv_quit_result(void *arg)
+{
+    struct quit_result_params *params = arg;
+    macdrv_quit_reply(params->result);
+    return 0;
+}
+
+
+const unixlib_entry_t __wine_unix_call_funcs[] =
+{
+    macdrv_dnd_get_data,
+    macdrv_dnd_get_formats,
+    macdrv_dnd_have_format,
+    macdrv_dnd_release,
+    macdrv_dnd_retain,
+    macdrv_ime_clear,
+    macdrv_ime_process_text_input,
+    macdrv_ime_using_input_method,
+    macdrv_init,
+    macdrv_notify_icon,
+    macdrv_quit_result,
+};
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+
+
+/* FIXME: Use __wine_unix_call instead */
+static NTSTATUS CDECL unix_call(enum macdrv_funcs code, void *params)
+{
+    return __wine_unix_call_funcs[code]( params );
 }

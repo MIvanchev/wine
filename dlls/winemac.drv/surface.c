@@ -20,6 +20,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include "macdrv.h"
@@ -77,7 +81,7 @@ static struct macdrv_window_surface *get_mac_surface(struct window_surface *surf
  */
 static void update_blit_data(struct macdrv_window_surface *surface)
 {
-    HeapFree(GetProcessHeap(), 0, surface->blit_data);
+    free(surface->blit_data);
     surface->blit_data = NULL;
 
     if (surface->drawn)
@@ -86,7 +90,7 @@ static void update_blit_data(struct macdrv_window_surface *surface)
 
         if (NtGdiCombineRgn(blit, surface->drawn, 0, RGN_COPY) > NULLREGION &&
             (!surface->region || NtGdiCombineRgn(blit, blit, surface->region, RGN_AND) > NULLREGION) &&
-            OffsetRgn(blit, surface->header.rect.left, surface->header.rect.top) > NULLREGION)
+            NtGdiOffsetRgn(blit, surface->header.rect.left, surface->header.rect.top) > NULLREGION)
             surface->blit_data = get_region_data(blit, 0);
 
         NtGdiDeleteObjectApp(blit);
@@ -209,10 +213,10 @@ static void macdrv_surface_destroy(struct window_surface *window_surface)
     TRACE("freeing %p bits %p\n", surface, surface->bits);
     if (surface->region) NtGdiDeleteObjectApp(surface->region);
     if (surface->drawn) NtGdiDeleteObjectApp(surface->drawn);
-    HeapFree(GetProcessHeap(), 0, surface->blit_data);
-    HeapFree(GetProcessHeap(), 0, surface->bits);
+    free(surface->blit_data);
+    free(surface->bits);
     pthread_mutex_destroy(&surface->mutex);
-    HeapFree(GetProcessHeap(), 0, surface);
+    free(surface);
 }
 
 static const struct window_surface_funcs macdrv_surface_funcs =
@@ -246,8 +250,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     int err;
     DWORD window_background;
 
-    surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                        FIELD_OFFSET(struct macdrv_window_surface, info.bmiColors[3]));
+    surface = calloc(1, FIELD_OFFSET(struct macdrv_window_surface, info.bmiColors[3]));
     if (!surface) return NULL;
 
     err = pthread_mutexattr_init(&attr);
@@ -260,7 +263,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     }
     if (err)
     {
-        HeapFree(GetProcessHeap(), 0, surface);
+        free(surface);
         return NULL;
     }
 
@@ -286,7 +289,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     if (old_mac_surface && old_mac_surface->drawn)
     {
         surface->drawn = NtGdiCreateRectRgn(rect->left, rect->top, rect->right, rect->bottom);
-        OffsetRgn(surface->drawn, -rect->left, -rect->top);
+        NtGdiOffsetRgn(surface->drawn, -rect->left, -rect->top);
         if (NtGdiCombineRgn(surface->drawn, surface->drawn, old_mac_surface->drawn, RGN_AND) <= NULLREGION)
         {
             NtGdiDeleteObjectApp(surface->drawn);
@@ -295,7 +298,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     }
     update_blit_data(surface);
     surface->use_alpha = use_alpha;
-    surface->bits = HeapAlloc(GetProcessHeap(), 0, surface->info.bmiHeader.biSizeImage);
+    surface->bits = malloc(surface->info.bmiHeader.biSizeImage);
     if (!surface->bits) goto failed;
     window_background = macdrv_window_background_color();
     memset_pattern4(surface->bits, &window_background, surface->info.bmiHeader.biSizeImage);

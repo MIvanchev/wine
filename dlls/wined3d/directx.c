@@ -23,6 +23,7 @@
 
 #include "wined3d_private.h"
 #include "winternl.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -37,6 +38,19 @@ enum wined3d_driver_model
     DRIVER_MODEL_NT5X,
     DRIVER_MODEL_NT6X
 };
+
+struct wined3d_adapter_budget_change_notification
+{
+    const struct wined3d_adapter *adapter;
+    HANDLE event;
+    DWORD cookie;
+    UINT64 last_local_budget;
+    UINT64 last_non_local_budget;
+    struct list entry;
+};
+
+static struct list adapter_budget_change_notifications = LIST_INIT( adapter_budget_change_notifications );
+static HANDLE notification_thread, notification_thread_stop_event;
 
 /* The d3d device ID */
 static const GUID IID_D3DDEVICE_D3DUID = { 0xaeb2cdd4, 0x6e41, 0x43ea, { 0x94,0x1c,0x83,0x61,0xcc,0x76,0x07,0x81 } };
@@ -1046,6 +1060,131 @@ HRESULT CDECL wined3d_adapter_get_video_memory_info(const struct wined3d_adapter
     return WINED3D_OK;
 }
 
+static DWORD CALLBACK notification_thread_func(void *stop_event)
+{
+    struct wined3d_adapter_budget_change_notification *notification;
+    struct wined3d_video_memory_info info;
+    HRESULT hr;
+
+    while (TRUE)
+    {
+        wined3d_mutex_lock();
+        LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+                struct wined3d_adapter_budget_change_notification, entry)
+        {
+            hr = wined3d_adapter_get_video_memory_info(notification->adapter, 0,
+                    WINED3D_MEMORY_SEGMENT_GROUP_LOCAL, &info);
+            if (SUCCEEDED(hr) && info.budget != notification->last_local_budget)
+            {
+                notification->last_local_budget = info.budget;
+                SetEvent(notification->event);
+                continue;
+            }
+
+            hr = wined3d_adapter_get_video_memory_info(notification->adapter, 0,
+                    WINED3D_MEMORY_SEGMENT_GROUP_NON_LOCAL, &info);
+            if (SUCCEEDED(hr) && info.budget != notification->last_non_local_budget)
+            {
+                notification->last_non_local_budget = info.budget;
+                SetEvent(notification->event);
+            }
+        }
+        wined3d_mutex_unlock();
+
+        if (WaitForSingleObject(stop_event, 1000) == WAIT_OBJECT_0)
+            break;
+    }
+
+    return TRUE;
+}
+
+HRESULT CDECL wined3d_adapter_register_budget_change_notification(const struct wined3d_adapter *adapter,
+        HANDLE event, DWORD *cookie)
+{
+    static DWORD cookie_counter;
+    static BOOL wrapped;
+    struct wined3d_adapter_budget_change_notification *notification, *new_notification;
+    BOOL found = FALSE;
+
+    new_notification = heap_alloc_zero(sizeof(*new_notification));
+    if (!new_notification)
+        return E_OUTOFMEMORY;
+
+    wined3d_mutex_lock();
+    new_notification->adapter = adapter;
+    new_notification->event = event;
+    new_notification->cookie = cookie_counter++;
+    if (cookie_counter < new_notification->cookie)
+        wrapped = TRUE;
+    if (wrapped)
+    {
+        while (TRUE)
+        {
+            LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+                    struct wined3d_adapter_budget_change_notification, entry)
+            {
+                if (notification->cookie == new_notification->cookie)
+                {
+                    found = TRUE;
+                    break;
+                }
+            }
+
+            if (!found)
+                break;
+
+            new_notification->cookie = cookie_counter++;
+        }
+    }
+
+    *cookie = new_notification->cookie;
+    list_add_head(&adapter_budget_change_notifications, &new_notification->entry);
+
+    if (!notification_thread)
+    {
+        notification_thread_stop_event = CreateEventW(0, FALSE, FALSE, NULL);
+        notification_thread = CreateThread(NULL, 0, notification_thread_func,
+                notification_thread_stop_event, 0, NULL);
+    }
+    wined3d_mutex_unlock();
+    return WINED3D_OK;
+}
+
+HRESULT CDECL wined3d_adapter_unregister_budget_change_notification(DWORD cookie)
+{
+    struct wined3d_adapter_budget_change_notification *notification;
+    HANDLE thread, thread_stop_event;
+
+    wined3d_mutex_lock();
+    LIST_FOR_EACH_ENTRY(notification, &adapter_budget_change_notifications,
+            struct wined3d_adapter_budget_change_notification, entry)
+    {
+        if (notification->cookie == cookie)
+        {
+            list_remove(&notification->entry);
+            heap_free(notification);
+            break;
+        }
+    }
+
+    if (!list_empty(&adapter_budget_change_notifications))
+    {
+        wined3d_mutex_unlock();
+        return WINED3D_OK;
+    }
+
+    thread = notification_thread;
+    thread_stop_event = notification_thread_stop_event;
+    notification_thread = NULL;
+    notification_thread_stop_event = NULL;
+    wined3d_mutex_unlock();
+    SetEvent(thread_stop_event);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    CloseHandle(thread_stop_event);
+    return WINED3D_OK;
+}
+
 HRESULT CDECL wined3d_register_software_device(struct wined3d *wined3d, void *init_function)
 {
     FIXME("wined3d %p, init_function %p stub!\n", wined3d, init_function);
@@ -1680,12 +1819,12 @@ HRESULT CDECL wined3d_check_depth_stencil_match(const struct wined3d_adapter *ad
     rt_format = wined3d_get_format(adapter, render_target_format_id, WINED3D_BIND_RENDER_TARGET);
     ds_format = wined3d_get_format(adapter, depth_stencil_format_id, WINED3D_BIND_DEPTH_STENCIL);
 
-    if (!(rt_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_RENDERTARGET))
+    if (!(rt_format->caps[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3D_FORMAT_CAP_RENDERTARGET))
     {
         WARN("Format %s is not render target format.\n", debug_d3dformat(rt_format->id));
         return WINED3DERR_NOTAVAILABLE;
     }
-    if (!(ds_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_DEPTH_STENCIL))
+    if (!(ds_format->caps[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3D_FORMAT_CAP_DEPTH_STENCIL))
     {
         WARN("Format %s is not depth/stencil format.\n", debug_d3dformat(ds_format->id));
         return WINED3DERR_NOTAVAILABLE;
@@ -1759,11 +1898,12 @@ static BOOL wined3d_check_depth_stencil_format(const struct wined3d_adapter *ada
 
 static BOOL wined3d_check_surface_format(const struct wined3d_format *format)
 {
-    if ((format->flags[WINED3D_GL_RES_TYPE_TEX_2D] | format->flags[WINED3D_GL_RES_TYPE_RB]) & WINED3DFMT_FLAG_BLIT)
+    if ((format->caps[WINED3D_GL_RES_TYPE_TEX_2D] | format->caps[WINED3D_GL_RES_TYPE_RB])
+            & WINED3D_FORMAT_CAP_BLIT)
         return TRUE;
 
-    if ((format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_EXTENSION | WINED3DFMT_FLAG_TEXTURE))
-            == (WINED3DFMT_FLAG_EXTENSION | WINED3DFMT_FLAG_TEXTURE))
+    if ((format->attrs & WINED3D_FORMAT_ATTR_EXTENSION)
+            && (format->caps[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3D_FORMAT_CAP_TEXTURE))
         return TRUE;
 
     return FALSE;
@@ -1784,9 +1924,9 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
 {
     const struct wined3d_format *adapter_format, *format;
     enum wined3d_gl_resource_type gl_type, gl_type_end;
+    unsigned int format_caps = 0, format_attrs = 0;
     BOOL mipmap_gen_supported = TRUE;
     unsigned int allowed_bind_flags;
-    DWORD format_flags = 0;
     DWORD allowed_usage;
 
     TRACE("wined3d %p, adapter %p, device_type %s, adapter_format %s, usage %s, "
@@ -1912,39 +2052,53 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
     }
 
     if (bind_flags & WINED3D_BIND_SHADER_RESOURCE)
-        format_flags |= WINED3DFMT_FLAG_TEXTURE;
+        format_caps |= WINED3D_FORMAT_CAP_TEXTURE;
     if (bind_flags & WINED3D_BIND_RENDER_TARGET)
-        format_flags |= WINED3DFMT_FLAG_RENDERTARGET;
+        format_caps |= WINED3D_FORMAT_CAP_RENDERTARGET;
     if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
-        format_flags |= WINED3DFMT_FLAG_DEPTH_STENCIL;
+        format_caps |= WINED3D_FORMAT_CAP_DEPTH_STENCIL;
     if (bind_flags & WINED3D_BIND_UNORDERED_ACCESS)
-        format_flags |= WINED3DFMT_FLAG_UNORDERED_ACCESS;
+        format_caps |= WINED3D_FORMAT_CAP_UNORDERED_ACCESS;
     if (bind_flags & WINED3D_BIND_VERTEX_BUFFER)
-        format_flags |= WINED3DFMT_FLAG_VERTEX_ATTRIBUTE;
+        format_caps |= WINED3D_FORMAT_CAP_VERTEX_ATTRIBUTE;
     if (bind_flags & WINED3D_BIND_INDEX_BUFFER)
-        format_flags |= WINED3DFMT_FLAG_INDEX_BUFFER;
+        format_caps |= WINED3D_FORMAT_CAP_INDEX_BUFFER;
 
     if (usage & WINED3DUSAGE_QUERY_FILTER)
-        format_flags |= WINED3DFMT_FLAG_FILTERING;
+        format_caps |= WINED3D_FORMAT_CAP_FILTERING;
     if (usage & WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING)
-        format_flags |= WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING;
+        format_caps |= WINED3D_FORMAT_CAP_POSTPIXELSHADER_BLENDING;
     if (usage & WINED3DUSAGE_QUERY_SRGBREAD)
-        format_flags |= WINED3DFMT_FLAG_SRGB_READ;
+        format_caps |= WINED3D_FORMAT_CAP_SRGB_READ;
     if (usage & WINED3DUSAGE_QUERY_SRGBWRITE)
-        format_flags |= WINED3DFMT_FLAG_SRGB_WRITE;
+        format_caps |= WINED3D_FORMAT_CAP_SRGB_WRITE;
     if (usage & WINED3DUSAGE_QUERY_VERTEXTEXTURE)
-        format_flags |= WINED3DFMT_FLAG_VTF;
+        format_caps |= WINED3D_FORMAT_CAP_VTF;
     if (usage & WINED3DUSAGE_QUERY_LEGACYBUMPMAP)
-        format_flags |= WINED3DFMT_FLAG_BUMPMAP;
+        format_attrs |= WINED3D_FORMAT_ATTR_BUMPMAP;
 
-    if ((format_flags & WINED3DFMT_FLAG_TEXTURE) && (wined3d->flags & WINED3D_NO3D))
+    if ((format_caps & WINED3D_FORMAT_CAP_TEXTURE) && (wined3d->flags & WINED3D_NO3D))
     {
         TRACE("Requested texturing support, but wined3d was created with WINED3D_NO3D.\n");
         return WINED3DERR_NOTAVAILABLE;
     }
 
+    if ((format->attrs & format_attrs) != format_attrs)
+    {
+        TRACE("Requested format attributes %#x, but format %s only has %#x.\n",
+                format_attrs, debug_d3dformat(check_format_id), format->attrs);
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
     for (; gl_type <= gl_type_end; ++gl_type)
     {
+        if ((format->caps[gl_type] & format_caps) != format_caps)
+        {
+            TRACE("Requested format caps %#x, but format %s only has %#x.\n",
+                    format_caps, debug_d3dformat(check_format_id), format->caps[gl_type]);
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
         if ((bind_flags & WINED3D_BIND_RENDER_TARGET)
                 && !adapter->adapter_ops->adapter_check_format(adapter, adapter_format, format, NULL))
         {
@@ -1972,14 +2126,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
             return WINED3DERR_NOTAVAILABLE;
         }
 
-        if ((format->flags[gl_type] & format_flags) != format_flags)
-        {
-            TRACE("Requested format flags %#x, but format %s only has %#x.\n",
-                    format_flags, debug_d3dformat(check_format_id), format->flags[gl_type]);
-            return WINED3DERR_NOTAVAILABLE;
-        }
-
-        if (!(format->flags[gl_type] & WINED3DFMT_FLAG_GEN_MIPMAP))
+        if (!(format->caps[gl_type] & WINED3D_FORMAT_CAP_GEN_MIPMAP))
             mipmap_gen_supported = FALSE;
     }
 

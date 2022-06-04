@@ -57,6 +57,9 @@
 #undef Status  /* avoid conflict with wintrnl.h */
 typedef int Status;
 
+/* avoid conflict with processthreadsapi.h */
+#undef ControlMask
+
 #include "windef.h"
 #include "winbase.h"
 #include "ntgdi.h"
@@ -235,6 +238,7 @@ extern void X11DRV_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style ) D
 extern void X11DRV_SetWindowText( HWND hwnd, LPCWSTR text ) DECLSPEC_HIDDEN;
 extern UINT X11DRV_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp ) DECLSPEC_HIDDEN;
 extern LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern LRESULT X11DRV_ClipboardWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp ) DECLSPEC_HIDDEN;
 extern void X11DRV_UpdateClipboard(void) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
                                         const RECT *window_rect ) DECLSPEC_HIDDEN;
@@ -833,7 +837,6 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
 
 /* unixlib interface */
 
-extern NTSTATUS x11drv_clipboard_message( void *arg ) DECLSPEC_HIDDEN;
 extern NTSTATUS x11drv_create_desktop( void *arg ) DECLSPEC_HIDDEN;
 extern NTSTATUS x11drv_systray_clear( void *arg ) DECLSPEC_HIDDEN;
 extern NTSTATUS x11drv_systray_dock( void *arg ) DECLSPEC_HIDDEN;
@@ -927,55 +930,5 @@ static inline UINT asciiz_to_unicode( WCHAR *dst, const char *src )
     while ((*p++ = *src++));
     return (p - dst) * sizeof(WCHAR);
 }
-
-static inline LONG x11drv_wcstol( LPCWSTR s, LPWSTR *end, INT base )
-{
-    BOOL negative = FALSE, empty = TRUE;
-    LONG ret = 0;
-
-    if (base < 0 || base == 1 || base > 36) return 0;
-    if (end) *end = (WCHAR *)s;
-    while (*s == ' ' || *s == '\t') s++;
-
-    if (*s == '-')
-    {
-        negative = TRUE;
-        s++;
-    }
-    else if (*s == '+') s++;
-
-    if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
-    {
-        base = 16;
-        s += 2;
-    }
-    if (base == 0) base = s[0] != '0' ? 10 : 8;
-
-    while (*s)
-    {
-        int v;
-
-        if ('0' <= *s && *s <= '9') v = *s - '0';
-        else if ('A' <= *s && *s <= 'Z') v = *s - 'A' + 10;
-        else if ('a' <= *s && *s <= 'z') v = *s - 'a' + 10;
-        else break;
-        if (v >= base) break;
-        if (negative) v = -v;
-        s++;
-        empty = FALSE;
-
-        if (!negative && (ret > MAXLONG / base || ret * base > MAXLONG - v))
-            ret = MAXLONG;
-        else if (negative && (ret < (LONG)MINLONG / base || ret * base < (LONG)(MINLONG - v)))
-            ret = MINLONG;
-        else
-            ret = ret * base + v;
-    }
-
-    if (end && !empty) *end = (WCHAR *)s;
-    return ret;
-}
-
-#define wcstol x11drv_wcstol
 
 #endif  /* __WINE_X11DRV_H */

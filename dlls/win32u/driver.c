@@ -813,8 +813,11 @@ static NTSTATUS nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *
 {
     if (!count && timeout && !timeout->QuadPart) return WAIT_TIMEOUT;
 
-    return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
-                                     !!(flags & MWMO_ALERTABLE), timeout );
+    if (!user_callbacks)
+        return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
+                                         !!(flags & MWMO_ALERTABLE), timeout );
+    return user_callbacks->pNtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
+                                                      !!(flags & MWMO_ALERTABLE), timeout );
 }
 
 static void nulldrv_ReleaseDC( HWND hwnd, HDC hdc )
@@ -1099,6 +1102,11 @@ static BOOL loaderdrv_ClipCursor( const RECT *clip )
     return load_driver()->pClipCursor( clip );
 }
 
+static LRESULT nulldrv_ClipboardWindowProc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    return 0;
+}
+
 static void loaderdrv_UpdateClipboard(void)
 {
     load_driver()->pUpdateClipboard();
@@ -1172,6 +1180,7 @@ static const struct user_driver_funcs lazy_load_driver =
     loaderdrv_SetCursorPos,
     loaderdrv_ClipCursor,
     /* clipboard functions */
+    nulldrv_ClipboardWindowProc,
     loaderdrv_UpdateClipboard,
     /* display modes */
     loaderdrv_ChangeDisplaySettingsEx,
@@ -1247,6 +1256,7 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
     SET_USER_FUNC(GetCursorPos);
     SET_USER_FUNC(SetCursorPos);
     SET_USER_FUNC(ClipCursor);
+    SET_USER_FUNC(ClipboardWindowProc);
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(ChangeDisplaySettingsEx);
     SET_USER_FUNC(EnumDisplaySettingsEx);
