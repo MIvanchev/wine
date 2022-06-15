@@ -110,6 +110,8 @@ struct wg_parser_stream
     uint64_t duration;
 };
 
+extern void gst_init_static_plugins(void);
+
 static NTSTATUS wg_parser_get_stream_count(void *args)
 {
     struct wg_parser_get_stream_count_params *params = args;
@@ -1532,6 +1534,8 @@ static void init_gstreamer_once(void)
         g_error_free(err);
         return;
     }
+
+    gst_init_static_plugins();
 
     GST_DEBUG_CATEGORY_INIT(wine, "WINE", GST_DEBUG_FG_RED, "Wine GStreamer support");
 
