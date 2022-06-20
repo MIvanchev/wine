@@ -1596,12 +1596,14 @@ then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access_mask,
         [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]],
                                             [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
-                           [ALSA_LIBS="$(pkg-config --libs --static alsa)"],
+                           [ALSA_LIBS="$(pkg-config --libs --static alsa) -lrt"],
                            [ALSA_LIBS=""])],
         [ALSA_LIBS=""],
-        [$(pkg-config --libs --static alsa)])
+        [$(pkg-config --libs --static alsa) -lrt])
 fi
 test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
+WINE_NOTICE_WITH(alsa,[test "x$ALSA_LIBS" = "x"],
+                 [ALSA ${notice_platform}development files not found, ALSA won't be supported.])
 
 dnl **** Check for OSSv4 ****
 if test "x$with_oss" != xno
@@ -1701,13 +1703,13 @@ WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_capi20_capi20_register" != xyes],
 dnl **** Check for cups ****
 if test "x$with_cups" != "xno"
 then
-    WINE_PACKAGE_FLAGS(CUPS,[cups],[-lcups],
+    WINE_PACKAGE_FLAGS(CUPS,[cups],,
                        [`${CUPS_CONFIG:-cups-config} --cflags 2>/dev/null`],
-                       [`${CUPS_CONFIG:-cups-config} --libs 2>/dev/null`],
+                       [`${CUPS_CONFIG:-cups-config} --libs --static 2>/dev/null`],
                        [AC_CHECK_HEADERS(cups/cups.h cups/ppd.h)
                         if test "$ac_cv_header_cups_cups_h" = "yes"
                         then
-                            WINE_CHECK_LIB(cups,cupsGetDefault)
+                            WINE_CHECK_LIB(cups,cupsGetDefault,,,[$CUPS_LIBS])
                         else
                             CUPS_CFLAGS=""
                             CUPS_LIBS=""
