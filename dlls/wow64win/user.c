@@ -726,6 +726,11 @@ NTSTATUS WINAPI wow64_NtUserDeleteMenu( UINT *args )
     return NtUserDeleteMenu( menu, id, flags );
 }
 
+NTSTATUS WINAPI wow64_NtUserEndMenu( UINT *args )
+{
+    return NtUserEndMenu();
+}
+
 NTSTATUS WINAPI wow64_NtUserGetMenuItemRect( UINT *args )
 {
     HWND hwnd = get_handle( &args );
@@ -734,6 +739,16 @@ NTSTATUS WINAPI wow64_NtUserGetMenuItemRect( UINT *args )
     RECT *rect = get_ptr( &args );
 
     return NtUserGetMenuItemRect( hwnd, handle, item, rect );
+}
+
+NTSTATUS WINAPI wow64_NtUserMenuItemFromPoint( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    HMENU handle = get_handle( &args );
+    int x = get_ulong( &args );
+    int y = get_ulong( &args );
+
+    return NtUserMenuItemFromPoint( hwnd, handle, x, y );
 }
 
 NTSTATUS WINAPI wow64_NtUserSetMenuContextHelpId( UINT *args )
@@ -827,4 +842,19 @@ NTSTATUS WINAPI wow64_NtUserRemoveMenu( UINT *args )
     UINT flags = get_ulong( &args );
 
     return NtUserRemoveMenu( handle, id, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserLockWindowUpdate( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserLockWindowUpdate( hwnd );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetTitleBarInfo( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    TITLEBARINFO *info = get_ptr( &args );
+
+    return NtUserGetTitleBarInfo( hwnd, info );
 }

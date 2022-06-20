@@ -101,6 +101,7 @@
     SYSCALL_ENTRY( NtUserCreateWindowStation ) \
     SYSCALL_ENTRY( NtUserDeleteMenu ) \
     SYSCALL_ENTRY( NtUserDestroyAcceleratorTable ) \
+    SYSCALL_ENTRY( NtUserEndMenu ) \
     SYSCALL_ENTRY( NtUserFindExistingCursorIcon ) \
     SYSCALL_ENTRY( NtUserFindWindowEx ) \
     SYSCALL_ENTRY( NtUserGetAncestor ) \
@@ -133,10 +134,13 @@
     SYSCALL_ENTRY( NtUserGetProp ) \
     SYSCALL_ENTRY( NtUserGetSystemDpiForProcess ) \
     SYSCALL_ENTRY( NtUserGetThreadDesktop ) \
+    SYSCALL_ENTRY( NtUserGetTitleBarInfo ) \
     SYSCALL_ENTRY( NtUserGetWindowRgnEx ) \
     SYSCALL_ENTRY( NtUserInitializeClientPfnArrays ) \
     SYSCALL_ENTRY( NtUserInternalGetWindowText ) \
     SYSCALL_ENTRY( NtUserKillTimer ) \
+    SYSCALL_ENTRY( NtUserLockWindowUpdate ) \
+    SYSCALL_ENTRY( NtUserMenuItemFromPoint ) \
     SYSCALL_ENTRY( NtUserNotifyWinEvent ) \
     SYSCALL_ENTRY( NtUserOpenDesktop ) \
     SYSCALL_ENTRY( NtUserOpenInputDesktop ) \

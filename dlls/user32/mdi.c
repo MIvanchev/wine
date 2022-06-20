@@ -859,7 +859,7 @@ static BOOL MDI_AugmentFrameMenu( HWND frame, HWND hChild )
         hIcon = (HICON)GetClassLongPtrW(hChild, GCLP_HICON);
     if (!hIcon)
         hIcon = LoadImageW(0, (LPWSTR)IDI_WINLOGO, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                           GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+                           GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR | LR_SHARED);
     if (hIcon)
     {
       HDC hMemDC;
@@ -1822,11 +1822,11 @@ void WINAPI ScrollChildren(HWND hWnd, UINT uMsg, WPARAM wParam,
     SetScrollPos(hWnd, (uMsg == WM_VSCROLL)?SB_VERT:SB_HORZ , newPos, TRUE);
 
     if( uMsg == WM_VSCROLL )
-	ScrollWindowEx(hWnd ,0 ,curPos - newPos, NULL, NULL, 0, NULL,
-			SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+	NtUserScrollWindowEx( hWnd ,0 ,curPos - newPos, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
     else
-	ScrollWindowEx(hWnd ,curPos - newPos, 0, NULL, NULL, 0, NULL,
-			SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
+	NtUserScrollWindowEx( hWnd ,curPos - newPos, 0, NULL, NULL, 0, NULL,
+                              SW_INVALIDATE | SW_ERASE | SW_SCROLLCHILDREN );
 done:
     SetThreadDpiAwarenessContext( context );
 }

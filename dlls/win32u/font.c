@@ -4478,26 +4478,35 @@ UINT WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags )
 /***********************************************************************
  *           NtGdiHfontCreate   (win32u.@)
  */
-HFONT WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *penumex, ULONG size, ULONG type,
+HFONT WINAPI NtGdiHfontCreate( const void *logfont, ULONG size, ULONG type,
                                ULONG flags, void *data )
 {
     HFONT hFont;
     FONTOBJ *fontPtr;
     const LOGFONTW *plf;
 
-    if (!penumex) return 0;
+    if (!logfont) return 0;
 
-    if (penumex->elfEnumLogfontEx.elfFullName[0] ||
-        penumex->elfEnumLogfontEx.elfStyle[0] ||
-        penumex->elfEnumLogfontEx.elfScript[0])
+    if (size == sizeof(ENUMLOGFONTEXDVW) || size == sizeof(ENUMLOGFONTEXW))
     {
-        FIXME("some fields ignored. fullname=%s, style=%s, script=%s\n",
-            debugstr_w(penumex->elfEnumLogfontEx.elfFullName),
-            debugstr_w(penumex->elfEnumLogfontEx.elfStyle),
-            debugstr_w(penumex->elfEnumLogfontEx.elfScript));
-    }
+        const ENUMLOGFONTEXW *lfex = logfont;
 
-    plf = &penumex->elfEnumLogfontEx.elfLogFont;
+        if (lfex->elfFullName[0] || lfex->elfStyle[0] || lfex->elfScript[0])
+        {
+            FIXME( "some fields ignored. fullname=%s, style=%s, script=%s\n",
+                   debugstr_w( lfex->elfFullName ), debugstr_w( lfex->elfStyle ),
+                   debugstr_w( lfex->elfScript ));
+        }
+
+        plf = &lfex->elfLogFont;
+    }
+    else if (size != sizeof(LOGFONTW))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    else plf = logfont;
+
     if (!(fontPtr = malloc( sizeof(*fontPtr) ))) return 0;
 
     fontPtr->logfont = *plf;
@@ -6562,5 +6571,27 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
         info->rsb = width_to_LP( dc, info->rsb );
     }
     release_dc_ptr(dc);
+    return ret;
+}
+
+/***********************************************************************
+ *           DrawTextW    (win32u.so)
+ */
+INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
+{
+    struct draw_text_params *params;
+    ULONG ret_len, size;
+    void *ret_ptr;
+    int ret;
+
+    if (count == -1) count = wcslen( str );
+    size = FIELD_OFFSET( struct draw_text_params, str[count] );
+    if (!(params = malloc( size ))) return 0;
+    params->hdc = hdc;
+    params->rect = rect;
+    params->flags = flags;
+    if (count) memcpy( params->str, str, count * sizeof(WCHAR) );
+    ret = KeUserModeCallback( NtUserDrawText, params, size, &ret_ptr, &ret_len );
+    free( params );
     return ret;
 }

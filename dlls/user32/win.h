@@ -48,20 +48,15 @@ extern HWND *WIN_ListChildren( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void MDI_CalcDefaultChildPos( HWND hwndClient, INT total, LPPOINT lpPos, INT delta, UINT *id ) DECLSPEC_HIDDEN;
 extern HDESK open_winstation_desktop( HWINSTA hwinsta, LPCWSTR name, DWORD flags, BOOL inherit, ACCESS_MASK access ) DECLSPEC_HIDDEN;
 
-/* user lock */
-extern void USER_Lock(void) DECLSPEC_HIDDEN;
-extern void USER_Unlock(void) DECLSPEC_HIDDEN;
-
 /* to release pointers retrieved by WIN_GetPtr */
 static inline void WIN_ReleasePtr( WND *ptr )
 {
-    USER_Unlock();
+    release_user_handle_ptr( ptr );
 }
 
 extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
 
 extern void WINPOS_ActivateOtherWindow( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam ) DECLSPEC_HIDDEN;
 
 extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern UINT get_win_monitor_dpi( HWND hwnd ) DECLSPEC_HIDDEN;

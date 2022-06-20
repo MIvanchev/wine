@@ -1346,7 +1346,7 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
         else if (msg->message == WM_KEYUP)
         {
             /* Handle VK_APPS key by posting a WM_CONTEXTMENU message */
-            if (msg->wParam == VK_APPS && user_callbacks && !user_callbacks->is_menu_active())
+            if (msg->wParam == VK_APPS && !is_menu_active())
                 NtUserPostMessage( msg->hwnd, WM_CONTEXTMENU, (WPARAM)msg->hwnd, -1 );
         }
     }
@@ -1420,7 +1420,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     }
 
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
-    set_thread_dpi_awareness_context( get_window_dpi_awareness_context( msg->hwnd ));
+    SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( msg->hwnd ));
 
     /* FIXME: is this really the right place for this hook? */
     event.message = msg->message;
@@ -1599,7 +1599,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     get_user_thread_info()->msg_source.originId   = msg_data->source.origin;
 
     /* hardware messages are always in physical coords */
-    context = set_thread_dpi_awareness_context( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
         ret = user_callbacks && user_callbacks->process_rawinput_message( msg, hw_id, msg_data );
@@ -1609,7 +1609,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
         ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
     else
         ERR( "unknown message type %x\n", msg->message );
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return ret;
 }
 
@@ -2890,6 +2890,8 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
 {
     switch (type)
     {
+    case NtUserPopupMenuWndProc:
+        return popup_menu_window_proc( hwnd, msg, wparam, lparam );
     case NtUserDesktopWindowProc:
         return desktop_window_proc( hwnd, msg, wparam, lparam );
     case NtUserDefWindowProc:

@@ -214,8 +214,12 @@ struct unix_funcs
     BOOL     (WINAPI *pNtUserDestroyMenu)( HMENU handle );
     BOOL     (WINAPI *pNtUserDestroyWindow)( HWND hwnd );
     LRESULT  (WINAPI *pNtUserDispatchMessage)( const MSG *msg );
+    BOOL     (WINAPI *pNtUserDragDetect)( HWND hwnd, int x, int y );
+    BOOL     (WINAPI *pNtUserDrawCaptionTemp)( HWND hwnd, HDC hdc, const RECT *rect, HFONT font,
+                                               HICON icon, const WCHAR *str, UINT flags );
     BOOL     (WINAPI *pNtUserDrawIconEx)( HDC hdc, INT x0, INT y0, HICON icon, INT width,
                                           INT height, UINT istep, HBRUSH hbr, UINT flags );
+    DWORD    (WINAPI *pNtUserDrawMenuBarTemp)( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font );
     BOOL     (WINAPI *pNtUserEmptyClipboard)(void);
     BOOL     (WINAPI *pNtUserEnableMenuItem)( HMENU handle, UINT id, UINT flags );
     BOOL     (WINAPI *pNtUserEndDeferWindowPosEx)( HDWP hdwp, BOOL async );
@@ -239,15 +243,23 @@ struct unix_funcs
                                            UNICODE_STRING *res_name, DWORD *bpp, LONG unk );
     INT      (WINAPI *pNtUserGetKeyNameText)( LONG lparam, WCHAR *buffer, INT size );
     UINT     (WINAPI *pNtUserGetKeyboardLayoutList)( INT size, HKL *layouts );
+    BOOL     (WINAPI *pNtUserGetMenuBarInfo)( HWND hwnd, LONG id, LONG item, MENUBARINFO *info );
     BOOL     (WINAPI *pNtUserGetMessage)( MSG *msg, HWND hwnd, UINT first, UINT last );
     INT      (WINAPI *pNtUserGetPriorityClipboardFormat)( UINT *list, INT count );
     DWORD    (WINAPI *pNtUserGetQueueStatus)( UINT flags );
+    UINT     (WINAPI *pNtUserGetRawInputBuffer)( RAWINPUT *data, UINT *data_size, UINT header_size );
+    UINT     (WINAPI *pNtUserGetRawInputData)( HRAWINPUT rawinput, UINT command,
+                                               void *data, UINT *data_size, UINT header_size );
     HMENU    (WINAPI *pNtUserGetSystemMenu)( HWND hwnd, BOOL revert );
     BOOL     (WINAPI *pNtUserGetUpdateRect)( HWND hwnd, RECT *rect, BOOL erase );
     INT      (WINAPI *pNtUserGetUpdateRgn)( HWND hwnd, HRGN hrgn, BOOL erase );
     BOOL     (WINAPI *pNtUserGetUpdatedClipboardFormats)( UINT *formats, UINT size, UINT *out_size );
     BOOL     (WINAPI *pNtUserGetWindowPlacement)( HWND hwnd, WINDOWPLACEMENT *placement );
     BOOL     (WINAPI *pNtUserHideCaret)( HWND hwnd );
+    BOOL     (WINAPI *pNtUserHiliteMenuItem)( HWND hwnd, HMENU handle, UINT item, UINT hilite );
+    HICON    (WINAPI *pNtUserInternalGetWindowIcon)( HWND hwnd, UINT type );
+    BOOL     (WINAPI *pNtUserInvalidateRect)( HWND hwnd, const RECT *rect, BOOL erase );
+    BOOL     (WINAPI *pNtUserInvalidateRgn)( HWND hwnd, HRGN hrgn, BOOL erase );
     BOOL     (WINAPI *pNtUserIsClipboardFormatAvailable)( UINT format );
     UINT     (WINAPI *pNtUserMapVirtualKeyEx)( UINT code, UINT type, HKL layout );
     LRESULT  (WINAPI *pNtUserMessageCall)( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
@@ -268,6 +280,9 @@ struct unix_funcs
     INT      (WINAPI *pNtUserReleaseDC)( HWND hwnd, HDC hdc );
     BOOL     (WINAPI *pNtUserScrollDC)( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
                                         HRGN ret_update_rgn, RECT *update_rect );
+    INT      (WINAPI *pNtUserScrollWindowEx)( HWND hwnd, INT dx, INT dy, const RECT *rect,
+                                              const RECT *clip_rect, HRGN update_rgn,
+                                              RECT *update_rect, UINT flags );
     HPALETTE (WINAPI *pNtUserSelectPalette)( HDC hdc, HPALETTE hpal, WORD bkg );
     UINT     (WINAPI *pNtUserSendInput)( UINT count, INPUT *inputs, int size );
     HWND     (WINAPI *pNtUserSetActiveWindow)( HWND hwnd );
@@ -305,6 +320,8 @@ struct unix_funcs
     INT      (WINAPI *pNtUserToUnicodeEx)( UINT virt, UINT scan, const BYTE *state,
                                            WCHAR *str, int size, UINT flags, HKL layout );
     BOOL     (WINAPI *pNtUserTrackMouseEvent)( TRACKMOUSEEVENT *info );
+    BOOL     (WINAPI *pNtUserTrackPopupMenuEx)( HMENU handle, UINT flags, INT x, INT y, HWND hwnd,
+                                                TPMPARAMS *params );
     INT      (WINAPI *pNtUserTranslateAccelerator)( HWND hwnd, HACCEL accel, MSG *msg );
     BOOL     (WINAPI *pNtUserTranslateMessage)( const MSG *msg, UINT flags );
     BOOL     (WINAPI *pNtUserUnregisterClass)( UNICODE_STRING *name, HINSTANCE instance,
@@ -328,7 +345,6 @@ struct unix_funcs
     const struct vulkan_funcs * (CDECL *get_vulkan_driver)( UINT version );
     struct opengl_funcs * (CDECL *get_wgl_driver)( HDC hdc, UINT version );
     BOOL (CDECL *wine_send_input)( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
-    void (CDECL *set_user_driver)( const struct user_driver_funcs *funcs, UINT version );
 };
 
 /* clipboard.c */
@@ -361,7 +377,13 @@ extern void register_window_surface( struct window_surface *old,
 extern LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
                                     BOOL ansi ) DECLSPEC_HIDDEN;
 extern LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern BOOL draw_frame_caption( HDC dc, LPRECT r, UINT uFlags ) DECLSPEC_HIDDEN;
+extern BOOL draw_frame_menu( HDC dc, RECT *r, UINT flags ) DECLSPEC_HIDDEN;
+extern BOOL draw_nc_sys_button( HWND hwnd, HDC hdc, BOOL down ) DECLSPEC_HIDDEN;
+extern BOOL draw_rect_edge( HDC hdc, RECT *rc, UINT uType, UINT uFlags, UINT width ) DECLSPEC_HIDDEN;
 extern void fill_rect( HDC dc, const RECT *rect, HBRUSH hbrush ) DECLSPEC_HIDDEN;
+extern void get_sys_popup_pos( HWND hwnd, RECT *rect ) DECLSPEC_HIDDEN;
+extern LRESULT handle_nc_hit_test( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 
 /* hook.c */
 extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
@@ -387,10 +409,20 @@ extern void update_mouse_tracking_info( HWND hwnd ) DECLSPEC_HIDDEN;
 /* menu.c */
 extern HMENU create_menu( BOOL is_popup ) DECLSPEC_HIDDEN;
 extern BOOL draw_menu_bar( HWND hwnd ) DECLSPEC_HIDDEN;
+extern UINT draw_nc_menu_bar( HDC hdc, RECT *rect, HWND hwnd ) DECLSPEC_HIDDEN;
+extern void end_menu( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HMENU get_menu( HWND hwnd ) DECLSPEC_HIDDEN;
+extern UINT get_menu_bar_height( HWND hwnd, UINT width, INT org_x, INT org_y ) DECLSPEC_HIDDEN;
 extern BOOL get_menu_info( HMENU handle, MENUINFO *info ) DECLSPEC_HIDDEN;
 extern INT get_menu_item_count( HMENU handle ) DECLSPEC_HIDDEN;
+extern UINT get_menu_state( HMENU handle, UINT item_id, UINT flags ) DECLSPEC_HIDDEN;
+extern BOOL is_menu( HMENU handle ) DECLSPEC_HIDDEN;
+extern HWND is_menu_active(void) DECLSPEC_HIDDEN;
+extern LRESULT popup_menu_window_proc( HWND hwnd, UINT message, WPARAM wparam,
+                                       LPARAM lparam ) DECLSPEC_HIDDEN;
 extern BOOL set_window_menu( HWND hwnd, HMENU handle ) DECLSPEC_HIDDEN;
+extern void track_keyboard_menu_bar( HWND hwnd, UINT wparam, WCHAR ch ) DECLSPEC_HIDDEN;
+extern void track_mouse_menu_bar( HWND hwnd, INT ht, int x, int y ) DECLSPEC_HIDDEN;
 
 /* message.c */
 extern LRESULT dispatch_message( const MSG *msg, BOOL ansi ) DECLSPEC_HIDDEN;
@@ -407,12 +439,18 @@ extern LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
 
 /* sysparams.c */
 extern BOOL enable_thunk_lock DECLSPEC_HIDDEN;
+extern DWORD process_layout DECLSPEC_HIDDEN;
+extern HBRUSH get_55aa_brush(void) DECLSPEC_HIDDEN;
+extern DWORD get_dialog_base_units(void) DECLSPEC_HIDDEN;
+extern LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, LONG *height ) DECLSPEC_HIDDEN;
 extern RECT get_display_rect( const WCHAR *display ) DECLSPEC_HIDDEN;
 extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info ) DECLSPEC_HIDDEN;
 extern UINT get_win_monitor_dpi( HWND hwnd ) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect( UINT dpi ) DECLSPEC_HIDDEN;
+extern COLORREF get_sys_color( int index ) DECLSPEC_HIDDEN;
 extern HBRUSH get_sys_color_brush( unsigned int index ) DECLSPEC_HIDDEN;
+extern HPEN get_sys_color_pen( unsigned int index ) DECLSPEC_HIDDEN;
 extern UINT get_system_dpi(void) DECLSPEC_HIDDEN;
 extern int get_system_metrics( int index ) DECLSPEC_HIDDEN;
 extern UINT get_thread_dpi(void) DECLSPEC_HIDDEN;
@@ -421,13 +459,13 @@ extern RECT get_virtual_screen_rect( UINT dpi ) DECLSPEC_HIDDEN;
 extern BOOL is_exiting_thread( DWORD tid ) DECLSPEC_HIDDEN;
 extern POINT map_dpi_point( POINT pt, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
 extern RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
+extern BOOL message_beep( UINT i ) DECLSPEC_HIDDEN;
 extern POINT point_phys_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern POINT point_thread_to_win_dpi( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
 extern HMONITOR monitor_from_window( HWND hwnd, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
-extern DPI_AWARENESS_CONTEXT set_thread_dpi_awareness_context( DPI_AWARENESS_CONTEXT context ) DECLSPEC_HIDDEN;
 extern void user_lock(void) DECLSPEC_HIDDEN;
 extern void user_unlock(void) DECLSPEC_HIDDEN;
 extern void user_check_not_lock(void) DECLSPEC_HIDDEN;
@@ -445,15 +483,20 @@ extern HWND get_parent( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND get_hwnd_message_parent(void) DECLSPEC_HIDDEN;
 extern DPI_AWARENESS_CONTEXT get_window_dpi_awareness_context( HWND hwnd ) DECLSPEC_HIDDEN;
 extern MINMAXINFO get_min_max_info( HWND hwnd ) DECLSPEC_HIDDEN;
+extern DWORD get_window_context_help_id( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND get_window_relative( HWND hwnd, UINT rel ) DECLSPEC_HIDDEN;
 extern DWORD get_window_thread( HWND hwnd, DWORD *process ) DECLSPEC_HIDDEN;
 extern HWND is_current_process_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND is_current_thread_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL is_desktop_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL is_iconic( HWND hwnd ) DECLSPEC_HIDDEN;
+extern BOOL is_window_drawable( HWND hwnd, BOOL icon ) DECLSPEC_HIDDEN;
 extern BOOL is_window_enabled( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL is_window_unicode( HWND hwnd ) DECLSPEC_HIDDEN;
+extern BOOL is_window_visible( HWND hwnd ) DECLSPEC_HIDDEN;
+extern BOOL is_zoomed( HWND hwnd ) DECLSPEC_HIDDEN;
 extern DWORD get_window_long( HWND hwnd, INT offset ) DECLSPEC_HIDDEN;
+extern ULONG_PTR get_window_long_ptr( HWND hwnd, INT offset, BOOL ansi ) DECLSPEC_HIDDEN;
 extern BOOL get_window_rect( HWND hwnd, RECT *rect, UINT dpi ) DECLSPEC_HIDDEN;
 enum coords_relative;
 extern BOOL get_window_rects( HWND hwnd, enum coords_relative relative, RECT *window_rect,

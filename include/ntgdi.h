@@ -109,10 +109,13 @@ enum
     NtGdiSetMapMode = 8,
     /* not compatible with Windows */
     NtGdiSetBkColor = 100,
+    NtGdiSetBkMode,
     NtGdiSetTextColor,
     NtGdiSetDCBrushColor,
     NtGdiSetDCPenColor,
     NtGdiSetGraphicsMode,
+    NtGdiSetROP2,
+    NtGdiSetTextAlign,
 };
 
 /* NtGdiGetDCDword parameter, not compatible with Windows */
@@ -369,7 +372,7 @@ BOOL     WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags
 BOOL     WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform );
 BOOL     WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
                                    void *grad_array, ULONG ngrad, ULONG mode );
-HFONT    WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *enumex, ULONG unk2, ULONG unk3,
+HFONT    WINAPI NtGdiHfontCreate( const void *logfont, ULONG unk2, ULONG unk3,
                                   ULONG unk4, void *data );
 DWORD    WINAPI NtGdiInitSpool(void);
 INT      WINAPI NtGdiIntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom );

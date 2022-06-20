@@ -461,7 +461,7 @@ HWND WINAPI NtUserSetParent( HWND hwnd, HWND parent )
     if (!ret) return 0;
 
     get_window_rects( hwnd, COORDS_SCREEN, &new_screen_rect, NULL, 0 );
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     user_driver->pSetParent( full_handle, parent, old_parent );
 
@@ -478,7 +478,7 @@ HWND WINAPI NtUserSetParent( HWND hwnd, HWND parent )
 
     if (was_visible) NtUserShowWindow( hwnd, SW_SHOW );
 
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return old_parent;
 }
 
@@ -737,7 +737,7 @@ BOOL is_child( HWND parent, HWND child )
 }
 
 /* see IsWindowVisible */
-static BOOL is_window_visible( HWND hwnd )
+BOOL is_window_visible( HWND hwnd )
 {
     HWND *list;
     BOOL retval = TRUE;
@@ -762,7 +762,7 @@ static BOOL is_window_visible( HWND hwnd )
  * minimized, and it is itself not minimized unless we are
  * trying to draw its default class icon.
  */
-static BOOL is_window_drawable( HWND hwnd, BOOL icon )
+BOOL is_window_drawable( HWND hwnd, BOOL icon )
 {
     HWND *list;
     BOOL retval = TRUE;
@@ -965,7 +965,7 @@ BOOL is_iconic( HWND hwnd )
     return (get_window_long( hwnd, GWL_STYLE ) & WS_MINIMIZE) != 0;
 }
 
-static BOOL is_zoomed( HWND hwnd )
+BOOL is_zoomed( HWND hwnd )
 {
     return (get_window_long( hwnd, GWL_STYLE ) & WS_MAXIMIZE) != 0;
 }
@@ -1097,7 +1097,7 @@ DWORD get_window_long( HWND hwnd, INT offset )
 }
 
 /* see GetWindowLongPtr */
-static ULONG_PTR get_window_long_ptr( HWND hwnd, INT offset, BOOL ansi )
+ULONG_PTR get_window_long_ptr( HWND hwnd, INT offset, BOOL ansi )
 {
     return get_window_long_size( hwnd, offset, sizeof(LONG_PTR), ansi );
 }
@@ -3405,7 +3405,7 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         else if (winpos->cy > 32767) winpos->cy = 32767;
     }
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( winpos->hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( winpos->hwnd ));
 
     if (!calc_winpos( winpos, &old_window_rect, &old_client_rect,
                       &new_window_rect, &new_client_rect )) goto done;
@@ -3480,7 +3480,7 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
     }
     ret = TRUE;
 done:
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return ret;
 }
 
@@ -3816,7 +3816,7 @@ MINMAXINFO get_min_max_info( HWND hwnd )
     RECT rc;
     WND *win;
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     /* Compute default values */
 
@@ -3887,7 +3887,7 @@ MINMAXINFO get_min_max_info( HWND hwnd )
     minmax.ptMaxTrackSize.x = max( minmax.ptMaxTrackSize.x, minmax.ptMinTrackSize.x );
     minmax.ptMaxTrackSize.y = max( minmax.ptMaxTrackSize.y, minmax.ptMinTrackSize.y );
 
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return minmax;
 }
 
@@ -4198,13 +4198,13 @@ void update_window_state( HWND hwnd )
         return;
     }
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
     get_window_rects( hwnd, COORDS_PARENT, &window_rect, &client_rect, get_thread_dpi() );
     valid_rects[0] = valid_rects[1] = client_rect;
     apply_window_pos( hwnd, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE |
                       SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW,
                       &window_rect, &client_rect, valid_rects );
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
 }
 
 /***********************************************************************
@@ -4225,7 +4225,7 @@ static BOOL show_window( HWND hwnd, INT cmd )
 
     TRACE( "hwnd=%p, cmd=%d, was_visible %d\n", hwnd, cmd, was_visible );
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     switch(cmd)
     {
@@ -4377,7 +4377,7 @@ static BOOL show_window( HWND hwnd, INT cmd )
     }
 
 done:
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return was_visible;
 }
 
@@ -4524,7 +4524,7 @@ BOOL WINAPI NtUserFlashWindowEx( FLASHWINFO *info )
 }
 
 /* see GetWindowContextHelpId */
-static DWORD get_window_context_help_id( HWND hwnd )
+DWORD get_window_context_help_id( HWND hwnd )
 {
     DWORD retval;
     WND *win = get_win_ptr( hwnd );
@@ -4537,6 +4537,69 @@ static DWORD get_window_context_help_id( HWND hwnd )
     retval = win->helpContext;
     release_win_ptr( win );
     return retval;
+}
+
+/* see SetWindowContextHelpId */
+static BOOL set_window_context_help_id( HWND hwnd, DWORD id )
+{
+    WND *win = get_win_ptr( hwnd );
+    if (!win || win == WND_DESKTOP) return FALSE;
+    if (win == WND_OTHER_PROCESS)
+    {
+        if (is_window( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
+        return FALSE;
+    }
+    win->helpContext = id;
+    release_win_ptr( win );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           NtUserInternalGetWindowIcon   (win32u.@)
+ */
+HICON WINAPI NtUserInternalGetWindowIcon( HWND hwnd, UINT type )
+{
+    WND *win = get_win_ptr( hwnd );
+    HICON ret;
+
+    TRACE( "hwnd %p, type %#x\n", hwnd, type );
+
+    if (!win)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        if (is_window( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
+        return 0;
+    }
+
+    switch (type)
+    {
+        case ICON_BIG:
+            ret = win->hIcon;
+            if (!ret) ret = (HICON)get_class_long_ptr( hwnd, GCLP_HICON, FALSE );
+            break;
+
+        case ICON_SMALL:
+        case ICON_SMALL2:
+            ret = win->hIconSmall ? win->hIconSmall : win->hIconSmall2;
+            if (!ret) ret = (HICON)get_class_long_ptr( hwnd, GCLP_HICONSM, FALSE );
+            if (!ret) ret = (HICON)get_class_long_ptr( hwnd, GCLP_HICON, FALSE );
+            break;
+
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            release_win_ptr( win );
+            return 0;
+    }
+    release_win_ptr( win );
+
+    if (!ret) ret = LoadImageW( 0, (const WCHAR *)IDI_APPLICATION, IMAGE_ICON,
+                                0, 0, LR_SHARED | LR_DEFAULTSIZE );
+
+    return CopyImage( ret, IMAGE_ICON, 0, 0, 0 );
 }
 
 /***********************************************************************
@@ -4696,8 +4759,7 @@ BOOL WINAPI NtUserDestroyWindow( HWND hwnd )
 
     if (call_hooks( WH_CBT, HCBT_DESTROYWND, (WPARAM)hwnd, 0, TRUE )) return FALSE;
 
-    if (user_callbacks && user_callbacks->is_menu_active() == hwnd)
-        user_callbacks->pEndMenu();
+    if (is_menu_active() == hwnd) NtUserEndMenu();
 
     is_child = (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD) != 0;
 
@@ -5063,6 +5125,7 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
             (class_name->Length != sizeof(messageW) ||
              wcsnicmp( class_name->Buffer, messageW, ARRAYSIZE(messageW) )))
         {
+            if (process_layout & LAYOUT_RTL) cs.dwExStyle |= WS_EX_LAYOUTRTL;
             parent = get_desktop_window();
         }
     }
@@ -5163,7 +5226,7 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
 
     if (parent) map_dpi_create_struct( &cs, thread_dpi, win_dpi );
 
-    context = set_thread_dpi_awareness_context( get_window_dpi_awareness_context( hwnd ));
+    context = SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( hwnd ));
 
     /* send the WM_GETMINMAXINFO message and fix the size if needed */
 
@@ -5261,7 +5324,7 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
     send_parent_notify( hwnd, WM_CREATE );
     if (!is_window( hwnd ))
     {
-        set_thread_dpi_awareness_context( context );
+        SetThreadDpiAwarenessContext( context );
         return 0;
     }
 
@@ -5290,12 +5353,12 @@ HWND WINAPI NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
         call_hooks( WH_SHELL, HSHELL_WINDOWCREATED, (WPARAM)hwnd, 0, TRUE );
 
     TRACE( "created window %p\n", hwnd );
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return hwnd;
 
 failed:
     destroy_window( hwnd );
-    set_thread_dpi_awareness_context( context );
+    SetThreadDpiAwarenessContext( context );
     return 0;
 }
 
@@ -5339,6 +5402,9 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
     case NtUserCallHwnd_IsWindowVisible:
         return is_window_visible( hwnd );
 
+    case NtUserCallHwnd_SetForegroundWindow:
+        return set_foreground_window( hwnd, FALSE );
+
     default:
         FIXME( "invalid code %u\n", code );
         return 0;
@@ -5375,10 +5441,6 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
 
     case NtUserCallHwndParam_GetClientRect:
         return get_client_rect( hwnd, (RECT *)param );
-
-    case NtUserCallHwndParam_GetMinMaxInfo:
-        *(MINMAXINFO *)param = get_min_max_info( hwnd );
-        return 0;
 
     case NtUserCallHwndParam_GetWindowInfo:
         return get_window_info( hwnd, (WINDOWINFO *)param );
@@ -5429,8 +5491,8 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
     case NtUserCallHwndParam_ScreenToClient:
         return screen_to_client( hwnd, (POINT *)param );
 
-    case NtUserCallHwndParam_SetForegroundWindow:
-        return set_foreground_window( hwnd, param );
+    case NtUserCallHwndParam_SetWindowContextHelpId:
+        return set_window_context_help_id( hwnd, param );
 
     case NtUserCallHwndParam_SetWindowPixelFormat:
         return set_window_pixel_format( hwnd, param );
@@ -5441,9 +5503,6 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
     /* temporary exports */
     case NtUserIsWindowDrawable:
         return is_window_drawable( hwnd, param );
-
-    case NtUserSetCaptureWindow:
-        return set_capture_window( hwnd, param, NULL );
 
     case NtUserSetWindowStyle:
         {
