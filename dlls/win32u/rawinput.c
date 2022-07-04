@@ -24,8 +24,14 @@
 #endif
 
 #include <stdbool.h>
+#include <pthread.h>
+
 #include "win32u_private.h"
 #include "ntuser_private.h"
+#define WIN32_NO_STATUS
+#include "winioctl.h"
+#include "ddk/hidclass.h"
+#include "wine/hid.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -57,6 +63,15 @@ typedef struct
     } data;
 } RAWINPUT64;
 #endif
+
+static struct rawinput_thread_data *get_rawinput_thread_data(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct rawinput_thread_data *data = thread_info->rawinput;
+    if (data) return data;
+    data = thread_info->rawinput = calloc( 1, RAWINPUT_BUFFER_SIZE + sizeof(struct user_thread_info) );
+    return data;
+}
 
 static bool rawinput_from_hardware_message( RAWINPUT *rawinput, const struct hardware_msg_data *msg_data )
 {
@@ -179,6 +194,432 @@ static bool rawinput_from_hardware_message( RAWINPUT *rawinput, const struct har
     return true;
 }
 
+struct device
+{
+    WCHAR *path;
+    HANDLE file;
+    HANDLE handle;
+    RID_DEVICE_INFO info;
+    struct hid_preparsed_data *data;
+};
+
+static struct device *rawinput_devices;
+static unsigned int rawinput_devices_count, rawinput_devices_max;
+
+static pthread_mutex_t rawinput_devices_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool array_reserve( void **elements, unsigned int *capacity, unsigned int count, unsigned int size )
+{
+    unsigned int new_capacity, max_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return true;
+
+    max_capacity = ~(unsigned int)0 / size;
+    if (count > max_capacity)
+        return false;
+
+    new_capacity = max( 4, *capacity );
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = max_capacity;
+
+    if (!(new_elements = realloc( *elements, new_capacity * size )))
+        return false;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+
+    return true;
+}
+
+static struct device *add_device( HKEY key, DWORD type )
+{
+    static const WCHAR symbolic_linkW[] = {'S','y','m','b','o','l','i','c','L','i','n','k',0};
+    char value_buffer[4096];
+    KEY_VALUE_PARTIAL_INFORMATION *value = (KEY_VALUE_PARTIAL_INFORMATION *)value_buffer;
+    static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
+    static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
+    struct hid_preparsed_data *preparsed = NULL;
+    HID_COLLECTION_INFORMATION hid_info;
+    struct device *device = NULL;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    RID_DEVICE_INFO info;
+    IO_STATUS_BLOCK io;
+    WCHAR *path, *pos;
+    NTSTATUS status;
+    unsigned int i;
+    UINT32 handle;
+    HANDLE file;
+
+    if (!query_reg_value( key, symbolic_linkW, value, sizeof(value_buffer) ))
+    {
+        ERR( "failed to get symbolic link value\n" );
+        return NULL;
+    }
+
+    if (!(path = malloc( value->DataLength + sizeof(WCHAR) )))
+        return NULL;
+    memcpy( path, value->Data, value->DataLength );
+    path[value->DataLength / sizeof(WCHAR)] = 0;
+
+    /* upper case everything but the GUID */
+    for (pos = path; *pos && *pos != '{'; pos++) *pos = towupper( *pos );
+
+    /* path is in DOS format and begins with \\?\ prefix */
+    path[1] = '?';
+
+    RtlInitUnicodeString( &string, path );
+    InitializeObjectAttributes( &attr, &string, OBJ_CASE_INSENSITIVE, NULL, NULL );
+    if ((status = NtOpenFile( &file, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attr, &io,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT )))
+    {
+        ERR( "Failed to open device file %s, status %#x.\n", debugstr_w(path), status );
+        free( path );
+        return NULL;
+    }
+
+    path[1] = '\\';
+
+    status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io, IOCTL_HID_GET_WINE_RAWINPUT_HANDLE,
+                                    NULL, 0, &handle, sizeof(handle) );
+    if (status)
+    {
+        ERR( "Failed to get raw input handle, status %#x.\n", status );
+        goto fail;
+    }
+
+    memset( &info, 0, sizeof(info) );
+    info.cbSize = sizeof(info);
+    info.dwType = type;
+
+    switch (type)
+    {
+    case RIM_TYPEHID:
+        status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io,
+                                        IOCTL_HID_GET_COLLECTION_INFORMATION,
+                                        NULL, 0, &hid_info, sizeof(hid_info) );
+        if (status)
+        {
+            ERR( "Failed to get collection information, status %#x.\n", status );
+            goto fail;
+        }
+
+        info.hid.dwVendorId = hid_info.VendorID;
+        info.hid.dwProductId = hid_info.ProductID;
+        info.hid.dwVersionNumber = hid_info.VersionNumber;
+
+        if (!(preparsed = malloc( hid_info.DescriptorSize )))
+        {
+            ERR( "Failed to allocate memory.\n" );
+            goto fail;
+        }
+
+        status = NtDeviceIoControlFile( file, NULL, NULL, NULL, &io,
+                                        IOCTL_HID_GET_COLLECTION_DESCRIPTOR,
+                                        NULL, 0, preparsed, hid_info.DescriptorSize );
+        if (status)
+        {
+            ERR( "Failed to get collection descriptor, status %#x.\n", status );
+            goto fail;
+        }
+
+        info.hid.usUsagePage = preparsed->usage_page;
+        info.hid.usUsage = preparsed->usage;
+        break;
+
+    case RIM_TYPEMOUSE:
+        info.mouse = mouse_info;
+        break;
+
+    case RIM_TYPEKEYBOARD:
+        info.keyboard = keyboard_info;
+        break;
+    }
+
+    for (i = 0; i < rawinput_devices_count && !device; ++i)
+    {
+        if (rawinput_devices[i].handle == UlongToHandle(handle))
+            device = rawinput_devices + i;
+    }
+
+    if (device)
+    {
+        TRACE( "Updating device %#x / %s.\n", handle, debugstr_w(path) );
+        free( device->data );
+        NtClose( device->file );
+        free( device->path );
+    }
+    else if (array_reserve( (void **)&rawinput_devices, &rawinput_devices_max,
+                            rawinput_devices_count + 1, sizeof(*rawinput_devices) ))
+    {
+        device = &rawinput_devices[rawinput_devices_count++];
+        TRACE( "Adding device %#x / %s.\n", handle, debugstr_w(path) );
+    }
+    else
+    {
+        ERR( "Failed to allocate memory.\n" );
+        goto fail;
+    }
+
+    device->path = path;
+    device->file = file;
+    device->handle = ULongToHandle(handle);
+    device->info = info;
+    device->data = preparsed;
+
+    return device;
+
+fail:
+    free( preparsed );
+    NtClose( file );
+    free( path );
+    return NULL;
+}
+
+static const WCHAR device_classesW[] =
+{
+    '\\','R','e','g','i','s','t','r','y',
+    '\\','M','a','c','h','i','n','e',
+    '\\','S','y','s','t','e','m',
+    '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
+    '\\','C','o','n','t','r','o','l',
+    '\\','D','e','v','i','c','e','C','l','a','s','s','e','s','\\',0
+};
+static const WCHAR guid_devinterface_hidW[] =
+{
+    '{','4','d','1','e','5','5','b','2','-','f','1','6','f','-','1','1','c','f',
+    '-','8','8','c','b','-','0','0','1','1','1','1','0','0','0','0','3','0','}',0
+};
+static const WCHAR guid_devinterface_keyboardW[] =
+{
+    '{','8','8','4','b','9','6','c','3','-','5','6','e','f','-','1','1','d','1',
+    '-','b','c','8','c','-','0','0','a','0','c','9','1','4','0','5','d','d','}',0
+};
+static const WCHAR guid_devinterface_mouseW[] =
+{
+    '{','3','7','8','d','e','4','4','c','-','5','6','e','f','-','1','1','d','1',
+    '-','b','c','8','c','-','0','0','a','0','c','9','1','4','0','5','d','d','}',0
+};
+
+static void enumerate_devices( DWORD type, const WCHAR *class )
+{
+    WCHAR buffer[1024];
+    KEY_NODE_INFORMATION *subkey_info = (void *)buffer;
+    HKEY class_key, device_key, iface_key;
+    unsigned int i, j;
+    DWORD size;
+
+    wcscpy( buffer, device_classesW );
+    wcscat( buffer, class );
+    if (!(class_key = reg_open_key( NULL, buffer, wcslen( buffer ) * sizeof(WCHAR) )))
+        return;
+
+    for (i = 0; !NtEnumerateKey( class_key, i, KeyNodeInformation, buffer, sizeof(buffer), &size ); ++i)
+    {
+        if (!(device_key = reg_open_key( class_key, subkey_info->Name, subkey_info->NameLength )))
+        {
+            ERR( "failed to open %s\n", debugstr_wn(subkey_info->Name, subkey_info->NameLength / sizeof(WCHAR)) );
+            continue;
+        }
+
+        for (j = 0; !NtEnumerateKey( device_key, j, KeyNodeInformation, buffer, sizeof(buffer), &size ); ++j)
+        {
+            if (!(iface_key = reg_open_key( device_key, subkey_info->Name, subkey_info->NameLength )))
+            {
+                ERR( "failed to open %s\n", debugstr_wn(subkey_info->Name, subkey_info->NameLength / sizeof(WCHAR)) );
+                continue;
+            }
+
+            add_device( iface_key, type );
+            NtClose( iface_key );
+        }
+
+        NtClose( device_key );
+    }
+
+    NtClose( class_key );
+}
+
+static void rawinput_update_device_list(void)
+{
+    unsigned int i;
+
+    TRACE( "\n" );
+
+    pthread_mutex_lock( &rawinput_devices_mutex );
+
+    /* destroy previous list */
+    for (i = 0; i < rawinput_devices_count; ++i)
+    {
+        free( rawinput_devices[i].data );
+        NtClose( rawinput_devices[i].file );
+        free( rawinput_devices[i].path );
+    }
+    rawinput_devices_count = 0;
+
+    enumerate_devices( RIM_TYPEHID, guid_devinterface_hidW );
+    enumerate_devices( RIM_TYPEMOUSE, guid_devinterface_mouseW );
+    enumerate_devices( RIM_TYPEKEYBOARD, guid_devinterface_keyboardW );
+
+    pthread_mutex_unlock( &rawinput_devices_mutex );
+}
+
+static struct device *find_device_from_handle( HANDLE handle )
+{
+    unsigned int i;
+
+    for (i = 0; i < rawinput_devices_count; ++i)
+    {
+        if (rawinput_devices[i].handle == handle)
+            return rawinput_devices + i;
+    }
+
+    rawinput_update_device_list();
+
+    for (i = 0; i < rawinput_devices_count; ++i)
+    {
+        if (rawinput_devices[i].handle == handle)
+            return rawinput_devices + i;
+    }
+    return NULL;
+}
+
+BOOL rawinput_device_get_usages( HANDLE handle, USAGE *usage_page, USAGE *usage )
+{
+    struct device *device;
+
+    *usage_page = *usage = 0;
+
+    if (!(device = find_device_from_handle( handle ))) return FALSE;
+    if (device->info.dwType != RIM_TYPEHID) return FALSE;
+
+    *usage_page = device->info.hid.usUsagePage;
+    *usage = device->info.hid.usUsage;
+    return TRUE;
+}
+
+/**********************************************************************
+ *         NtUserGetRawInputDeviceList   (win32u.@)
+ */
+UINT WINAPI NtUserGetRawInputDeviceList( RAWINPUTDEVICELIST *devices, UINT *device_count, UINT size )
+{
+    static unsigned int last_check;
+    unsigned int i, ticks = NtGetTickCount();
+
+    TRACE("devices %p, device_count %p, size %u.\n", devices, device_count, size);
+
+    if (size != sizeof(*devices))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return ~0u;
+    }
+
+    if (!device_count)
+    {
+        SetLastError( ERROR_NOACCESS );
+        return ~0u;
+    }
+
+    if (ticks - last_check > 2000)
+    {
+        last_check = ticks;
+        rawinput_update_device_list();
+    }
+
+    if (!devices)
+    {
+        *device_count = rawinput_devices_count;
+        return 0;
+    }
+
+    if (*device_count < rawinput_devices_count)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        *device_count = rawinput_devices_count;
+        return ~0u;
+    }
+
+    for (i = 0; i < rawinput_devices_count; ++i)
+    {
+        devices[i].hDevice = rawinput_devices[i].handle;
+        devices[i].dwType = rawinput_devices[i].info.dwType;
+    }
+
+    return rawinput_devices_count;
+}
+
+/**********************************************************************
+ *         NtUserGetRawInputDeviceInfo   (win32u.@)
+ */
+UINT WINAPI NtUserGetRawInputDeviceInfo( HANDLE handle, UINT command, void *data, UINT *data_size )
+{
+    const struct hid_preparsed_data *preparsed;
+    struct device *device;
+    RID_DEVICE_INFO info;
+    DWORD len, data_len;
+
+    TRACE( "handle %p, command %#x, data %p, data_size %p.\n", handle, command, data, data_size );
+
+    if (!data_size)
+    {
+        SetLastError( ERROR_NOACCESS );
+        return ~0u;
+    }
+    if (!(device = find_device_from_handle( handle )))
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return ~0u;
+    }
+
+    data_len = *data_size;
+    switch (command)
+    {
+    case RIDI_DEVICENAME:
+        if ((len = wcslen( device->path ) + 1) <= data_len && data)
+            memcpy( data, device->path, len * sizeof(WCHAR) );
+        *data_size = len;
+        break;
+
+    case RIDI_DEVICEINFO:
+        if ((len = sizeof(info)) <= data_len && data)
+            memcpy( data, &device->info, len );
+        *data_size = len;
+        break;
+
+    case RIDI_PREPARSEDDATA:
+        if (!(preparsed = device->data))
+            len = 0;
+        else
+            len = preparsed->caps_size + FIELD_OFFSET(struct hid_preparsed_data, value_caps[0]) +
+                  preparsed->number_link_collection_nodes * sizeof(struct hid_collection_node);
+
+        if (preparsed && len <= data_len && data)
+            memcpy( data, preparsed, len );
+        *data_size = len;
+        break;
+
+    default:
+        FIXME( "command %#x not supported\n", command );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return ~0u;
+    }
+
+    if (!data)
+        return 0;
+
+    if (data_len < len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return ~0u;
+    }
+
+    return *data_size;
+}
+
 /**********************************************************************
  *         NtUserGetRawInputBuffer   (win32u.@)
  */
@@ -223,7 +664,7 @@ UINT WINAPI NtUserGetRawInputBuffer( RAWINPUT *data, UINT *data_size, UINT heade
         return 0;
     }
 
-    if (!user_callbacks || !(thread_data = user_callbacks->get_rawinput_thread_data())) return ~0u;
+    if (!(thread_data = get_rawinput_thread_data())) return ~0u;
     rawinput = thread_data->buffer;
 
     /* first RAWINPUT block in the buffer is used for WM_INPUT message data */
@@ -286,7 +727,7 @@ UINT WINAPI NtUserGetRawInputData( HRAWINPUT rawinput, UINT command, void *data,
     TRACE( "rawinput %p, command %#x, data %p, data_size %p, header_size %u.\n",
            rawinput, command, data, data_size, header_size );
 
-    if (!user_callbacks || !(thread_data = user_callbacks->get_rawinput_thread_data()))
+    if (!(thread_data = get_rawinput_thread_data()))
     {
         SetLastError( ERROR_OUTOFMEMORY );
         return ~0u;
@@ -333,4 +774,147 @@ UINT WINAPI NtUserGetRawInputData( HRAWINPUT rawinput, UINT command, void *data,
     }
     memcpy( data, thread_data->buffer, size );
     return size;
+}
+
+BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data )
+{
+    struct rawinput_thread_data *thread_data;
+
+    if (!(thread_data = get_rawinput_thread_data()))
+        return FALSE;
+
+    if (msg->message == WM_INPUT_DEVICE_CHANGE)
+    {
+        rawinput_update_device_list();
+    }
+    else
+    {
+        thread_data->buffer->header.dwSize = RAWINPUT_BUFFER_SIZE;
+        if (!rawinput_from_hardware_message( thread_data->buffer, msg_data )) return FALSE;
+        thread_data->hw_id = hw_id;
+        msg->lParam = (LPARAM)hw_id;
+    }
+
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+    return TRUE;
+}
+
+/**********************************************************************
+ *         NtUserRegisterRawInputDevices   (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size )
+{
+    struct rawinput_device *server_devices;
+    BOOL ret;
+    UINT i;
+
+    TRACE( "devices %p, device_count %u, size %u.\n", devices, device_count, size );
+
+    if (size != sizeof(*devices))
+    {
+        WARN( "Invalid structure size %u.\n", size );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    for (i = 0; i < device_count; ++i)
+    {
+        if ((devices[i].dwFlags & RIDEV_INPUTSINK) && !devices[i].hwndTarget)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+
+        if ((devices[i].dwFlags & RIDEV_REMOVE) && devices[i].hwndTarget)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+    }
+
+    if (!(server_devices = malloc( device_count * sizeof(*server_devices) ))) return FALSE;
+
+    for (i = 0; i < device_count; ++i)
+    {
+        TRACE( "device %u: page %#x, usage %#x, flags %#x, target %p.\n",
+               i, devices[i].usUsagePage, devices[i].usUsage,
+               devices[i].dwFlags, devices[i].hwndTarget );
+        if (devices[i].dwFlags & ~(RIDEV_REMOVE|RIDEV_NOLEGACY|RIDEV_INPUTSINK|RIDEV_DEVNOTIFY))
+            FIXME( "Unhandled flags %#x for device %u.\n", devices[i].dwFlags, i );
+
+        server_devices[i].usage_page = devices[i].usUsagePage;
+        server_devices[i].usage = devices[i].usUsage;
+        server_devices[i].flags = devices[i].dwFlags;
+        server_devices[i].target = wine_server_user_handle( devices[i].hwndTarget );
+    }
+
+    SERVER_START_REQ( update_rawinput_devices )
+    {
+        wine_server_add_data( req, server_devices, device_count * sizeof(*server_devices) );
+        ret = !wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    free( server_devices );
+
+    return ret;
+}
+
+static int compare_raw_input_devices( const void *ap, const void *bp )
+{
+    const RAWINPUTDEVICE a = *(const RAWINPUTDEVICE *)ap;
+    const RAWINPUTDEVICE b = *(const RAWINPUTDEVICE *)bp;
+
+    if (a.usUsagePage != b.usUsagePage) return a.usUsagePage - b.usUsagePage;
+    if (a.usUsage != b.usUsage) return a.usUsage - b.usUsage;
+    return 0;
+}
+
+/**********************************************************************
+ *         NtUserGetRegisteredRawInputDevices   (win32u.@)
+ */
+UINT WINAPI NtUserGetRegisteredRawInputDevices( RAWINPUTDEVICE *devices, UINT *device_count, UINT size )
+{
+    struct rawinput_device *buffer = NULL;
+    unsigned int i, status, buffer_size;
+
+    TRACE("devices %p, device_count %p, size %u\n", devices, device_count, size);
+
+    if (size != sizeof(RAWINPUTDEVICE) || !device_count || (devices && !*device_count))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return ~0u;
+    }
+
+    buffer_size = *device_count * sizeof(*buffer);
+    if (devices && !(buffer = malloc( buffer_size )))
+        return ~0u;
+
+    SERVER_START_REQ(get_rawinput_devices)
+    {
+        if (buffer) wine_server_set_reply( req, buffer, buffer_size );
+        status = wine_server_call_err(req);
+        *device_count = reply->device_count;
+    }
+    SERVER_END_REQ;
+    if (status)
+    {
+        free( buffer );
+        return ~0u;
+    }
+
+    if (!devices) return 0;
+
+    for (i = 0; i < *device_count; ++i)
+    {
+        devices[i].usUsagePage = buffer[i].usage_page;
+        devices[i].usUsage = buffer[i].usage;
+        devices[i].dwFlags = buffer[i].flags;
+        devices[i].hwndTarget = wine_server_ptr_handle(buffer[i].target);
+    }
+
+    qsort( devices, *device_count, sizeof(*devices), compare_raw_input_devices );
+
+    free( buffer );
+    return *device_count;
 }

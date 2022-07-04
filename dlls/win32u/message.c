@@ -1602,7 +1602,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
-        ret = user_callbacks && user_callbacks->process_rawinput_message( msg, hw_id, msg_data );
+        ret = process_rawinput_message( msg, hw_id, msg_data );
     else if (is_keyboard_message( msg->message ))
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
     else if (is_mouse_message( msg->message ))
@@ -2381,9 +2381,8 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
             hid_usage_page = ((USAGE *)rawinput->data.hid.bRawData)[0];
             hid_usage = ((USAGE *)rawinput->data.hid.bRawData)[1];
         }
-        if (input->hi.uMsg == WM_INPUT && user_callbacks &&
-            !user_callbacks->rawinput_device_get_usages( rawinput->header.hDevice,
-                                                         &hid_usage_page, &hid_usage ))
+        if (input->hi.uMsg == WM_INPUT &&
+            !rawinput_device_get_usages( rawinput->header.hDevice, &hid_usage_page, &hid_usage ))
         {
             WARN( "unable to get HID usages for device %p\n", rawinput->header.hDevice );
             return STATUS_INVALID_HANDLE;

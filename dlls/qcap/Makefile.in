@@ -2,7 +2,7 @@ MODULE    = qcap.dll
 UNIXLIB   = qcap.so
 IMPORTS   = strmbase strmiids uuid ole32 oleaut32
 DELAYIMPORTS = msvfw32
-EXTRALIBS = $(V4L2_LIBS)
+UNIX_LIBS = $(V4L2_LIBS)
 
 C_SRCS = \
 	audiorecord.c \

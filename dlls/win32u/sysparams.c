@@ -223,6 +223,7 @@ struct monitor
     unsigned int flags;
     RECT rc_monitor;
     RECT rc_work;
+    BOOL is_clone;
 };
 
 static struct list adapters = LIST_INIT(adapters);
@@ -1249,7 +1250,7 @@ static BOOL update_display_cache_from_registry(void)
     DWORD adapter_id, monitor_id, monitor_count = 0, size;
     KEY_BASIC_INFORMATION key;
     struct adapter *adapter;
-    struct monitor *monitor;
+    struct monitor *monitor, *monitor2;
     HANDLE mutex = NULL;
     NTSTATUS status;
     BOOL ret;
@@ -1293,6 +1294,15 @@ static BOOL update_display_cache_from_registry(void)
             {
                 free( monitor );
                 break;
+            }
+
+            LIST_FOR_EACH_ENTRY(monitor2, &monitors, struct monitor, entry)
+            {
+                if (EqualRect(&monitor2->rc_monitor, &monitor->rc_monitor))
+                {
+                    monitor->is_clone = TRUE;
+                    break;
+                }
             }
 
             monitor->handle = UlongToHandle( ++monitor_count );
@@ -2016,6 +2026,7 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
                                 get_thread_dpi() );
         OffsetRect( &monrect, -origin.x, -origin.y );
         if (!intersect_rect( &monrect, &monrect, &limit )) continue;
+        if (monitor->is_clone) continue;
 
         enum_info[count].handle = monitor->handle;
         enum_info[count].rect = monrect;
@@ -4689,6 +4700,7 @@ static void thread_detach(void)
 
     free( thread_info->key_state );
     thread_info->key_state = 0;
+    free( thread_info->rawinput );
 
     destroy_thread_windows();
     NtClose( thread_info->server_queue );
@@ -4814,13 +4826,6 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         return TRUE;
 
     /* temporary exports */
-    case NtUserCallHooks:
-        {
-            const struct win_hook_params *params = (struct win_hook_params *)arg;
-            return call_hooks( params->id, params->code, params->wparam, params->lparam,
-                               params->next_unicode );
-        }
-
     case NtUserGetDeskPattern:
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
 
