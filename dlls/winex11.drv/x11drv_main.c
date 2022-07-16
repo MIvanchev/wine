@@ -273,6 +273,7 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
 void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg )
 {
     pthread_mutex_lock( &error_mutex );
+    XLockDisplay( display );
     err_callback         = callback;
     err_callback_display = display;
     err_callback_arg     = arg;
@@ -291,6 +292,7 @@ int X11DRV_check_error(void)
 {
     int res = err_callback_result;
     err_callback = NULL;
+    XUnlockDisplay( err_callback_display );
     pthread_mutex_unlock( &error_mutex );
     return res;
 }
@@ -302,7 +304,7 @@ int X11DRV_check_error(void)
 static int error_handler( Display *display, XErrorEvent *error_evt )
 {
     if (err_callback && display == err_callback_display &&
-        (long)(error_evt->serial - err_serial) >= 0)
+        (!error_evt->serial || error_evt->serial >= err_serial))
     {
         if ((err_callback_result = err_callback( display, error_evt, err_callback_arg )))
         {
@@ -972,6 +974,25 @@ NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDP
     }
     pthread_mutex_unlock( &d3dkmt_mutex );
     return STATUS_SUCCESS;
+}
+
+static HANDLE get_display_device_init_mutex(void)
+{
+    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
+    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
+    OBJECT_ATTRIBUTES attr;
+    HANDLE mutex = 0;
+
+    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
+    NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE );
+    if (mutex) NtWaitForSingleObject( mutex, FALSE, NULL );
+    return mutex;
+}
+
+static void release_display_device_init_mutex(HANDLE mutex)
+{
+    NtReleaseMutant( mutex, NULL );
+    NtClose( mutex );
 }
 
 /* Find the Vulkan device UUID corresponding to a LUID */

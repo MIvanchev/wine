@@ -60,162 +60,12 @@ static pthread_mutex_t modes_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static BOOL inited_original_display_mode;
 
-static HANDLE get_display_device_init_mutex(void)
-{
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
-    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
-    OBJECT_ATTRIBUTES attr;
-    HANDLE mutex = 0;
-
-    InitializeObjectAttributes(&attr, &name, OBJ_OPENIF, NULL, NULL);
-    NtCreateMutant(&mutex, MUTEX_ALL_ACCESS, &attr, FALSE);
-    if (mutex) NtWaitForSingleObject(mutex, FALSE, NULL);
-    return mutex;
-}
-
-static void release_display_device_init_mutex(HANDLE mutex)
-{
-    NtReleaseMutant(mutex, NULL);
-    NtClose(mutex);
-}
-
-static HKEY get_display_device_reg_key(const WCHAR *device_name)
-{
-    static const WCHAR display[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-    static const WCHAR video_key[] = {
-        '\\','R','e','g','i','s','t','r','y',
-        '\\','M','a','c','h','i','n','e',
-        '\\','H','A','R','D','W','A','R','E',
-        '\\','D','E','V','I','C','E','M','A','P',
-        '\\','V','I','D','E','O'};
-    static const WCHAR current_config_key[] = {
-        '\\','R','e','g','i','s','t','r','y',
-        '\\','M','a','c','h','i','n','e',
-        '\\','S','y','s','t','e','m',
-        '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
-        '\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s',
-        '\\','C','u','r','r','e','n','t'};
-    WCHAR value_name[MAX_PATH], buffer[4096], *end_ptr;
-    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
-    DWORD adapter_index, size;
-    char adapter_name[100];
-    HKEY hkey;
-
-    /* Device name has to be \\.\DISPLAY%d */
-    if (wcsnicmp(device_name, display, ARRAY_SIZE(display)))
-        return FALSE;
-
-    /* Parse \\.\DISPLAY* */
-    adapter_index = wcstol(device_name + ARRAY_SIZE(display), &end_ptr, 10) - 1;
-    if (*end_ptr)
-        return FALSE;
-
-    /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
-    if (!(hkey = reg_open_key(NULL, video_key, sizeof(video_key)))) return FALSE;
-    sprintf(adapter_name, "\\Device\\Video%d", adapter_index);
-    asciiz_to_unicode(value_name, adapter_name);
-    size = query_reg_value(hkey, value_name, value, sizeof(buffer));
-    NtClose(hkey);
-    if (!size || value->Type != REG_SZ) return FALSE;
-
-    /* Replace \Registry\Machine\ prefix with HKEY_CURRENT_CONFIG */
-    memmove(buffer + ARRAYSIZE(current_config_key), (const WCHAR *)value->Data + 17,
-             size - 17 * sizeof(WCHAR));
-    memcpy(buffer, current_config_key, sizeof(current_config_key));
-    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name),
-           wine_dbgstr_w(buffer));
-    return reg_open_key(NULL, buffer, lstrlenW(buffer) * sizeof(WCHAR));
-}
-
-
-static BOOL query_display_setting(HKEY hkey, const char *name, DWORD *ret)
-{
-    char buffer[1024];
-    WCHAR nameW[128];
-    KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
-
-    asciiz_to_unicode(nameW, name);
-    if (query_reg_value(hkey, nameW, value, sizeof(buffer)) != sizeof(DWORD) ||
-        value->Type != REG_DWORD)
-        return FALSE;
-
-    *ret = *(DWORD *)value->Data;
-    return TRUE;
-}
-
-
-static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
-{
-    HANDLE mutex;
-    HKEY hkey;
-    BOOL ret = TRUE;
-
-    dm->dmFields = 0;
-
-    mutex = get_display_device_init_mutex();
-    if (!(hkey = get_display_device_reg_key(device_name)))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
-
-    ret &= query_display_setting(hkey, "DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
-    dm->dmFields |= DM_BITSPERPEL;
-    ret &= query_display_setting(hkey, "DefaultSettings.XResolution", &dm->dmPelsWidth);
-    dm->dmFields |= DM_PELSWIDTH;
-    ret &= query_display_setting(hkey, "DefaultSettings.YResolution", &dm->dmPelsHeight);
-    dm->dmFields |= DM_PELSHEIGHT;
-    ret &= query_display_setting(hkey, "DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
-    dm->dmFields |= DM_DISPLAYFREQUENCY;
-    ret &= query_display_setting(hkey, "DefaultSettings.Flags", &dm->dmDisplayFlags);
-    dm->dmFields |= DM_DISPLAYFLAGS;
-    ret &= query_display_setting(hkey, "DefaultSettings.XPanning", (DWORD *)&dm->dmPosition.x);
-    ret &= query_display_setting(hkey, "DefaultSettings.YPanning", (DWORD *)&dm->dmPosition.y);
-    dm->dmFields |= DM_POSITION;
-    ret &= query_display_setting(hkey, "DefaultSettings.Orientation", &dm->dmDisplayOrientation);
-    dm->dmFields |= DM_DISPLAYORIENTATION;
-    ret &= query_display_setting(hkey, "DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
-
-    NtClose(hkey);
-    release_display_device_init_mutex(mutex);
-    return ret;
-}
-
 
 static BOOL set_setting_value(HKEY hkey, const char *name, DWORD val)
 {
     WCHAR nameW[128];
     UNICODE_STRING str = { asciiz_to_unicode(nameW, name) - sizeof(WCHAR), sizeof(nameW), nameW };
     return !NtSetValueKey(hkey, &str, 0, REG_DWORD, &val, sizeof(val));
-}
-
-
-static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
-{
-    HANDLE mutex;
-    HKEY hkey;
-    BOOL ret = TRUE;
-
-    mutex = get_display_device_init_mutex();
-    if (!(hkey = get_display_device_reg_key(device_name)))
-    {
-        release_display_device_init_mutex(mutex);
-        return FALSE;
-    }
-
-    ret &= set_setting_value(hkey, "DefaultSettings.BitsPerPel", dm->dmBitsPerPel);
-    ret &= set_setting_value(hkey, "DefaultSettings.XResolution", dm->dmPelsWidth);
-    ret &= set_setting_value(hkey, "DefaultSettings.YResolution", dm->dmPelsHeight);
-    ret &= set_setting_value(hkey, "DefaultSettings.VRefresh", dm->dmDisplayFrequency);
-    ret &= set_setting_value(hkey, "DefaultSettings.Flags", dm->dmDisplayFlags);
-    ret &= set_setting_value(hkey, "DefaultSettings.XPanning", dm->dmPosition.x);
-    ret &= set_setting_value(hkey, "DefaultSettings.YPanning", dm->dmPosition.y);
-    ret &= set_setting_value(hkey, "DefaultSettings.Orientation", dm->dmDisplayOrientation);
-    ret &= set_setting_value(hkey, "DefaultSettings.FixedOutput", dm->dmDisplayFixedOutput);
-
-    NtClose(hkey);
-    release_display_device_init_mutex(mutex);
-    return ret;
 }
 
 
@@ -988,13 +838,7 @@ better:
         /* we have a valid mode */
         TRACE("Requested display settings match mode %ld\n", best);
 
-        if ((flags & CDS_UPDATEREGISTRY) && !write_registry_settings(devname, devmode))
-        {
-            WARN("Failed to update registry\n");
-            ret = DISP_CHANGE_NOTUPDATED;
-        }
-        else if (flags & (CDS_TEST | CDS_NORESET))
-            ret = DISP_CHANGE_SUCCESSFUL;
+        if (flags & (CDS_TEST | CDS_NORESET)) ret = DISP_CHANGE_SUCCESSFUL;
         else if (wcsicmp(primary_adapter, devname))
         {
             FIXME("Changing non-primary adapter settings is currently unsupported.\n");
@@ -1044,8 +888,6 @@ better:
  */
 BOOL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, DEVMODEW *devmode, DWORD flags)
 {
-    static const WCHAR dev_name[CCHDEVICENAME] =
-        { 'W','i','n','e',' ','M','a','c',' ','d','r','i','v','e','r',0 };
     struct macdrv_display *displays = NULL;
     int num_displays;
     CGDisplayModeRef display_mode;
@@ -1057,19 +899,6 @@ BOOL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, DEVMODEW *devmode
     TRACE("%s, %u, %p + %hu, %08x\n", debugstr_w(devname), mode, devmode, devmode->dmSize, flags);
 
     init_original_display_mode();
-
-    memcpy(devmode->dmDeviceName, dev_name, sizeof(dev_name));
-    devmode->dmSpecVersion = DM_SPECVERSION;
-    devmode->dmDriverVersion = DM_SPECVERSION;
-    devmode->dmSize = FIELD_OFFSET(DEVMODEW, dmICMMethod);
-    devmode->dmDriverExtra = 0;
-    memset(&devmode->dmFields, 0, devmode->dmSize - FIELD_OFFSET(DEVMODEW, dmFields));
-
-    if (mode == ENUM_REGISTRY_SETTINGS)
-    {
-        TRACE("mode %d (registry) -- getting default mode\n", mode);
-        return read_registry_settings(devname, devmode);
-    }
 
     if (macdrv_get_displays(&displays, &num_displays))
         goto failed;
@@ -1457,8 +1286,7 @@ void macdrv_displays_changed(const macdrv_event *event)
 
 static BOOL force_display_devices_refresh;
 
-void macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
-                                  BOOL force, void *param )
+BOOL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, BOOL force, void *param )
 {
     struct macdrv_adapter *adapters, *adapter;
     struct macdrv_monitor *monitors, *monitor;
@@ -1466,14 +1294,14 @@ void macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     INT gpu_count, adapter_count, monitor_count;
     DWORD len;
 
-    if (!force && !force_display_devices_refresh) return;
+    if (!force && !force_display_devices_refresh) return TRUE;
     force_display_devices_refresh = FALSE;
 
     /* Initialize GPUs */
     if (macdrv_get_gpus(&gpus, &gpu_count))
     {
         ERR("could not get GPUs\n");
-        return;
+        return FALSE;
     }
     TRACE("GPU count: %d\n", gpu_count);
 
@@ -1528,6 +1356,7 @@ void macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     }
 
     macdrv_free_gpus(gpus);
+    return TRUE;
 }
 
 /***********************************************************************

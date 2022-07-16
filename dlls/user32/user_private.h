@@ -47,9 +47,6 @@ struct wm_char_mapping_data
     MSG  get_msg;
 };
 
-extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
-extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
-
 static inline struct user_thread_info *get_user_thread_info(void)
 {
     return (struct user_thread_info *)NtCurrentTeb()->Win32ClientInfo;
@@ -63,7 +60,7 @@ struct tagWND;
 extern BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
                               DWORD type ) DECLSPEC_HIDDEN;
 extern BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
-                                void **buffer, size_t size ) DECLSPEC_HIDDEN;
+                                const void *buffer, size_t size ) DECLSPEC_HIDDEN;
 extern void free_cached_data( UINT format, HANDLE handle ) DECLSPEC_HIDDEN;
 extern HANDLE render_synthesized_format( UINT format, UINT from ) DECLSPEC_HIDDEN;
 
@@ -177,8 +174,8 @@ extern struct user_api_hook *user_api DECLSPEC_HIDDEN;
 LRESULT WINAPI USER_DefDlgProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
 LRESULT WINAPI USER_ScrollBarProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
 void WINAPI USER_ScrollBarDraw(HWND, HDC, INT, enum SCROLL_HITTEST,
-                               const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, INT, INT,
-                               INT, BOOL) DECLSPEC_HIDDEN;
-void WINAPI SCROLL_SetStandardScrollPainted(HWND hwnd, INT bar, BOOL visible);
+                               const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, UINT,
+                               INT, INT, INT, BOOL) DECLSPEC_HIDDEN;
+struct scroll_info *SCROLL_GetInternalInfo( HWND hwnd, INT nBar, BOOL alloc );
 
 #endif /* __WINE_USER_PRIVATE_H */

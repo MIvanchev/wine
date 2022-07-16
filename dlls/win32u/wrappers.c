@@ -849,6 +849,12 @@ BOOL WINAPI NtUserDestroyWindow( HWND hwnd )
     return unix_funcs->pNtUserDestroyWindow( hwnd );
 }
 
+BOOL WINAPI NtUserDisableThreadIme( DWORD thread_id )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserDisableThreadIme( thread_id );
+}
+
 LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
 {
     if (!unix_funcs) return 0;
@@ -885,6 +891,12 @@ BOOL WINAPI NtUserEnableMenuItem( HMENU handle, UINT id, UINT flags )
 {
     if (!unix_funcs) return FALSE;
     return unix_funcs->pNtUserEnableMenuItem( handle, id, flags );
+}
+
+BOOL WINAPI NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserEnableScrollBar( hwnd, bar, flags );
 }
 
 BOOL WINAPI NtUserEndDeferWindowPosEx( HDWP hdwp, BOOL async )
@@ -1046,6 +1058,12 @@ DWORD WINAPI NtUserGetQueueStatus( UINT flags )
 {
     if (!unix_funcs) return 0;
     return unix_funcs->pNtUserGetQueueStatus( flags );
+}
+
+BOOL WINAPI NtUserGetScrollBarInfo( HWND hwnd, LONG id, SCROLLBARINFO *info )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserGetScrollBarInfo( hwnd, id, info );
 }
 
 BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size )
@@ -1274,6 +1292,12 @@ HWND WINAPI NtUserSetParent( HWND hwnd, HWND parent )
     return unix_funcs->pNtUserSetParent( hwnd, parent );
 }
 
+INT WINAPI NtUserSetScrollInfo( HWND hwnd, INT bar, const SCROLLINFO *info, BOOL redraw )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->pNtUserSetScrollInfo( hwnd, bar, info, redraw );
+}
+
 BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *values )
 {
     if (!unix_funcs) return FALSE;
@@ -1332,6 +1356,12 @@ INT WINAPI NtUserShowCursor( BOOL show )
 {
     if (!unix_funcs) return 0;
     return unix_funcs->pNtUserShowCursor( show );
+}
+
+BOOL WINAPI NtUserShowScrollBar( HWND hwnd, INT bar, BOOL show )
+{
+    if (!unix_funcs) return FALSE;
+    return unix_funcs->pNtUserShowScrollBar( hwnd, bar, show );
 }
 
 BOOL WINAPI NtUserShowWindowAsync( HWND hwnd, INT cmd )

@@ -753,7 +753,7 @@
 @ stdcall -syscall NtUserAddClipboardFormatListener(long)
 @ stub NtUserAddVisualIdentifier
 @ stub NtUserAlterWindowStyle
-@ stub NtUserAssociateInputContext
+@ stdcall -syscall NtUserAssociateInputContext(long long long)
 @ stdcall -syscall NtUserAttachThreadInput(long long long)
 @ stub NtUserAutoPromoteMouseInPointer
 @ stub NtUserAutoRotateScreen
@@ -811,7 +811,7 @@
 @ stub NtUserCreateDCompositionHwndTarget
 @ stdcall -syscall NtUserCreateDesktopEx(ptr ptr ptr long long long)
 @ stub NtUserCreateEmptyCursorObject
-@ stub NtUserCreateInputContext
+@ stdcall -syscall NtUserCreateInputContext(ptr)
 @ stub NtUserCreateLocalMemHandle
 @ stub NtUserCreatePalmRejectionDelayZone
 @ stdcall NtUserCreateWindowEx(long ptr ptr ptr long long long long long long long long ptr long long long long)
@@ -831,13 +831,13 @@
 @ stub NtUserDestroyActivationObject
 @ stdcall NtUserDestroyCursor(long long)
 @ stub NtUserDestroyDCompositionHwndTarget
-@ stub NtUserDestroyInputContext
+@ stdcall -syscall NtUserDestroyInputContext(long)
 @ stdcall NtUserDestroyMenu(long)
 @ stub NtUserDestroyPalmRejectionDelayZone
 @ stdcall NtUserDestroyWindow(long)
 @ stub NtUserDisableImmersiveOwner
 @ stub NtUserDisableProcessWindowFiltering
-@ stub NtUserDisableThreadIme
+@ stdcall NtUserDisableThreadIme(long)
 @ stub NtUserDiscardPointerFrameMessages
 @ stdcall NtUserDispatchMessage(ptr)
 @ stub NtUserDisplayConfigGetDeviceInfo
@@ -866,7 +866,7 @@
 @ stub NtUserEnableMouseInputForCursorSuppression
 @ stub NtUserEnableNonClientDpiScaling
 @ stub NtUserEnableResizeLayoutSynchronization
-@ stub NtUserEnableScrollBar
+@ stdcall NtUserEnableScrollBar(long long long)
 @ stub NtUserEnableSoftwareCursorForScreenCapture
 @ stub NtUserEnableTouchPad
 @ stub NtUserEnableWindowGDIScaledDpiMessage
@@ -991,7 +991,7 @@
 @ stdcall -syscall NtUserGetRegisteredRawInputDevices(ptr ptr long)
 @ stub NtUserGetRequiredCursorSizes
 @ stub NtUserGetResizeDCompositionSynchronizationObject
-@ stub NtUserGetScrollBarInfo
+@ stdcall NtUserGetScrollBarInfo(long long ptr)
 @ stub NtUserGetSharedWindowData
 @ stdcall -syscall NtUserGetSystemDpiForProcess(long)
 @ stdcall NtUserGetSystemMenu(long long)
@@ -1114,7 +1114,7 @@
 @ stub NtUserQueryBSDRWindow
 @ stub NtUserQueryDisplayConfig
 @ stub NtUserQueryInformationThread
-@ stub NtUserQueryInputContext
+@ stdcall -syscall NtUserQueryInputContext(long long)
 @ stub NtUserQuerySendMessage
 @ stub NtUserQueryWindow
 @ stub NtUserRealChildWindowFromPoint
@@ -1223,7 +1223,7 @@
 @ stub NtUserSetProcessUIAccessZorder
 @ stdcall -syscall NtUserSetProcessWindowStation(long)
 @ stdcall -syscall NtUserSetProp(long wstr ptr)
-@ stub NtUserSetScrollInfo
+@ stdcall NtUserSetScrollInfo(long long ptr long)
 @ stub NtUserSetSensorPresence
 @ stub NtUserSetSharedWindowData
 @ stub NtUserSetShellWindowEx
@@ -1259,7 +1259,7 @@
 @ stdcall -syscall NtUserSetWindowsHookEx(ptr ptr long long ptr long)
 @ stdcall NtUserShowCaret(long)
 @ stdcall NtUserShowCursor(long)
-@ stub NtUserShowScrollBar
+@ stdcall NtUserShowScrollBar(long long long)
 @ stub NtUserShowSystemCursor
 @ stdcall NtUserShowWindow(long long)
 @ stdcall NtUserShowWindowAsync(long long)
@@ -1293,7 +1293,7 @@
 @ stub NtUserUnregisterSessionPort
 @ stub NtUserUnregisterUserApiHook
 @ stub NtUserUpdateDefaultDesktopThumbnail
-@ stub NtUserUpdateInputContext
+@ stdcall -syscall NtUserUpdateInputContext(long long ptr)
 @ stub NtUserUpdateInstance
 @ stdcall NtUserUpdateLayeredWindow(long long ptr ptr long ptr long ptr long ptr)
 @ stub NtUserUpdatePerUserSystemParameters

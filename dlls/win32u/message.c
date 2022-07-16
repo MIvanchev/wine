@@ -32,6 +32,7 @@
 #include "hidusage.h"
 #include "dbt.h"
 #include "dde.h"
+#include "ddk/imm.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -1362,9 +1363,8 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
     if (remove) accept_hardware_message( hw_id );
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
 
-    if (remove && msg->message == WM_KEYDOWN && user_callbacks)
-        if (user_callbacks->pImmProcessKey( msg->hwnd, NtUserGetKeyboardLayout(0),
-                                            msg->wParam, msg->lParam, 0 ))
+    if (remove && msg->message == WM_KEYDOWN)
+        if (ImmProcessKey( msg->hwnd, NtUserGetKeyboardLayout(0), msg->wParam, msg->lParam, 0 ))
             msg->wParam = VK_PROCESSKEY;
 
     return TRUE;
@@ -1827,9 +1827,26 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             }
             if (info.msg.message >= WM_DDE_FIRST && info.msg.message <= WM_DDE_LAST)
             {
-                if (!user_callbacks->unpack_dde_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
-                                                         &info.msg.lParam, &buffer, size ))
-                    continue;  /* ignore it */
+                struct unpack_dde_message_result result;
+                struct unpack_dde_message_params *params;
+                void *ret_ptr;
+                ULONG len;
+                BOOL ret;
+
+                len = FIELD_OFFSET( struct unpack_dde_message_params, data[size] );
+                if (!(params = malloc( len )))
+                    continue;
+                params->result  = &result;
+                params->hwnd    = info.msg.hwnd;
+                params->message = info.msg.message;
+                params->wparam  = info.msg.wParam;
+                params->lparam  = info.msg.lParam;
+                if (size) memcpy( params->data, buffer, size );
+                ret = KeUserModeCallback( NtUserUnpackDDEMessage, params, len, &ret_ptr, &len );
+                free( params );
+                if (!ret) continue; /* ignore it */
+                info.msg.wParam = result.wparam;
+                info.msg.lParam = result.lparam;
             }
             *msg = info.msg;
             msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
@@ -2185,8 +2202,17 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     }
     else if (info->type == MSG_POSTED && info->msg >= WM_DDE_FIRST && info->msg <= WM_DDE_LAST)
     {
-        return user_callbacks && user_callbacks->post_dde_message( info->hwnd, info->msg,
-                info->wparam, info->lparam, info->dest_tid, info->type );
+        struct post_dde_message_params params;
+        void *ret_ptr;
+        ULONG ret_len;
+
+        params.hwnd     = info->hwnd;
+        params.msg      = info->msg;
+        params.wparam   = info->wparam;
+        params.lparam   = info->lparam;
+        params.dest_tid = info->dest_tid;
+        params.type     = info->type;
+        return KeUserModeCallback( NtUserPostDDEMessage, &params, sizeof(params), &ret_ptr, &ret_len );
     }
 
     SERVER_START_REQ( send_message )
@@ -2889,17 +2915,25 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
 {
     switch (type)
     {
+    case NtUserScrollBarWndProc:
+        return scroll_bar_window_proc( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserPopupMenuWndProc:
         return popup_menu_window_proc( hwnd, msg, wparam, lparam );
+
     case NtUserDesktopWindowProc:
         return desktop_window_proc( hwnd, msg, wparam, lparam );
+
     case NtUserDefWindowProc:
         return default_window_proc( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserCallWindowProc:
         return init_win_proc_params( (struct win_proc_params *)result_info, hwnd, msg,
                                      wparam, lparam, ansi );
+
     case NtUserSendMessage:
         return send_window_message( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserSendMessageTimeout:
         {
             struct send_message_timeout_params *params = (void *)result_info;
@@ -2908,18 +2942,24 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
                                                    params->timeout, &res, ansi );
             return res;
         }
+
     case NtUserSendNotifyMessage:
         return send_notify_message( hwnd, msg, wparam, lparam, ansi );
+
     case NtUserSendMessageCallback:
         return send_message_callback( hwnd, msg, wparam, lparam, (void *)result_info, ansi );
+
     case NtUserClipboardWindowProc:
         return user_driver->pClipboardWindowProc( hwnd, msg, wparam, lparam );
+
     case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );
         return 0;
+
     case NtUserSpyExit:
         spy_exit_message( ansi, hwnd, msg, (LPARAM)result_info, wparam, lparam );
         return 0;
+
     default:
         FIXME( "%p %x %lx %lx %p %x %x\n", hwnd, msg, wparam, lparam, result_info, type, ansi );
     }
@@ -2955,8 +2995,7 @@ BOOL WINAPI NtUserTranslateMessage( const MSG *msg, UINT flags )
         return TRUE;
 
     case VK_PROCESSKEY:
-        return user_callbacks && user_callbacks->pImmTranslateMessage( msg->hwnd, msg->message,
-                                                                       msg->wParam, msg->lParam );
+        return ImmTranslateMessage( msg->hwnd, msg->message, msg->wParam, msg->lParam );
     }
 
     NtUserGetKeyboardState( state );
