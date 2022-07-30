@@ -109,6 +109,7 @@ struct send_message_info
     SENDASYNCPROC     callback;   /* callback function for SendMessageCallback */
     ULONG_PTR         data;       /* callback data */
     enum wm_char_mapping wm_char;
+    struct win_proc_params *params;
 };
 
 static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
@@ -2374,6 +2375,7 @@ LRESULT send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid,
         info.lparam   = lparam;
         info.flags    = flags;
         info.timeout  = timeout;
+        info.params   = NULL;
 
         ret = send_inter_thread_message( &info, &result );
     }
@@ -2399,6 +2401,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
     info.hwnd     = hwnd;
     info.flags    = 0;
     info.timeout  = 0;
+    info.params   = NULL;
 
     if (input->type == INPUT_HARDWARE && rawinput->header.dwType == RIM_TYPEHID)
     {
@@ -2496,9 +2499,9 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
 }
 
 /**********************************************************************
- *           dispatch_message
+ *           NtUserDispatchMessage  (win32u.@)
  */
-LRESULT dispatch_message( const MSG *msg, BOOL ansi )
+LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
 {
     struct win_proc_params params;
     LRESULT retval = 0;
@@ -2509,17 +2512,9 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
         params.func = (WNDPROC)msg->lParam;
         params.result = &retval; /* FIXME */
         if (!init_win_proc_params( &params, msg->hwnd, msg->message,
-                                   msg->wParam, NtGetTickCount(), ansi ))
+                                   msg->wParam, NtGetTickCount(), FALSE ))
             return 0;
-        __TRY
-        {
-            dispatch_win_proc_params( &params, sizeof(params) );
-        }
-        __EXCEPT
-        {
-            retval = 0;
-        }
-        __ENDTRY
+        dispatch_win_proc_params( &params, sizeof(params) );
         return retval;
     }
     if (msg->message == WM_SYSTIMER)
@@ -2541,7 +2536,7 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
     spy_enter_message( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message, msg->wParam, msg->lParam );
 
     if (init_window_call_params( &params, msg->hwnd, msg->message, msg->wParam, msg->lParam,
-                                 &retval, ansi, WMCHAR_MAP_DISPATCHMESSAGE ))
+                                 &retval, FALSE, WMCHAR_MAP_DISPATCHMESSAGE ))
         dispatch_win_proc_params( &params, sizeof(params) );
     else if (!is_window( msg->hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
     else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
@@ -2556,14 +2551,6 @@ LRESULT dispatch_message( const MSG *msg, BOOL ansi )
         NtGdiDeleteObjectApp( hrgn );
     }
     return retval;
-}
-
-/**********************************************************************
- *           NtUserDispatchMessage  (win32u.@)
- */
-LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
-{
-    return dispatch_message( msg, FALSE );
 }
 
 static BOOL is_message_broadcastable( UINT msg )
@@ -2642,6 +2629,16 @@ static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr,
 
     if (!(info->dest_tid = get_window_thread( info->hwnd, &dest_pid ))) return FALSE;
     if (is_exiting_thread( info->dest_tid )) return FALSE;
+
+    if (info->params && info->dest_tid == GetCurrentThreadId() &&
+        !is_hooked( WH_CALLWNDPROC ) && !is_hooked( WH_CALLWNDPROCRET ) &&
+        thread_info->recursion_count <= MAX_WINPROC_RECURSION)
+    {
+        /* if we're called from client side and need just a simple winproc call,
+         * just fill dispatch params and let user32 do the rest */
+        return init_window_call_params( info->params, info->hwnd, info->msg, info->wparam, info->lparam,
+                                        NULL, ansi, info->wm_char );
+    }
 
     thread_info->msg_source = msg_source_unavailable;
     spy_enter_message( SPY_SENDMESSAGE, info->hwnd, info->msg, info->wparam, info->lparam );
@@ -2763,7 +2760,8 @@ BOOL kill_system_timer( HWND hwnd, UINT_PTR id )
     return ret;
 }
 
-static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
+static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                                    struct win_proc_params *client_params, BOOL ansi )
 {
     struct send_message_info info;
     DWORD_PTR res = 0;
@@ -2776,6 +2774,7 @@ static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     info.flags   = SMTO_NORMAL;
     info.timeout = 0;
     info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params  = client_params;
 
     process_message( &info, &res, ansi );
     return res;
@@ -2795,6 +2794,7 @@ LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
     info.flags   = flags;
     info.timeout = timeout;
     info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params  = NULL;
 
     return process_message( &info, res_ptr, ansi );
 }
@@ -2802,7 +2802,7 @@ LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
 /* see SendMessageW */
 LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return send_window_message( hwnd, msg, wparam, lparam, FALSE );
+    return send_window_message( hwnd, msg, wparam, lparam, NULL, FALSE );
 }
 
 /* see SendNotifyMessageW */
@@ -2823,6 +2823,7 @@ static BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     info.lparam  = lparam;
     info.flags   = 0;
     info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params  = NULL;
 
     return process_message( &info, NULL, ansi );
 }
@@ -2848,6 +2849,7 @@ static BOOL send_message_callback( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
     info.data     = params->data;
     info.flags    = 0;
     info.wm_char  = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params   = NULL;
 
     return process_message( &info, NULL, ansi );
 }
@@ -2874,6 +2876,7 @@ BOOL WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
     info.wparam = wparam;
     info.lparam = lparam;
     info.flags  = 0;
+    info.params = NULL;
 
     if (is_broadcast(hwnd)) return broadcast_message( &info, NULL );
 
@@ -2907,6 +2910,7 @@ BOOL WINAPI NtUserPostThreadMessage( DWORD thread, UINT msg, WPARAM wparam, LPAR
     info.wparam   = wparam;
     info.lparam   = lparam;
     info.flags    = 0;
+    info.params   = NULL;
     return put_message_in_queue( &info, NULL );
 }
 
@@ -2932,7 +2936,7 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
                                      wparam, lparam, ansi );
 
     case NtUserSendMessage:
-        return send_window_message( hwnd, msg, wparam, lparam, ansi );
+        return send_window_message( hwnd, msg, wparam, lparam, result_info, ansi );
 
     case NtUserSendMessageTimeout:
         {
@@ -2951,6 +2955,15 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
 
     case NtUserClipboardWindowProc:
         return user_driver->pClipboardWindowProc( hwnd, msg, wparam, lparam );
+
+    case NtUserGetDispatchParams:
+        if (!hwnd) return FALSE;
+        if (init_window_call_params( result_info, hwnd, msg, wparam, lparam,
+                                     NULL, ansi, WMCHAR_MAP_DISPATCHMESSAGE ))
+            return TRUE;
+        if (!is_window( hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        return FALSE;
 
     case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );

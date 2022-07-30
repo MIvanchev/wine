@@ -159,7 +159,7 @@ static HMENU top_popup_hmenu;
 static BOOL exit_menu = FALSE;
 
 static SIZE menucharsize;
-static UINT od_item_hight; /* default owner drawn item height */
+static UINT od_item_height; /* default owner drawn item height */
 
 /**********************************************************************
  *           NtUserCopyAcceleratorTable   (win32u.@)
@@ -1986,7 +1986,7 @@ static void calc_menu_item_size( HDC hdc, struct menu_item *item, HWND owner, IN
         menucharsize.cx = get_char_dimensions( hdc, NULL, &menucharsize.cy );
         /* Win95/98/ME will use menucharsize.cy here. Testing is possible
          * but it is unlikely an application will depend on that */
-        od_item_hight = HIWORD( get_dialog_base_units() );
+        od_item_height = HIWORD( get_dialog_base_units() );
     }
 
     SetRect( &item->rect, org_x, org_y, org_x, org_y );
@@ -1998,7 +1998,7 @@ static void calc_menu_item_size( HDC hdc, struct menu_item *item, HWND owner, IN
         mis.CtlID      = 0;
         mis.itemID     = item->wID;
         mis.itemData   = item->dwItemData;
-        mis.itemHeight = od_item_hight;
+        mis.itemHeight = od_item_height;
         mis.itemWidth  = 0;
         send_message( owner, WM_MEASUREITEM, 0, (LPARAM)&mis );
         /* Tests reveal that Windows ( Win95 through WinXP) adds twice the average
@@ -4053,14 +4053,7 @@ static UINT find_item_by_key( HWND owner, HMENU hmenu, WCHAR key, BOOL force_men
     return -1;
 }
 
-static BOOL seh_release_capture;
-
-static void CALLBACK finally_release_capture( BOOL __normal )
-{
-    if (seh_release_capture) set_capture_window( 0, GUI_INMENUMODE, NULL );
-}
-
-static BOOL track_menu_impl( HMENU hmenu, UINT flags, int x, int y, HWND hwnd, const RECT *rect )
+static BOOL track_menu( HMENU hmenu, UINT flags, int x, int y, HWND hwnd, const RECT *rect )
 {
     BOOL enter_idle_sent = FALSE;
     int executed_menu_id = -1;
@@ -4102,8 +4095,6 @@ static BOOL track_menu_impl( HMENU hmenu, UINT flags, int x, int y, HWND hwnd, c
 
     if ((flags & TPM_POPUPMENU) && menu->nItems == 0)
         return FALSE;
-
-    seh_release_capture = TRUE;
 
     while (!exit_menu)
     {
@@ -4308,7 +4299,6 @@ static BOOL track_menu_impl( HMENU hmenu, UINT flags, int x, int y, HWND hwnd, c
         else mt.trackFlags &= ~TF_SKIPREMOVE;
     }
 
-    seh_release_capture = FALSE;
     set_capture_window( 0, GUI_INMENUMODE, NULL );
 
     /* If dropdown is still painted and the close box is clicked on
@@ -4342,36 +4332,6 @@ static BOOL track_menu_impl( HMENU hmenu, UINT flags, int x, int y, HWND hwnd, c
     if (!(flags & TPM_RETURNCMD)) return TRUE;
     if (executed_menu_id == -1) executed_menu_id = 0;
     return executed_menu_id;
-}
-
-/* FIXME: this is an ugly hack to work around unixlib exceptions limitations.
- * For this to work properly we need recursive exception handlers capable of
- * catching exceptions from client callbacks. We probably need to actually
- * run on Unix stack first, so we need a hack for now. */
-struct track_menu_params
-{
-    HMENU handle;
-    UINT flags;
-    int x;
-    int y;
-    HWND hwnd;
-    const RECT *rect;
-};
-
-static NTSTATUS CDECL track_menu_proc( void *arg )
-{
-    struct track_menu_params *params = arg;
-    return track_menu_impl( params->handle, params->flags, params->x, params->y,
-                            params->hwnd, params->rect );
-}
-
-static BOOL track_menu( HMENU handle, UINT flags, int x, int y, HWND hwnd, const RECT *rect )
-{
-    struct track_menu_params params =
-        { .handle = handle, .flags = flags, .x = x, .y = y, .hwnd = hwnd, .rect = rect };
-    if (!user_callbacks)
-        return track_menu_impl( handle, flags, x, y, hwnd, rect );
-    return user_callbacks->try_finally( track_menu_proc, &params, finally_release_capture );
 }
 
 static BOOL init_tracking( HWND hwnd, HMENU handle, BOOL is_popup, UINT flags )

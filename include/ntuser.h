@@ -276,8 +276,9 @@ enum
     NtUserSendMessageCallback = 0x02b8,
     /* Wine-specific exports */
     NtUserClipboardWindowProc = 0x0300,
-    NtUserSpyEnter            = 0x0301,
-    NtUserSpyExit             = 0x0302,
+    NtUserGetDispatchParams   = 0x3001,
+    NtUserSpyEnter            = 0x0302,
+    NtUserSpyExit             = 0x0303,
 };
 
 /* NtUserThunkedMenuItemInfo codes */
@@ -901,7 +902,6 @@ enum
     NtUserCallOneParam_BeginDeferWindowPos,
     NtUserCallOneParam_CreateCursorIcon,
     NtUserCallOneParam_CreateMenu,
-    NtUserCallOneParam_DispatchMessageA,
     NtUserCallOneParam_EnableDC,
     NtUserCallOneParam_EnableThunkLock,
     NtUserCallOneParam_EnumClipboardFormats,
@@ -922,10 +922,7 @@ enum
     NtUserCallOneParam_SetProcessDefaultLayout,
     /* temporary exports */
     NtUserGetDeskPattern,
-    NtUserGetWinProcPtr,
     NtUserLock,
-    NtUserSetCallbacks,
-    NtUserSpyGetVKeyName,
 };
 
 static inline HDWP NtUserBeginDeferWindowPos( INT count )
@@ -941,11 +938,6 @@ static inline HICON NtUserCreateCursorIcon( BOOL is_icon )
 static inline HMENU NtUserCreateMenu( BOOL is_popup )
 {
     return UlongToHandle( NtUserCallOneParam( is_popup, NtUserCallOneParam_CreateMenu ));
-}
-
-static inline LRESULT NtUserDispatchMessageA( const MSG *msg )
-{
-    return NtUserCallOneParam( (UINT_PTR)msg, NtUserCallOneParam_DispatchMessageA );
 }
 
 static inline WORD NtUserEnableDC( HDC hdc )
@@ -1107,6 +1099,7 @@ enum
     NtUserCallHwnd_ArrangeIconicWindows,
     NtUserCallHwnd_DrawMenuBar,
     NtUserCallHwnd_GetDefaultImeWindow,
+    NtUserCallHwnd_GetDialogInfo,
     NtUserCallHwnd_GetDpiForWindow,
     NtUserCallHwnd_GetParent,
     NtUserCallHwnd_GetWindowContextHelpId,
@@ -1118,6 +1111,10 @@ enum
     NtUserCallHwnd_IsWindowUnicode,
     NtUserCallHwnd_IsWindowVisible,
     NtUserCallHwnd_SetForegroundWindow,
+    /* temporary exports */
+    NtUserGetFullWindowHandle,
+    NtUserIsCurrehtProcessWindow,
+    NtUserIsCurrehtThreadWindow,
 };
 
 static inline UINT NtUserArrangeIconicWindows( HWND parent )
@@ -1138,6 +1135,11 @@ static inline DWORD NtUserGetWindowContextHelpId( HWND hwnd )
 static inline HWND NtUserGetDefaultImeWindow( HWND hwnd )
 {
     return UlongToHandle( NtUserCallHwnd( hwnd, NtUserCallHwnd_GetDefaultImeWindow ));
+}
+
+static inline void *NtUserGetDialogInfo( HWND hwnd )
+{
+    return (void *)NtUserCallHwnd( hwnd, NtUserCallHwnd_GetDialogInfo );
 }
 
 static inline UINT NtUserGetDpiForWindow( HWND hwnd )
@@ -1202,6 +1204,7 @@ enum
     NtUserCallHwndParam_GetClassLongPtrW,
     NtUserCallHwndParam_GetClassWord,
     NtUserCallHwndParam_GetClientRect,
+    NtUserCallHwndParam_GetDialogProc,
     NtUserCallHwndParam_GetScrollInfo,
     NtUserCallHwndParam_GetWindowInfo,
     NtUserCallHwndParam_GetWindowLongA,
@@ -1218,6 +1221,7 @@ enum
     NtUserCallHwndParam_MirrorRgn,
     NtUserCallHwndParam_MonitorFromWindow,
     NtUserCallHwndParam_ScreenToClient,
+    NtUserCallHwndParam_SetDialogInfo,
     NtUserCallHwndParam_SetWindowContextHelpId,
     NtUserCallHwndParam_SetWindowPixelFormat,
     NtUserCallHwndParam_ShowOwnedPopups,
@@ -1264,6 +1268,18 @@ static inline WORD NtUserGetClassWord( HWND hwnd, INT offset )
 static inline BOOL NtUserGetClientRect( HWND hwnd, RECT *rect )
 {
     return NtUserCallHwndParam( hwnd, (UINT_PTR)rect, NtUserCallHwndParam_GetClientRect );
+}
+
+enum dialog_proc_type
+{
+    DLGPROC_ANSI,
+    DLGPROC_UNICODE,
+    DLGPROC_WIN16,
+};
+
+static inline DLGPROC NtUserGetDialogProc( HWND hwnd, enum dialog_proc_type type )
+{
+    return (DLGPROC)NtUserCallHwndParam( hwnd, type, NtUserCallHwndParam_GetDialogProc );
 }
 
 struct get_scroll_info_params
@@ -1365,6 +1381,11 @@ static inline HMONITOR NtUserMonitorFromWindow( HWND hwnd, DWORD flags )
 static inline BOOL NtUserScreenToClient( HWND hwnd, POINT *pt )
 {
     return NtUserCallHwndParam( hwnd, (UINT_PTR)pt, NtUserCallHwndParam_ScreenToClient );
+}
+
+static inline void NtUserSetDialogInfo( HWND hwnd, void *info )
+{
+    NtUserCallHwndParam( hwnd, (UINT_PTR)info, NtUserCallHwndParam_SetDialogInfo );
 }
 
 static inline BOOL NtUserSetWindowContextHelpId( HWND hwnd, DWORD id )

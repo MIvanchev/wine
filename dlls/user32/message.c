@@ -491,7 +491,6 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
             ULONGLONG hpack;
             /* hMem is being passed */
             if (size != sizeof(hpack)) return FALSE;
-            if (!size) return FALSE;
             uiLo = *lparam;
             memcpy( &hpack, buffer, size );
             hMem = unpack_ptr( hpack );
@@ -533,7 +532,6 @@ BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam
     case WM_DDE_EXECUTE:
 	if (size)
 	{
-	    if (!size) return FALSE;
             if (!(hMem = GlobalAlloc( GMEM_MOVEABLE|GMEM_DDESHARE, size ))) return FALSE;
             if ((ptr = GlobalLock( hMem )))
 	    {
@@ -597,12 +595,41 @@ LRESULT WINAPI SendMessageTimeoutA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 }
 
 
+static LRESULT dispatch_send_message( struct win_proc_params *params )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
+    LRESULT retval = 0;
+
+    static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
+
+    thread_info->recursion_count++;
+
+    params->result = &retval;
+    thread_info->msg_source = msg_source_unavailable;
+    SPY_EnterMessage( SPY_SENDMESSAGE, params->hwnd, params->msg, params->wparam, params->lparam );
+
+    dispatch_win_proc_params( params );
+
+    SPY_ExitMessage( SPY_RESULT_OK, params->hwnd, params->msg, retval, params->wparam, params->lparam );
+    thread_info->msg_source = prev_source;
+    thread_info->recursion_count--;
+    return retval;
+}
+
+
 /***********************************************************************
  *		SendMessageW  (USER32.@)
  */
 LRESULT WINAPI SendMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE );
+    struct win_proc_params params;
+    LRESULT retval;
+
+    params.hwnd = 0;
+    retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, FALSE );
+    if (params.hwnd) retval = dispatch_send_message( &params );
+    return retval;
 }
 
 
@@ -611,6 +638,9 @@ LRESULT WINAPI SendMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
  */
 LRESULT WINAPI SendMessageA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
+    struct win_proc_params params;
+    LRESULT retval;
+
     if (msg == WM_CHAR && !WIN_IsCurrentThread( hwnd ))
     {
         if (!map_wparam_AtoW( msg, &wparam, WMCHAR_MAP_SENDMESSAGE ))
@@ -618,7 +648,10 @@ LRESULT WINAPI SendMessageA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
         return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE );
     }
 
-    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, TRUE );
+    params.hwnd = 0;
+    retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, TRUE );
+    if (params.hwnd) retval = dispatch_send_message( &params );
+    return retval;
 }
 
 
@@ -832,6 +865,22 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
 }
 
 
+static LRESULT dispatch_message( const MSG *msg, BOOL ansi )
+{
+    struct win_proc_params params;
+    LRESULT retval = 0;
+
+    if (!NtUserMessageCall( msg->hwnd, msg->message, msg->wParam, msg->lParam,
+                            &params, NtUserGetDispatchParams, ansi )) return 0;
+    params.result = &retval;
+
+    SPY_EnterMessage( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message, msg->wParam, msg->lParam );
+    dispatch_win_proc_params( &params );
+    SPY_ExitMessage( SPY_RESULT_OK, msg->hwnd, msg->message, retval, msg->wParam, msg->lParam );
+    return retval;
+}
+
+
 /***********************************************************************
  *		DispatchMessageA (USER32.@)
  *
@@ -856,7 +905,12 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageA( const MSG* msg )
         __ENDTRY
         return retval;
     }
-    return NtUserDispatchMessageA( msg );
+
+    /* whenever possible, avoid using NtUserDispatchMessage to make the call unwindable */
+    if (msg->message != WM_SYSTIMER && msg->message != WM_PAINT)
+        return dispatch_message( msg, TRUE );
+
+    return NtUserDispatchMessage( msg );
 }
 
 
@@ -904,6 +958,11 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageW( const MSG* msg )
             return retval;
         }
     }
+
+    /* whenever possible, avoid using NtUserDispatchMessage to make the call unwindable */
+    if (msg->message != WM_SYSTIMER && msg->message != WM_PAINT)
+        return dispatch_message( msg, FALSE );
+
     return NtUserDispatchMessage( msg );
 }
 

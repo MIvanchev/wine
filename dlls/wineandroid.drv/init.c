@@ -288,9 +288,15 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
             .rc_work = monitor_rc_work,
             .state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED,
         };
+        const DEVMODEW mode =
+        {
+            .dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
+            .dmBitsPerPel = screen_bpp, .dmPelsWidth = screen_width, .dmPelsHeight = screen_height, .dmDisplayFrequency = 60,
+        };
         device_manager->add_gpu( &gpu, param );
         device_manager->add_adapter( &adapter, param );
         device_manager->add_monitor( &gdi_monitor, param );
+        device_manager->add_mode( &mode, param );
         force_display_devices_refresh = FALSE;
     }
 
@@ -562,10 +568,6 @@ JavaVM **p_java_vm = NULL;
 jobject *p_java_object = NULL;
 unsigned short *p_java_gdt_sel = NULL;
 
-static NTSTATUS CDECL unix_call( enum android_funcs code, void *params );
-NTSTATUS (WINAPI *pNtWaitForMultipleObjects)( ULONG,const HANDLE*,BOOLEAN,
-                                              BOOLEAN,const LARGE_INTEGER* );
-
 static HRESULT android_init( void *arg )
 {
     struct init_params *params = arg;
@@ -611,8 +613,6 @@ static HRESULT android_init( void *arg )
 #endif
     }
     __wine_set_user_driver( &android_drv_funcs, WINE_GDI_DRIVER_VERSION );
-    pNtWaitForMultipleObjects = params->pNtWaitForMultipleObjects;
-    params->unix_call = unix_call;
     return STATUS_SUCCESS;
 }
 
@@ -628,10 +628,3 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
 
 
 C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
-
-
-/* FIXME: Use __wine_unix_call instead */
-static NTSTATUS CDECL unix_call( enum android_funcs code, void *params )
-{
-    return __wine_unix_call_funcs[code]( params );
-}

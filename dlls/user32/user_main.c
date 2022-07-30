@@ -39,8 +39,6 @@ WINE_DECLARE_DEBUG_CHANNEL(message);
 
 HMODULE user32_module = 0;
 
-static DWORD exiting_thread_id;
-
 extern void WDML_NotifyThreadDetach(void);
 
 /***********************************************************************
@@ -118,24 +116,6 @@ static void dpiaware_init(void)
             SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE );
     }
 }
-
-static NTSTATUS try_finally( NTSTATUS (CDECL *func)( void *), void *arg,
-                             void (CALLBACK *finally_func)( BOOL ))
-{
-    NTSTATUS status;
-    __TRY
-    {
-        status = func( arg );
-    }
-    __FINALLY( finally_func );
-    return status;
-}
-
-static const struct user_callbacks user_funcs =
-{
-    NtWaitForMultipleObjects,
-    try_finally,
-};
 
 static NTSTATUS WINAPI User32CopyImage( const struct copy_image_params *params, ULONG size )
 {
@@ -248,9 +228,6 @@ static BOOL process_attach(void)
 {
     NtCurrentTeb()->Peb->KernelCallbackTable = kernel_callback_table;
 
-    /* FIXME: should not be needed */
-    NtUserCallOneParam( (UINT_PTR)&user_funcs, NtUserSetCallbacks );
-
     dpiaware_init();
     winproc_init();
     register_desktop_class();
@@ -263,30 +240,18 @@ static BOOL process_attach(void)
 
 
 /**********************************************************************
- *           USER_IsExitingThread
- */
-BOOL USER_IsExitingThread( DWORD tid )
-{
-    return (tid == exiting_thread_id);
-}
-
-
-/**********************************************************************
  *           thread_detach
  */
 static void thread_detach(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
 
-    exiting_thread_id = GetCurrentThreadId();
     NtUserCallNoParam( NtUserExitingThread );
 
     WDML_NotifyThreadDetach();
 
     NtUserCallNoParam( NtUserThreadDetach );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
-
-    exiting_thread_id = 0;
 }
 
 
@@ -399,11 +364,6 @@ BOOL WINAPI ShutdownBlockReasonDestroy(HWND hwnd)
 const char *SPY_GetMsgName( UINT msg, HWND hwnd )
 {
     return (const char *)NtUserCallHwndParam( hwnd, msg, NtUserSpyGetMsgName );
-}
-
-const char *SPY_GetVKeyName( WPARAM wparam )
-{
-    return (const char *)NtUserCallOneParam( wparam, NtUserSpyGetVKeyName );
 }
 
 void SPY_EnterMessage( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )

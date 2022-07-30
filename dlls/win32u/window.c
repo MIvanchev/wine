@@ -3438,7 +3438,7 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         /* child windows get WM_CHILDACTIVATE message */
         if ((get_window_long( winpos->hwnd, GWL_STYLE ) & (WS_CHILD | WS_POPUP)) == WS_CHILD)
             send_message( winpos->hwnd, WM_CHILDACTIVATE, 0, 0 );
-        else if (user_callbacks)
+        else
             set_foreground_window( winpos->hwnd, FALSE );
     }
 
@@ -5359,6 +5359,32 @@ failed:
     return 0;
 }
 
+static void *get_dialog_info( HWND hwnd )
+{
+    WND *win;
+    void *ret;
+
+    if (!(win = get_win_ptr( hwnd )) || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return NULL;
+    }
+
+    ret = win->dlgInfo;
+    release_win_ptr( win );
+    return ret;
+}
+
+static BOOL set_dialog_info( HWND hwnd, void *info )
+{
+    WND *win;
+
+    if (!(win = get_win_ptr( hwnd )) || win == WND_OTHER_PROCESS || win == WND_DESKTOP) return FALSE;
+    win->dlgInfo = info;
+    release_win_ptr( win );
+    return TRUE;
+}
+
 /*****************************************************************************
  *           NtUserCallHwnd (win32u.@)
  */
@@ -5380,6 +5406,9 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
 
     case NtUserCallHwnd_GetParent:
         return HandleToUlong( get_parent( hwnd ));
+
+    case NtUserCallHwnd_GetDialogInfo:
+        return (ULONG_PTR)get_dialog_info( hwnd );
 
     case NtUserCallHwnd_GetWindowContextHelpId:
         return get_window_context_help_id( hwnd );
@@ -5407,6 +5436,16 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
 
     case NtUserCallHwnd_SetForegroundWindow:
         return set_foreground_window( hwnd, FALSE );
+
+    /* temporary exports */
+    case NtUserGetFullWindowHandle:
+        return HandleToUlong( get_full_window_handle( hwnd ));
+
+    case NtUserIsCurrehtProcessWindow:
+        return HandleToUlong( is_current_process_window( hwnd ));
+
+    case NtUserIsCurrehtThreadWindow:
+        return HandleToUlong( is_current_thread_window( hwnd ));
 
     default:
         FIXME( "invalid code %u\n", code );
@@ -5444,6 +5483,9 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
 
     case NtUserCallHwndParam_GetClientRect:
         return get_client_rect( hwnd, (RECT *)param );
+
+    case NtUserCallHwndParam_GetDialogProc:
+        return (ULONG_PTR)get_dialog_proc( hwnd, param );
 
     case NtUserCallHwndParam_GetScrollInfo:
         {
@@ -5499,6 +5541,9 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
 
     case NtUserCallHwndParam_ScreenToClient:
         return screen_to_client( hwnd, (POINT *)param );
+
+    case NtUserCallHwndParam_SetDialogInfo:
+        return set_dialog_info( hwnd, (void *)param );
 
     case NtUserCallHwndParam_SetWindowContextHelpId:
         return set_window_context_help_id( hwnd, param );

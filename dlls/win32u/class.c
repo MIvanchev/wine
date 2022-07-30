@@ -60,6 +60,12 @@ typedef struct tagCLASS
     struct client_menu_name menu_name; /* Default menu name */
 } CLASS;
 
+typedef struct tagWINDOWPROC
+{
+    WNDPROC  procA;    /* ANSI window proc */
+    WNDPROC  procW;    /* Unicode window proc */
+} WINDOWPROC;
+
 static WINDOWPROC winproc_array[MAX_WINPROCS];
 static UINT winproc_used = NB_BUILTIN_WINPROCS;
 static pthread_mutex_t winproc_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -201,6 +207,31 @@ void get_winproc_params( struct win_proc_params *params )
         params->procA = proc->procA;
         params->procW = proc->procW;
     }
+}
+
+DLGPROC get_dialog_proc( HWND hwnd, enum dialog_proc_type type )
+{
+    WINDOWPROC *proc;
+    DLGPROC ret;
+    WND *win;
+
+    if (!(win = get_win_ptr( hwnd ))) return NULL;
+    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        ERR( "cannot get dlg proc %p from other process\n", hwnd );
+        return 0;
+    }
+    ret = *(DLGPROC *)((char *)win->wExtra + DWLP_DLGPROC);
+    release_win_ptr( win );
+    if (type == DLGPROC_WIN16 || !(proc = get_winproc_ptr( ret ))) return ret;
+    if (proc == WINPROC_PROC16) return WINPROC_PROC16;
+
+    if (type == DLGPROC_ANSI)
+        ret = proc->procA ? proc->procA : proc->procW;
+    else
+        ret = proc->procW ? proc->procW : proc->procA;
+
+    return ret;
 }
 
 /***********************************************************************

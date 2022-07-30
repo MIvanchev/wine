@@ -2672,9 +2672,9 @@ if (0) { /* crashes on native */
     count = 0;
     hr = IDWriteTextLayout1_GetClusterMetrics(layout1, clusters, 4, &count);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(count == 3, "Unexpected cluster count %u.\n", count);
+    todo_wine ok(count == 3, "Unexpected cluster count %u.\n", count);
     ok(clusters[0].length == 1, "got %u\n", clusters[0].length);
-    ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
+    todo_wine ok(clusters[1].length == 2, "got %u\n", clusters[1].length);
     ok(clusters[2].length == 1, "got %u\n", clusters[2].length);
 
     /* pair kerning flag participates in itemization - combining characters
@@ -4639,16 +4639,13 @@ static void test_MapCharacters(void)
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
-}
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* same Latin text, full length */
     g_source = L"abc";
     mappedlength = 0;
@@ -4656,16 +4653,14 @@ if (font) {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 3, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 3, "got %u\n", mappedlength);
-}
+
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     /* string 'a\x3058b' */
     g_source = str2W;
     mappedlength = 0;
@@ -4673,26 +4668,22 @@ if (font) {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 3, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
-}
     ok(scale == 1.0f, "got %f\n", scale);
-    todo_wine
     ok(font != NULL, "got %p\n", font);
-if (font) {
-    IDWriteFont_Release(font);
-}
+    if (font)
+        IDWriteFont_Release(font);
+
     g_source = str2W;
     mappedlength = 0;
     scale = 0.0f;
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 1, 2, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
     ok(mappedlength == 1, "got %u\n", mappedlength);
-}
     ok(scale == 1.0f, "got %f\n", scale);
     todo_wine
     ok(font != NULL, "got %p\n", font);
@@ -4731,17 +4722,21 @@ if (font) {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(mappedlength == 1, "got %u\n", mappedlength);
     ok(scale == 1.0f, "got %f\n", scale);
+    todo_wine
     ok(font != NULL, "got %p\n", font);
 
-    exists = FALSE;
-    hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
-    ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
-    hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    todo_wine
-    ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
-    IDWriteLocalizedStrings_Release(strings);
-    IDWriteFont_Release(font);
+    if (font)
+    {
+        exists = FALSE;
+        hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &strings, &exists);
+        ok(hr == S_OK && exists, "Unexpected hr %#lx, exists %d.\n", hr, exists);
+        hr = IDWriteLocalizedStrings_GetString(strings, 0, buffW, ARRAY_SIZE(buffW));
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        todo_wine
+        ok(lstrcmpW(buffW, L"Tahoma"), "Unexpected string %s.\n", wine_dbgstr_w(buffW));
+        IDWriteLocalizedStrings_Release(strings);
+        IDWriteFont_Release(font);
+    }
 
     IDWriteFontFallback_Release(fallback);
     IDWriteFactory2_Release(factory2);
@@ -4802,14 +4797,17 @@ static void test_system_fallback(void)
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
+        font = NULL;
+
         g_source = tests[i].text;
         hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &length, &font, &scale);
-    todo_wine
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
         if (hr != S_OK) continue;
+        todo_wine
         ok(length == 1, "Unexpected length %u\n", length);
         ok(scale == 1.0f, "got %f\n", scale);
+        if (!font) continue;
 
         get_font_name(font, name, ARRAY_SIZE(name));
     todo_wine
@@ -4861,14 +4859,14 @@ static void test_FontFallbackBuilder(void)
     EXPECT_REF(builder, 1);
     hr = IDWriteFontFallbackBuilder_CreateFontFallback(builder, &fallback);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     EXPECT_REF(fallback, 1);
     EXPECT_REF(builder, 1);
 
     IDWriteFontFallback_AddRef(fallback);
     EXPECT_REF(builder, 1);
     EXPECT_REF(fallback, 2);
-    EXPECT_REF(factory2, 3);
+    todo_wine EXPECT_REF(factory2, 3);
     IDWriteFontFallback_Release(fallback);
 
     /* New instance is created every time, even if mappings have not changed. */
@@ -4937,12 +4935,11 @@ static void test_FontFallbackBuilder(void)
     font = (void*)0xdeadbeef;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 1.0f, "got %f\n", scale);
-    ok(font == NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 1.0f, "Unexpected scale %f.\n", scale);
+    ok(!font, "Unexpected font instance %p.\n", font);
+
     IDWriteFontFallback_Release(fallback);
 
     /* remap with custom collection */
@@ -4959,12 +4956,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -4984,12 +4979,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5010,12 +5003,10 @@ todo_wine {
     font = NULL;
     hr = IDWriteFontFallback_MapCharacters(fallback, &analysissource, 0, 1, NULL, NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mappedlength, &font, &scale);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(mappedlength == 1, "got %u\n", mappedlength);
-    ok(scale == 5.0f, "got %f\n", scale);
-    ok(font != NULL, "got %p\n", font);
-}
+    ok(mappedlength == 1, "Unexpected length %u.\n", mappedlength);
+    ok(scale == 5.0f, "Unexpected scale %f.\n", scale);
+    ok(font != NULL, "Expected font instance %p.\n", font);
     if (font)
         IDWriteFont_Release(font);
 
@@ -5061,21 +5052,17 @@ static void test_fallback(void)
 
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
-todo_wine {
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
     ok(count == 4, "Unexpected count %u.\n", count);
-}
     for (i = 0, width = 0.0; i < count; i++)
         width += clusters[i].width;
 
     memset(&metrics, 0xcc, sizeof(metrics));
     hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
     ok(hr == S_OK, "Failed to get layout metrics, hr %#lx.\n", hr);
-todo_wine {
     ok(metrics.width > 0.0 && metrics.width == width, "Unexpected width %.2f, expected %.2f.\n", metrics.width, width);
     ok(metrics.height > 0.0, "Unexpected height %.2f.\n", metrics.height);
     ok(metrics.lineCount == 1, "Unexpected line count %u.\n", metrics.lineCount);
-}
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(format);
 
@@ -5374,6 +5361,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     range.startPosition = 0;
@@ -5384,6 +5372,7 @@ static void test_SetUnderline(void)
     count = 0;
     hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
     ok(hr == S_OK, "Failed to get cluster metrics, hr %#lx.\n", hr);
+    todo_wine
     ok(count == 3, "Unexpected cluster count %u.\n", count);
 
     flush_sequence(sequences, RENDERER_ID);
