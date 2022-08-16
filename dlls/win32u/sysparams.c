@@ -448,8 +448,11 @@ static BOOL write_adapter_mode( HKEY adapter_key, DWORD index, const DEVMODEW *m
     set_mode_field( flagsW, dmDisplayFlags, DM_DISPLAYFLAGS );
     set_mode_field( orientationW, dmDisplayOrientation, DM_DISPLAYORIENTATION );
     set_mode_field( fixed_outputW, dmDisplayFixedOutput, DM_DISPLAYFIXEDOUTPUT );
-    set_mode_field( x_panningW, dmPosition.x, DM_POSITION );
-    set_mode_field( y_panningW, dmPosition.y, DM_POSITION );
+    if (index == ENUM_CURRENT_SETTINGS || index == ENUM_REGISTRY_SETTINGS)
+    {
+        set_mode_field( x_panningW, dmPosition.x, DM_POSITION );
+        set_mode_field( y_panningW, dmPosition.y, DM_POSITION );
+    }
     ret = set_reg_value( hkey, driver_extraW, REG_BINARY, mode + 1, mode->dmDriverExtra );
 
 #undef set_mode_field
@@ -487,8 +490,11 @@ static BOOL read_adapter_mode( HKEY adapter_key, DWORD index, DEVMODEW *mode )
     query_mode_field( y_resolutionW, dmPelsHeight, DM_PELSHEIGHT );
     query_mode_field( v_refreshW, dmDisplayFrequency, DM_DISPLAYFREQUENCY );
     query_mode_field( flagsW, dmDisplayFlags, DM_DISPLAYFLAGS );
-    query_mode_field( x_panningW, dmPosition.x, DM_POSITION );
-    query_mode_field( y_panningW, dmPosition.y, DM_POSITION );
+    if (index == ENUM_CURRENT_SETTINGS || index == ENUM_REGISTRY_SETTINGS)
+    {
+        query_mode_field( x_panningW, dmPosition.x, DM_POSITION );
+        query_mode_field( y_panningW, dmPosition.y, DM_POSITION );
+    }
     query_mode_field( orientationW, dmDisplayOrientation, DM_DISPLAYORIENTATION );
     query_mode_field( fixed_outputW, dmDisplayFixedOutput, 0 );
 
@@ -1602,7 +1608,7 @@ UINT get_win_monitor_dpi( HWND hwnd )
  */
 DPI_AWARENESS get_thread_dpi_awareness(void)
 {
-    struct user_thread_info *info = get_user_thread_info();
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
     ULONG_PTR context = info->dpi_awareness;
 
     if (!context) context = NtUserGetProcessDpiAwarenessContext( NULL );
@@ -1671,12 +1677,12 @@ static DPI_AWARENESS get_awareness_from_dpi_awareness_context( DPI_AWARENESS_CON
  */
 DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
 {
-    struct user_thread_info *info = get_user_thread_info();
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
     DPI_AWARENESS prev, val = get_awareness_from_dpi_awareness_context( context );
 
     if (val == DPI_AWARENESS_INVALID)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     if (!(prev = info->dpi_awareness))
@@ -2149,7 +2155,8 @@ BOOL WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD index, DEVM
     memset( &devmode->dmDriverExtra, 0, devmode->dmSize - offsetof(DEVMODEW, dmDriverExtra) );
 
     if (index == ENUM_REGISTRY_SETTINGS) ret = read_registry_settings( adapter_path, devmode );
-    else ret = user_driver->pEnumDisplaySettingsEx( device_name, index, devmode, flags );
+    else if (index != ENUM_CURRENT_SETTINGS) ret = user_driver->pEnumDisplaySettingsEx( device_name, index, devmode, flags );
+    else ret = user_driver->pGetCurrentDisplaySettings( device_name, devmode );
 
     if (!ret) WARN( "Failed to query %s display settings.\n", debugstr_w(device_name) );
     else TRACE( "position %dx%d, resolution %ux%u, frequency %u, depth %u, orientation %#x.\n",
@@ -2296,7 +2303,7 @@ BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
 
     unlock_display_devices();
     WARN( "invalid handle %p\n", handle );
-    SetLastError( ERROR_INVALID_MONITOR_HANDLE );
+    RtlSetLastWin32Error( ERROR_INVALID_MONITOR_HANDLE );
     return FALSE;
 }
 
@@ -2415,12 +2422,12 @@ BOOL WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *
 {
     if (type > 2)
     {
-        SetLastError( ERROR_BAD_ARGUMENTS );
+        RtlSetLastWin32Error( ERROR_BAD_ARGUMENTS );
         return FALSE;
     }
     if (!x || !y)
     {
-        SetLastError( ERROR_INVALID_ADDRESS );
+        RtlSetLastWin32Error( ERROR_INVALID_ADDRESS );
         return FALSE;
     }
     switch (get_thread_dpi_awareness())
@@ -3531,7 +3538,7 @@ BOOL WINAPI NtUserSystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, 
 	break;
     }
     default:
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         break;
     }
     return ret;
@@ -3573,7 +3580,7 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
                 FIXME( "Unimplemented action: %u (%s)\n", x, #x ); \
             } \
         } \
-        SetLastError( ERROR_INVALID_SPI_VALUE ); \
+        RtlSetLastWin32Error( ERROR_INVALID_SPI_VALUE ); \
         ret = FALSE; \
         break
 #define WINE_SPI_WARN(x) \
@@ -4380,7 +4387,7 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
     }
     default:
 	FIXME( "Unknown action: %u\n", action );
-	SetLastError( ERROR_INVALID_SPI_VALUE );
+	RtlSetLastWin32Error( ERROR_INVALID_SPI_VALUE );
 	ret = FALSE;
 	break;
     }
@@ -4856,7 +4863,7 @@ BOOL WINAPI NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown 
     case NTUSER_DPI_PER_UNAWARE_GDISCALED:
         break;
     default:
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 
@@ -5020,6 +5027,9 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     case NtUserCallOneParam_MessageBeep:
         return message_beep( arg );
 
+    case NtUserCallOneParam_ReplyMessage:
+        return reply_message_result( arg );
+
     case NtUserCallOneParam_SetCaretBlinkTime:
         return set_caret_blink_time( arg );
 
@@ -5030,14 +5040,6 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     /* temporary exports */
     case NtUserGetDeskPattern:
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
-
-    case NtUserLock:
-        switch( arg )
-        {
-        case 0: user_lock(); return 0;
-        case 1: user_unlock(); return 0;
-        default: user_check_not_lock(); return 0;
-        }
 
     default:
         FIXME( "invalid code %u\n", code );
@@ -5064,9 +5066,6 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
     case NtUserCallTwoParam_MonitorFromRect:
         return HandleToUlong( monitor_from_rect( (const RECT *)arg1, arg2, get_thread_dpi() ));
 
-    case NtUserCallTwoParam_ReplyMessage:
-        return reply_message_result( arg1, (MSG *)arg2 );
-
     case NtUserCallTwoParam_SetCaretPos:
         return set_caret_pos( arg1, arg2 );
 
@@ -5079,9 +5078,6 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
     /* temporary exports */
     case NtUserAllocWinProc:
         return (UINT_PTR)alloc_winproc( (WNDPROC)arg1, arg2 );
-
-    case NtUserGetHandlePtr:
-        return (UINT_PTR)get_user_handle_ptr( UlongToHandle(arg1), arg2 );
 
     default:
         FIXME( "invalid code %u\n", code );

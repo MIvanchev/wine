@@ -117,7 +117,7 @@ extern struct macdrv_thread_data *macdrv_init_thread_data(void) DECLSPEC_HIDDEN;
 
 static inline struct macdrv_thread_data *macdrv_thread_data(void)
 {
-    return NtUserGetThreadInfo()->driver_data;
+    return (struct macdrv_thread_data *)(UINT_PTR)NtUserGetThreadInfo()->driver_data;
 }
 
 
@@ -127,6 +127,7 @@ extern LONG macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
                                            HWND hwnd, DWORD flags, LPVOID lpvoid) DECLSPEC_HIDDEN;
 extern BOOL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
                                          LPDEVMODEW devmode, DWORD flags) DECLSPEC_HIDDEN;
+extern BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR name, LPDEVMODEW devmode) DECLSPEC_HIDDEN;
 extern LRESULT macdrv_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;
 extern BOOL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
                                          BOOL force, void *param ) DECLSPEC_HIDDEN;

@@ -95,7 +95,7 @@ HWND get_hwnd_message_parent(void)
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
     if (!thread_info->msg_window) GetDesktopWindow();  /* trigger creation */
-    return thread_info->msg_window;
+    return UlongToHandle( thread_info->msg_window );
 }
 
 
@@ -109,8 +109,8 @@ BOOL is_desktop_window( HWND hwnd )
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
     if (!hwnd) return FALSE;
-    if (hwnd == thread_info->top_window) return TRUE;
-    if (hwnd == thread_info->msg_window) return TRUE;
+    if (hwnd == UlongToHandle( thread_info->top_window )) return TRUE;
+    if (hwnd == UlongToHandle( thread_info->msg_window )) return TRUE;
 
     if (!HIWORD(hwnd) || HIWORD(hwnd) == 0xffff)
     {
@@ -121,28 +121,10 @@ BOOL is_desktop_window( HWND hwnd )
 }
 
 
-/***********************************************************************
- *           WIN_GetPtr
- *
- * Return a pointer to the WND structure if local to the process,
- * or WND_OTHER_PROCESS if handle may be valid in other process.
- * If ret value is a valid pointer, it must be released with WIN_ReleasePtr.
- */
-WND *WIN_GetPtr( HWND hwnd )
+/* check if hwnd is a broadcast magic handle */
+static inline BOOL is_broadcast( HWND hwnd )
 {
-    WND *ptr = (void *)NtUserCallTwoParam( HandleToUlong(hwnd), NTUSER_OBJ_WINDOW, NtUserGetHandlePtr );
-    if (ptr == WND_OTHER_PROCESS && is_desktop_window( hwnd )) ptr = WND_DESKTOP;
-    return ptr;
-}
-
-
-/***********************************************************************
- *           WIN_ReleasePtr
- */
-void WIN_ReleasePtr( WND *ptr )
-{
-    assert( ptr && ptr != OBJ_OTHER_PROCESS );
-    NtUserCallOneParam( 1, NtUserLock );
+    return hwnd == HWND_BROADCAST || hwnd == HWND_TOPMOST;
 }
 
 
@@ -169,24 +151,6 @@ HWND WIN_IsCurrentThread( HWND hwnd )
 
 
 /***********************************************************************
- *           win_set_flags
- *
- * Set the flags of a window and return the previous value.
- */
-UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask )
-{
-    UINT ret;
-    WND *ptr = WIN_GetPtr( hwnd );
-
-    if (!ptr || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
-    ret = ptr->flags;
-    ptr->flags = (ret & ~clear_mask) | set_mask;
-    WIN_ReleasePtr( ptr );
-    return ret;
-}
-
-
-/***********************************************************************
  *           WIN_GetFullHandle
  *
  * Convert a possibly truncated window handle to a full 32-bit handle.
@@ -208,141 +172,6 @@ ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
      * We use STYLESTRUCT to pass params, but meaning of its field does not match our usage. */
     STYLESTRUCT style = { .styleNew = set_bits, .styleOld = clear_bits };
     return NtUserCallHwndParam( hwnd, (UINT_PTR)&style, NtUserSetWindowStyle );
-}
-
-
-/***********************************************************************
- *           WIN_GetRectangles
- *
- * Get the window and client rectangles.
- */
-BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWindow, RECT *rectClient )
-{
-    WND *win = WIN_GetPtr( hwnd );
-    BOOL ret = TRUE;
-
-    if (!win)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return FALSE;
-    }
-    if (win == WND_DESKTOP)
-    {
-        RECT rect;
-        rect.left = rect.top = 0;
-        if (hwnd == get_hwnd_message_parent())
-        {
-            rect.right  = 100;
-            rect.bottom = 100;
-            rect = rect_win_to_thread_dpi( hwnd, rect );
-        }
-        else
-        {
-            rect = get_primary_monitor_rect();
-        }
-        if (rectWindow) *rectWindow = rect;
-        if (rectClient) *rectClient = rect;
-        return TRUE;
-    }
-    if (win != WND_OTHER_PROCESS)
-    {
-        RECT window_rect = win->window_rect, client_rect = win->client_rect;
-
-        switch (relative)
-        {
-        case COORDS_CLIENT:
-            OffsetRect( &window_rect, -win->client_rect.left, -win->client_rect.top );
-            OffsetRect( &client_rect, -win->client_rect.left, -win->client_rect.top );
-            if (win->dwExStyle & WS_EX_LAYOUTRTL)
-                mirror_rect( &win->client_rect, &window_rect );
-            break;
-        case COORDS_WINDOW:
-            OffsetRect( &window_rect, -win->window_rect.left, -win->window_rect.top );
-            OffsetRect( &client_rect, -win->window_rect.left, -win->window_rect.top );
-            if (win->dwExStyle & WS_EX_LAYOUTRTL)
-                mirror_rect( &win->window_rect, &client_rect );
-            break;
-        case COORDS_PARENT:
-            if (win->parent)
-            {
-                WND *parent = WIN_GetPtr( win->parent );
-                if (parent == WND_DESKTOP) break;
-                if (!parent || parent == WND_OTHER_PROCESS)
-                {
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                if (parent->flags & WIN_CHILDREN_MOVED)
-                {
-                    WIN_ReleasePtr( parent );
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                if (parent->dwExStyle & WS_EX_LAYOUTRTL)
-                {
-                    mirror_rect( &parent->client_rect, &window_rect );
-                    mirror_rect( &parent->client_rect, &client_rect );
-                }
-                WIN_ReleasePtr( parent );
-            }
-            break;
-        case COORDS_SCREEN:
-            while (win->parent)
-            {
-                WND *parent = WIN_GetPtr( win->parent );
-                if (parent == WND_DESKTOP) break;
-                if (!parent || parent == WND_OTHER_PROCESS)
-                {
-                    WIN_ReleasePtr( win );
-                    goto other_process;
-                }
-                WIN_ReleasePtr( win );
-                if (parent->flags & WIN_CHILDREN_MOVED)
-                {
-                    WIN_ReleasePtr( parent );
-                    goto other_process;
-                }
-                win = parent;
-                if (win->parent)
-                {
-                    OffsetRect( &window_rect, win->client_rect.left, win->client_rect.top );
-                    OffsetRect( &client_rect, win->client_rect.left, win->client_rect.top );
-                }
-            }
-            break;
-        }
-        if (rectWindow) *rectWindow = rect_win_to_thread_dpi( hwnd, window_rect );
-        if (rectClient) *rectClient = rect_win_to_thread_dpi( hwnd, client_rect );
-        WIN_ReleasePtr( win );
-        return TRUE;
-    }
-
-other_process:
-    SERVER_START_REQ( get_window_rectangles )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        req->relative = relative;
-        req->dpi = get_thread_dpi();
-        if ((ret = !wine_server_call_err( req )))
-        {
-            if (rectWindow)
-            {
-                rectWindow->left   = reply->window.left;
-                rectWindow->top    = reply->window.top;
-                rectWindow->right  = reply->window.right;
-                rectWindow->bottom = reply->window.bottom;
-            }
-            if (rectClient)
-            {
-                rectClient->left   = reply->client.left;
-                rectClient->top    = reply->client.top;
-                rectClient->right  = reply->client.right;
-                rectClient->bottom = reply->client.bottom;
-            }
-        }
-    }
-    SERVER_END_REQ;
-    return ret;
 }
 
 
@@ -494,7 +323,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         POINT pos[2];
         UINT id = 0;
 
-        if (!(win_get_flags( cs->hwndParent ) & WIN_ISMDICLIENT))
+        if (!NtUserGetMDIClientInfo( cs->hwndParent ))
         {
             WARN("WS_EX_MDICHILD, but parent %p is not MDIClient\n", cs->hwndParent);
             return 0;
@@ -753,7 +582,7 @@ HWND WINAPI GetDesktopWindow(void)
 {
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
-    if (thread_info->top_window) return thread_info->top_window;
+    if (thread_info->top_window) return UlongToHandle( thread_info->top_window );
     return NtUserGetDesktopWindow();
 }
 
@@ -1212,8 +1041,6 @@ BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
     BOOL ret = TRUE;
     int i;
 
-    USER_CheckNotLock();
-
     /* We have to build a list of all windows first, to avoid */
     /* unpleasant side-effects, for instance if the callback */
     /* function changes the Z-order of the windows.          */
@@ -1242,8 +1069,6 @@ BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
     int i;
     BOOL ret = TRUE;
 
-    USER_CheckNotLock();
-
     if (!(list = list_window_children( 0, GetDesktopWindow(), NULL, id ))) return TRUE;
 
     /* Now call the callback function for every window */
@@ -1262,8 +1087,6 @@ BOOL WINAPI EnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
 {
     HWND *list;
     int i;
-
-    USER_CheckNotLock();
 
     if (!(list = list_window_children( desktop, 0, NULL, 0 ))) return TRUE;
 
@@ -1336,8 +1159,6 @@ BOOL WINAPI EnumChildWindows( HWND parent, WNDENUMPROC func, LPARAM lParam )
 {
     HWND *list;
     BOOL ret;
-
-    USER_CheckNotLock();
 
     if (!(list = WIN_ListChildren( parent ))) return FALSE;
     ret = WIN_EnumChildWindows( list, func, lParam );

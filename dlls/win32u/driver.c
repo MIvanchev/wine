@@ -312,7 +312,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
 
 static BOOL CDECL nulldrv_GetDeviceGammaRamp( PHYSDEV dev, void *ramp )
 {
-    SetLastError( ERROR_INVALID_PARAMETER );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return FALSE;
 }
 
@@ -516,7 +516,7 @@ static void CDECL nulldrv_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
 
 static BOOL CDECL nulldrv_SetDeviceGammaRamp( PHYSDEV dev, void *ramp )
 {
-    SetLastError( ERROR_INVALID_PARAMETER );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return FALSE;
 }
 
@@ -764,6 +764,11 @@ static BOOL nulldrv_EnumDisplaySettingsEx( LPCWSTR name, DWORD num, LPDEVMODEW m
     return FALSE;
 }
 
+static BOOL nulldrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+{
+    return FALSE;
+}
+
 static BOOL nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, BOOL force, void *param )
 {
     return FALSE;
@@ -780,7 +785,7 @@ static BOOL nodrv_CreateWindow( HWND hwnd )
     HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
 
     /* HWND_MESSAGE windows don't need a graphics driver */
-    if (!parent || parent == NtUserGetThreadInfo()->msg_window) return TRUE;
+    if (!parent || parent == UlongToHandle( NtUserGetThreadInfo()->msg_window )) return TRUE;
     if (warned++) return FALSE;
 
     ERR_(winediag)( "Application tried to create a window, but no driver could be loaded.\n" );
@@ -1077,6 +1082,11 @@ static BOOL loaderdrv_EnumDisplaySettingsEx( LPCWSTR name, DWORD num, LPDEVMODEW
     return load_driver()->pEnumDisplaySettingsEx( name, num, mode, flags );
 }
 
+static BOOL loaderdrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+{
+    return load_driver()->pGetCurrentDisplaySettings( name, mode );
+}
+
 static void loaderdrv_SetCursor( HCURSOR cursor )
 {
     load_driver()->pSetCursor( cursor );
@@ -1179,6 +1189,7 @@ static const struct user_driver_funcs lazy_load_driver =
     /* display modes */
     loaderdrv_ChangeDisplaySettingsEx,
     loaderdrv_EnumDisplaySettingsEx,
+    loaderdrv_GetCurrentDisplaySettings,
     loaderdrv_UpdateDisplayDevices,
     /* windowing functions */
     loaderdrv_CreateDesktopWindow,
@@ -1254,6 +1265,7 @@ void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(ChangeDisplaySettingsEx);
     SET_USER_FUNC(EnumDisplaySettingsEx);
+    SET_USER_FUNC(GetCurrentDisplaySettings);
     SET_USER_FUNC(UpdateDisplayDevices);
     SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);

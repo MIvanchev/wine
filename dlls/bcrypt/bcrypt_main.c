@@ -531,6 +531,7 @@ static NTSTATUS get_aes_property( enum mode_id mode, const WCHAR *prop, UCHAR *b
         case MODE_ID_ECB: str = BCRYPT_CHAIN_MODE_ECB; break;
         case MODE_ID_CBC: str = BCRYPT_CHAIN_MODE_CBC; break;
         case MODE_ID_GCM: str = BCRYPT_CHAIN_MODE_GCM; break;
+        case MODE_ID_CFB: str = BCRYPT_CHAIN_MODE_CFB; break;
         default: return STATUS_NOT_IMPLEMENTED;
         }
 
@@ -660,6 +661,11 @@ static NTSTATUS set_alg_property( struct algorithm *alg, const WCHAR *prop, UCHA
             else if (!wcscmp( (WCHAR *)value, BCRYPT_CHAIN_MODE_GCM ))
             {
                 alg->mode = MODE_ID_GCM;
+                return STATUS_SUCCESS;
+            }
+            else if (!wcscmp( (WCHAR *)value, BCRYPT_CHAIN_MODE_CFB ))
+            {
+                alg->mode = MODE_ID_CFB;
                 return STATUS_SUCCESS;
             }
             else
@@ -1880,26 +1886,41 @@ NTSTATUS WINAPI BCryptEncrypt( BCRYPT_KEY_HANDLE handle, UCHAR *input, ULONG inp
                                ULONG iv_len, UCHAR *output, ULONG output_len, ULONG *ret_len, ULONG flags )
 {
     struct key *key = handle;
+    struct key_asymmetric_encrypt_params asymmetric_params;
     NTSTATUS ret;
 
     TRACE( "%p, %p, %lu, %p, %p, %lu, %p, %lu, %p, %#lx\n", handle, input, input_len, padding, iv, iv_len, output,
            output_len, ret_len, flags );
 
     if (!key || key->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
-    if (!key_is_symmetric( key ))
+
+    if (key_is_symmetric( key ))
     {
-        FIXME( "encryption with asymmetric keys not yet supported\n" );
-        return STATUS_NOT_IMPLEMENTED;
+        if (flags & ~BCRYPT_BLOCK_PADDING)
+        {
+            FIXME( "flags %#lx not implemented\n", flags );
+            return STATUS_NOT_IMPLEMENTED;
+        }
+        EnterCriticalSection( &key->u.s.cs );
+        ret = key_symmetric_encrypt( key, input, input_len, padding, iv, iv_len, output, output_len, ret_len, flags );
+        LeaveCriticalSection( &key->u.s.cs );
     }
-    if (flags & ~BCRYPT_BLOCK_PADDING)
+    else
     {
-        FIXME( "flags %#lx not implemented\n", flags );
-        return STATUS_NOT_IMPLEMENTED;
+        if (flags & BCRYPT_PAD_NONE || flags & BCRYPT_PAD_OAEP)
+        {
+            FIXME( "flags %#lx not implemented\n", flags );
+            return STATUS_NOT_IMPLEMENTED;
+        }
+        asymmetric_params.input = input;
+        asymmetric_params.input_len = input_len;
+        asymmetric_params.key = key;
+        asymmetric_params.output = output;
+        asymmetric_params.output_len = output_len;
+        asymmetric_params.ret_len = ret_len;
+        ret = UNIX_CALL(key_asymmetric_encrypt, &asymmetric_params);
     }
 
-    EnterCriticalSection( &key->u.s.cs );
-    ret = key_symmetric_encrypt( key, input, input_len, padding, iv, iv_len, output, output_len, ret_len, flags );
-    LeaveCriticalSection( &key->u.s.cs );
     return ret;
 }
 

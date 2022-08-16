@@ -41,16 +41,6 @@ HMODULE user32_module = 0;
 
 extern void WDML_NotifyThreadDetach(void);
 
-/***********************************************************************
- *           USER_CheckNotLock
- *
- * Make sure that we don't hold the user lock.
- */
-void USER_CheckNotLock(void)
-{
-    NtUserCallOneParam( 2, NtUserLock );
-}
-
 
 /***********************************************************************
  *             UserRealizePalette (USER32.@)
@@ -211,11 +201,11 @@ static const void *kernel_callback_table[NtUserCallCount] =
     User32FreeCachedClipboardData,
     User32ImmProcessKey,
     User32ImmTranslateMessage,
+    User32InitBuiltinClasses,
     User32LoadDriver,
     User32LoadImage,
     User32LoadSysMenu,
     User32PostDDEMessage,
-    User32RegisterBuiltinClasses,
     User32RenderSsynthesizedFormat,
     User32UnpackDDEMessage,
 };
@@ -230,7 +220,6 @@ static BOOL process_attach(void)
 
     dpiaware_init();
     winproc_init();
-    register_desktop_class();
 
     /* Initialize system colors and metrics */
     SYSPARAMS_Init();
@@ -244,14 +233,14 @@ static BOOL process_attach(void)
  */
 static void thread_detach(void)
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
 
     NtUserCallNoParam( NtUserExitingThread );
 
     WDML_NotifyThreadDetach();
 
     NtUserCallNoParam( NtUserThreadDetach );
-    HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
+    HeapFree( GetProcessHeap(), 0, (void *)(UINT_PTR)thread_info->wmchar_data );
 }
 
 
@@ -363,7 +352,9 @@ BOOL WINAPI ShutdownBlockReasonDestroy(HWND hwnd)
 
 const char *SPY_GetMsgName( UINT msg, HWND hwnd )
 {
-    return (const char *)NtUserCallHwndParam( hwnd, msg, NtUserSpyGetMsgName );
+    char buf[128];
+    NtUserMessageCall( hwnd, msg, ARRAYSIZE(buf), 0, buf, NtUserSpyGetMsgName, FALSE );
+    return wine_dbg_sprintf( "%s", buf );
 }
 
 void SPY_EnterMessage( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )

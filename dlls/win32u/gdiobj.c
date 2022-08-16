@@ -566,8 +566,8 @@ static void init_gdi_shared(void)
 {
     SIZE_T size = sizeof(*gdi_shared);
 
-    if (NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&gdi_shared, 0, &size,
-                                 MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
+    if (NtAllocateVirtualMemory( GetCurrentProcess(), (void **)&gdi_shared, zero_bits(),
+                                 &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
         return;
     next_unused = gdi_shared->Handles + FIRST_GDI_HANDLE;
 
@@ -943,7 +943,7 @@ INT WINAPI NtGdiExtGetObjectW( HGDIOBJ handle, INT count, void *buffer )
     if (funcs && funcs->pGetObjectW)
     {
         if (buffer && ((ULONG_PTR)buffer >> 16) == 0) /* catch apps getting argument order wrong */
-            SetLastError( ERROR_NOACCESS );
+            RtlSetLastWin32Error( ERROR_NOACCESS );
         else
             result = funcs->pGetObjectW( handle, count, buffer );
     }

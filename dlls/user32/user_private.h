@@ -25,20 +25,13 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "../win32u/ntuser_private.h"
+#include "ntuser.h"
 #include "winreg.h"
-#include "winternl.h"
-#include "hidusage.h"
 #include "wine/heap.h"
 
 #define GET_WORD(ptr)  (*(const WORD *)(ptr))
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
 #define GET_LONG(ptr) (*(const LONG *)(ptr))
-
-#define WINE_MOUSE_HANDLE       ((HANDLE)1)
-#define WINE_KEYBOARD_HANDLE    ((HANDLE)2)
-
-struct received_message_info;
 
 /* data to store state for A/W mappings of WM_CHAR */
 struct wm_char_mapping_data
@@ -47,15 +40,7 @@ struct wm_char_mapping_data
     MSG  get_msg;
 };
 
-static inline struct user_thread_info *get_user_thread_info(void)
-{
-    return (struct user_thread_info *)NtCurrentTeb()->Win32ClientInfo;
-}
-
 extern HMODULE user32_module DECLSPEC_HIDDEN;
-
-struct dce;
-struct tagWND;
 
 extern BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
                               DWORD type ) DECLSPEC_HIDDEN;
@@ -76,7 +61,6 @@ extern BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping 
 extern HPEN SYSCOLOR_GetPen( INT index ) DECLSPEC_HIDDEN;
 extern HBRUSH SYSCOLOR_Get55AABrush(void) DECLSPEC_HIDDEN;
 extern void SYSPARAMS_Init(void) DECLSPEC_HIDDEN;
-extern void USER_CheckNotLock(void) DECLSPEC_HIDDEN;
 
 typedef LRESULT (*winproc_callback_t)( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                        LRESULT *result, void *arg );
@@ -100,7 +84,7 @@ BOOL WINAPI User32CallSendAsyncCallback( const struct send_async_params *params,
 BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, ULONG size );
 BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size );
 BOOL WINAPI User32CallWindowsHook( const struct win_hook_params *params, ULONG size );
-BOOL WINAPI User32RegisterBuiltinClasses( const struct win_hook_params *params, ULONG size );
+BOOL WINAPI User32InitBuiltinClasses( const struct win_hook_params *params, ULONG size );
 
 /* message spy definitions */
 

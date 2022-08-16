@@ -3328,11 +3328,16 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 
         if (x == -1 && y == -1) /* passed via VK_APPS press/release */
         {
+            POINT pt;
             RECT rc;
+
             /* Windows places the menu at the edit's center in this case */
-            WIN_GetRectangles( es->hwndSelf, COORDS_SCREEN, NULL, &rc );
-            x = rc.left + (rc.right - rc.left) / 2;
-            y = rc.top + (rc.bottom - rc.top) / 2;
+            GetClientRect( es->hwndSelf, &rc );
+            pt.x = rc.right / 2;
+            pt.y = rc.bottom / 2;
+            ClientToScreen( es->hwndSelf, &pt );
+            x = pt.x;
+            y = pt.y;
         }
 
 	if (!(es->flags & EF_FOCUSED))
@@ -5250,21 +5255,3 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 
 	return result;
 }
-
-
-/*********************************************************************
- * edit class descriptor
- */
-const struct builtin_class_descr EDIT_builtin_class =
-{
-    L"Edit",              /* name */
-    CS_DBLCLKS | CS_PARENTDC,   /* style */
-    WINPROC_EDIT,         /* proc */
-#ifdef __i386__
-    sizeof(EDITSTATE *) + sizeof(WORD), /* extra */
-#else
-    sizeof(EDITSTATE *),  /* extra */
-#endif
-    IDC_IBEAM,            /* cursor */
-    0                     /* brush */
-};

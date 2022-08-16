@@ -39,6 +39,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dialog);
 
 
+#define DIALOG_CLASS_ATOM    MAKEINTATOM(32770)  /* Dialog */
+
   /* Dialog control information */
 typedef struct
 {
@@ -83,20 +85,6 @@ typedef struct
     UINT lastID;
     UINT checkID;
 } RADIOGROUP;
-
-
-/*********************************************************************
- * dialog class descriptor
- */
-const struct builtin_class_descr DIALOG_builtin_class =
-{
-    (LPCWSTR)DIALOG_CLASS_ATOM, /* name */
-    CS_SAVEBITS | CS_DBLCLKS, /* style  */
-    WINPROC_DIALOG,     /* proc */
-    DLGWINDOWEXTRA,     /* extra */
-    IDC_ARROW,          /* cursor */
-    0                   /* brush */
-};
 
 
 /***********************************************************************

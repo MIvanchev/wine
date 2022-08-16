@@ -147,8 +147,6 @@ static LRESULT call_dialog_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRES
     WNDPROC proc = arg;
     LRESULT ret;
 
-    USER_CheckNotLock();
-
     hwnd = WIN_GetFullHandle( hwnd );
     TRACE_(relay)( "\1Call dialog proc %p (hwnd=%p,msg=%s,wp=%08Ix,lp=%08Ix)\n",
                    proc, hwnd, SPY_GetMsgName(msg, hwnd), wp, lp );
@@ -1238,7 +1236,6 @@ BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size )
         char stack_buffer[128];
         void *buffer;
         LRESULT result;
-        MSG msg;
 
         if (size > sizeof(*params))
         {
@@ -1255,13 +1252,11 @@ BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size )
             return 0;
         params->result = &result;
 
-        msg.hwnd    = params->hwnd;
-        msg.message = params->msg;
-        msg.wParam  = params->wparam;
-        msg.lParam  = params->lparam;
+
         dispatch_win_proc_params( params );
 
-        NtUserReplyMessage( result, &msg );
+        NtUserMessageCall( params->hwnd, params->msg, params->wparam, params->lparam,
+                           (void *)result, NtUserWinProcResult, FALSE );
         if (buffer != stack_buffer && buffer != params + 1)
             HeapFree( GetProcessHeap(), 0, buffer );
     }

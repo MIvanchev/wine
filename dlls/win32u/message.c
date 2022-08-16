@@ -245,7 +245,7 @@ static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, 
 
 static BOOL dispatch_win_proc_params( struct win_proc_params *params, size_t size )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
     void *ret_ptr;
     ULONG ret_len;
 
@@ -1045,6 +1045,8 @@ static void reply_message( struct received_message_info *info, LRESULT result, M
 
     memset( &data, 0, sizeof(data) );
     info->flags |= ISMEX_REPLIED;
+    if (info == get_user_thread_info()->receive_info)
+        NtUserGetThreadInfo()->receive_flags = info->flags;
 
     if (info->type == MSG_OTHER_PROCESS && !replied)
     {
@@ -1067,13 +1069,37 @@ static void reply_message( struct received_message_info *info, LRESULT result, M
  *
  * Send a reply to a sent message and update thread receive info.
  */
-BOOL reply_message_result( LRESULT result, MSG *msg )
+BOOL reply_message_result( LRESULT result )
 {
-    struct received_message_info *info = get_user_thread_info()->receive_info;
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct received_message_info *info = thread_info->receive_info;
 
     if (!info) return FALSE;
-    reply_message( info, result, msg );
-    if (msg) get_user_thread_info()->receive_info = info->prev;
+    reply_message( info, result, NULL );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           reply_winproc_result
+ *
+ * Send a reply to a sent message and update thread receive info.
+ */
+static BOOL reply_winproc_result( LRESULT result, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct received_message_info *info = thread_info->receive_info;
+    MSG msg;
+
+    if (!info) return FALSE;
+
+    msg.hwnd = hwnd;
+    msg.message = message;
+    msg.wParam = wparam;
+    msg.lParam = lparam;
+    reply_message( info, result, &msg );
+
+    thread_info->receive_info = info->prev;
+    thread_info->client_info.receive_flags = info->prev ? info->prev->flags : ISMEX_NOSEND;
     return TRUE;
 }
 
@@ -1140,7 +1166,7 @@ BOOL WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
 
     if (info->cbSize != sizeof(*info))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 
@@ -1593,11 +1619,12 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
                                       HWND hwnd_filter, UINT first, UINT last, BOOL remove )
 {
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
     DPI_AWARENESS_CONTEXT context;
     BOOL ret = FALSE;
 
-    get_user_thread_info()->msg_source.deviceType = msg_data->source.device;
-    get_user_thread_info()->msg_source.originId   = msg_data->source.origin;
+    thread_info->msg_source.deviceType = msg_data->source.device;
+    thread_info->msg_source.originId   = msg_data->source.origin;
 
     /* hardware messages are always in physical coords */
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
@@ -1625,7 +1652,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
 {
     LRESULT result;
     struct user_thread_info *thread_info = get_user_thread_info();
-    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->client_info.msg_source;
     struct received_message_info info;
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
@@ -1643,7 +1670,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         const message_data_t *msg_data = buffer;
         BOOL needs_unpack = FALSE;
 
-        thread_info->msg_source = prev_source;
+        thread_info->client_info.msg_source = prev_source;
 
         SERVER_START_REQ( get_message )
         {
@@ -1684,7 +1711,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             }
             if (res != STATUS_BUFFER_OVERFLOW)
             {
-                SetLastError( RtlNtStatusToDosError(res) );
+                RtlSetLastWin32Error( RtlNtStatusToDosError(res) );
                 return -1;
             }
             if (!(buffer = malloc( buffer_size ))) return -1;
@@ -1854,7 +1881,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             thread_info->client_info.message_pos   = MAKELONG( msg->pt.x, msg->pt.y );
             thread_info->client_info.message_time  = info.msg.time;
             thread_info->client_info.message_extra = 0;
-            thread_info->msg_source = msg_source_unavailable;
+            thread_info->client_info.msg_source = msg_source_unavailable;
             free( buffer );
             call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
             return 1;
@@ -1863,12 +1890,14 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         /* if we get here, we have a sent message; call the window procedure */
         info.prev = thread_info->receive_info;
         thread_info->receive_info = &info;
-        thread_info->msg_source = msg_source_unavailable;
+        thread_info->client_info.msg_source = msg_source_unavailable;
+        thread_info->client_info.receive_flags = info.flags;
         result = call_window_proc( info.msg.hwnd, info.msg.message, info.msg.wParam,
                                    info.msg.lParam, (info.type != MSG_ASCII), FALSE,
                                    WMCHAR_MAP_RECVMESSAGE, needs_unpack, buffer, size );
         if (thread_info->receive_info == &info)
-            reply_message_result( result, &info.msg );
+            reply_winproc_result( result, info.msg.hwnd, info.msg.message,
+                                  info.msg.wParam, info.msg.lParam );
 
         /* if some PM_QS* flags were specified, only handle sent messages from now on */
         if (HIWORD(flags) && !changed_mask) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
@@ -1950,7 +1979,7 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
                                                      mask, flags );
     if (HIWORD(ret))  /* is it an error code? */
     {
-        SetLastError( RtlNtStatusToDosError(ret) );
+        RtlSetLastWin32Error( RtlNtStatusToDosError(ret) );
         ret = WAIT_FAILED;
     }
     if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
@@ -2020,7 +2049,7 @@ DWORD WINAPI NtUserMsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handl
 
     if (count > MAXIMUM_WAIT_OBJECTS-1)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return WAIT_FAILED;
     }
 
@@ -2114,7 +2143,7 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
      * (back to the program) inside the message handling itself. */
     if (!msg_out)
     {
-        SetLastError( ERROR_NOACCESS );
+        RtlSetLastWin32Error( ERROR_NOACCESS );
         return FALSE;
     }
     *msg_out = msg;
@@ -2233,9 +2262,9 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
         {
             if (res == STATUS_INVALID_PARAMETER)
                 /* FIXME: find a STATUS_ value for this one */
-                SetLastError( ERROR_INVALID_THREAD_ID );
+                RtlSetLastWin32Error( ERROR_INVALID_THREAD_ID );
             else
-                SetLastError( RtlNtStatusToDosError(res) );
+                RtlSetLastWin32Error( RtlNtStatusToDosError(res) );
         }
     }
     SERVER_END_REQ;
@@ -2317,7 +2346,7 @@ static LRESULT retrieve_reply( const struct send_message_info *info,
            info->lparam, *result, status );
 
     /* MSDN states that last error is 0 on timeout, but at least NT4 returns ERROR_TIMEOUT */
-    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError(status) );
     return !status;
 }
 
@@ -2538,8 +2567,8 @@ LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
     if (init_window_call_params( &params, msg->hwnd, msg->message, msg->wParam, msg->lParam,
                                  &retval, FALSE, WMCHAR_MAP_DISPATCHMESSAGE ))
         dispatch_win_proc_params( &params, sizeof(params) );
-    else if (!is_window( msg->hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-    else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+    else if (!is_window( msg->hwnd )) RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+    else RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
 
     spy_exit_message( SPY_RESULT_OK, msg->hwnd, msg->message, retval, msg->wParam, msg->lParam );
 
@@ -2619,7 +2648,7 @@ static BOOL broadcast_message( struct send_message_info *info, DWORD_PTR *res_pt
  */
 static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr, BOOL ansi )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
     INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     DWORD dest_pid;
     BOOL ret;
@@ -2812,7 +2841,7 @@ static BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
     if (is_pointer_message( msg, wparam ))
     {
-        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
     }
 
@@ -2836,7 +2865,7 @@ static BOOL send_message_callback( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 
     if (is_pointer_message( msg, wparam ))
     {
-        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
     }
 
@@ -2863,7 +2892,7 @@ BOOL WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
 
     if (is_pointer_message( msg, wparam ))
     {
-        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
     }
 
@@ -2898,7 +2927,7 @@ BOOL WINAPI NtUserPostThreadMessage( DWORD thread, UINT msg, WPARAM wparam, LPAR
 
     if (is_pointer_message( msg, wparam ))
     {
-        SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
     }
     if (is_exiting_thread( thread )) return TRUE;
@@ -2951,22 +2980,29 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         return send_notify_message( hwnd, msg, wparam, lparam, ansi );
 
     case NtUserSendMessageCallback:
-        return send_message_callback( hwnd, msg, wparam, lparam, (void *)result_info, ansi );
+        return send_message_callback( hwnd, msg, wparam, lparam, result_info, ansi );
 
     case NtUserClipboardWindowProc:
         return user_driver->pClipboardWindowProc( hwnd, msg, wparam, lparam );
+
+    case NtUserWinProcResult:
+        return reply_winproc_result( (LRESULT)result_info, hwnd, msg, wparam, lparam );
 
     case NtUserGetDispatchParams:
         if (!hwnd) return FALSE;
         if (init_window_call_params( result_info, hwnd, msg, wparam, lparam,
                                      NULL, ansi, WMCHAR_MAP_DISPATCHMESSAGE ))
             return TRUE;
-        if (!is_window( hwnd )) SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        else SetLastError( ERROR_MESSAGE_SYNC_ONLY );
+        if (!is_window( hwnd )) RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+        else RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
 
     case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );
+        return 0;
+
+    case NtUserSpyGetMsgName:
+        lstrcpynA( result_info, debugstr_msg_name( msg, hwnd ), wparam );
         return 0;
 
     case NtUserSpyExit:
