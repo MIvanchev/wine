@@ -209,15 +209,6 @@ struct scroll_bar_win_data
 #define WINSWITCH_CLASS_ATOM MAKEINTATOM(32771)  /* WinSwitch */
 #define ICONTITLE_CLASS_ATOM MAKEINTATOM(32772)  /* IconTitle */
 
-/* info about the message currently being received by the current thread */
-struct received_message_info
-{
-    UINT  type;
-    MSG   msg;
-    UINT  flags;  /* InSendMessageEx return flags */
-    struct received_message_info *prev;
-};
-
 extern const char *debugstr_msg_name( UINT msg, HWND hwnd ) DECLSPEC_HIDDEN;
 extern const char *debugstr_vkey_name( WPARAM wParam ) DECLSPEC_HIDDEN;
 extern void spy_enter_message( INT flag, HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
@@ -232,10 +223,10 @@ DWORD get_class_long( HWND hwnd, INT offset, BOOL ansi ) DECLSPEC_HIDDEN;
 WNDPROC get_class_winproc( struct tagCLASS *class ) DECLSPEC_HIDDEN;
 ULONG_PTR get_class_long_ptr( HWND hwnd, INT offset, BOOL ansi ) DECLSPEC_HIDDEN;
 WORD get_class_word( HWND hwnd, INT offset ) DECLSPEC_HIDDEN;
-DLGPROC get_dialog_proc( HWND hwnd, enum dialog_proc_type type ) DECLSPEC_HIDDEN;
+DLGPROC get_dialog_proc( DLGPROC proc, BOOL ansi ) DECLSPEC_HIDDEN;
 ATOM get_int_atom_value( UNICODE_STRING *name ) DECLSPEC_HIDDEN;
 WNDPROC get_winproc( WNDPROC proc, BOOL ansi ) DECLSPEC_HIDDEN;
-void get_winproc_params( struct win_proc_params *params ) DECLSPEC_HIDDEN;
+void get_winproc_params( struct win_proc_params *params, BOOL fixup_ansi_dst ) DECLSPEC_HIDDEN;
 struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
 struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
 BOOL needs_ime_window( HWND hwnd ) DECLSPEC_HIDDEN;

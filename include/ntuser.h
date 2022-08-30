@@ -146,7 +146,6 @@ struct win_proc_params
     LRESULT *result;
     BOOL ansi;
     BOOL ansi_dst;
-    BOOL is_dialog;
     BOOL needs_unpack;
     enum wm_char_mapping mapping;
     DPI_AWARENESS_CONTEXT dpi_awareness;
@@ -165,9 +164,9 @@ struct win_hook_params
     int code;
     WPARAM wparam;
     LPARAM lparam;
+    UINT lparam_size;
     BOOL prev_unicode;
     BOOL next_unicode;
-    WCHAR module[MAX_PATH];
 };
 
 /* NtUserCopyImage params */
@@ -185,7 +184,8 @@ struct draw_text_params
 {
     HDC hdc;
     int count;
-    RECT *rect; /* FIXME: Use NtCallbackReturn instead */
+    RECT rect;
+    RECT *ret_rect; /* FIXME: Use NtCallbackReturn instead */
     UINT flags;
     WCHAR str[1];
 };
@@ -773,6 +773,7 @@ BOOL    WINAPI NtUserInvalidateRect( HWND hwnd, const RECT *rect, BOOL erase );
 BOOL    WINAPI NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase );
 BOOL    WINAPI NtUserKillTimer( HWND hwnd, UINT_PTR id );
 BOOL    WINAPI NtUserLockWindowUpdate( HWND hwnd );
+BOOL    WINAPI NtUserLogicalToPerMonitorDPIPhysicalPoint( HWND hwnd, POINT *pt );
 UINT    WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout );
 INT     WINAPI NtUserMenuItemFromPoint( HWND hwnd, HMENU handle, int x, int y );
 LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
@@ -787,6 +788,7 @@ BOOL    WINAPI NtUserOpenClipboard( HWND hwnd, ULONG unk );
 HDESK   WINAPI NtUserOpenDesktop( OBJECT_ATTRIBUTES *attr, DWORD flags, ACCESS_MASK access );
 HDESK   WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK access );
 BOOL    WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags );
+BOOL    WINAPI NtUserPerMonitorDPIPhysicalToLogicalPoint( HWND hwnd, POINT *pt );
 BOOL    WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );
 BOOL    WINAPI NtUserPostThreadMessage( DWORD thread, UINT msg, WPARAM wparam, LPARAM lparam );
 UINT_PTR WINAPI NtUserQueryInputContext( HIMC handle, UINT attr );
@@ -1066,6 +1068,7 @@ static inline UINT NtUserSetProcessDefaultLayout( DWORD layout )
 /* NtUserCallTwoParam codes, not compatible with Windows */
 enum
 {
+    NtUserCallTwoParam_GetDialogProc,
     NtUserCallTwoParam_GetMenuInfo,
     NtUserCallTwoParam_GetMonitorInfo,
     NtUserCallTwoParam_GetSystemMetricsForDpi,
@@ -1076,6 +1079,11 @@ enum
     /* temporary exports */
     NtUserAllocWinProc,
 };
+
+static inline DLGPROC NtUserGetDialogProc( DLGPROC proc, BOOL ansi )
+{
+    return (DLGPROC)NtUserCallTwoParam( (UINT_PTR)proc, ansi, NtUserCallTwoParam_GetDialogProc );
+}
 
 static inline BOOL NtUserGetMenuInfo( HMENU menu, MENUINFO *info )
 {
@@ -1118,6 +1126,7 @@ static inline BOOL NtUserUnhookWindowsHook( INT id, HOOKPROC proc )
 /* NtUserCallHwnd codes, not compatible with Windows */
 enum
 {
+    NtUserCallHwnd_ActivateOtherWindow,
     NtUserCallHwnd_ArrangeIconicWindows,
     NtUserCallHwnd_DrawMenuBar,
     NtUserCallHwnd_GetDefaultImeWindow,
@@ -1140,6 +1149,11 @@ enum
     NtUserIsCurrehtProcessWindow,
     NtUserIsCurrehtThreadWindow,
 };
+
+static inline void NtUserActivateOtherWindow( HWND hwnd )
+{
+    NtUserCallHwnd( hwnd, NtUserCallHwnd_ActivateOtherWindow );
+}
 
 static inline UINT NtUserArrangeIconicWindows( HWND parent )
 {
@@ -1239,7 +1253,6 @@ enum
     NtUserCallHwndParam_GetClassLongPtrW,
     NtUserCallHwndParam_GetClassWord,
     NtUserCallHwndParam_GetClientRect,
-    NtUserCallHwndParam_GetDialogProc,
     NtUserCallHwndParam_GetScrollInfo,
     NtUserCallHwndParam_GetWindowInfo,
     NtUserCallHwndParam_GetWindowLongA,
@@ -1308,18 +1321,6 @@ static inline WORD NtUserGetClassWord( HWND hwnd, INT offset )
 static inline BOOL NtUserGetClientRect( HWND hwnd, RECT *rect )
 {
     return NtUserCallHwndParam( hwnd, (UINT_PTR)rect, NtUserCallHwndParam_GetClientRect );
-}
-
-enum dialog_proc_type
-{
-    DLGPROC_ANSI,
-    DLGPROC_UNICODE,
-    DLGPROC_WIN16,
-};
-
-static inline DLGPROC NtUserGetDialogProc( HWND hwnd, enum dialog_proc_type type )
-{
-    return (DLGPROC)NtUserCallHwndParam( hwnd, type, NtUserCallHwndParam_GetDialogProc );
 }
 
 struct get_scroll_info_params

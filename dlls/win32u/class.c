@@ -201,7 +201,7 @@ BOOL is_winproc_unicode( WNDPROC proc, BOOL def_val )
     return ptr->procW != NULL;
 }
 
-void get_winproc_params( struct win_proc_params *params )
+void get_winproc_params( struct win_proc_params *params, BOOL fixup_ansi_dst )
 {
     WINDOWPROC *proc = get_winproc_ptr( params->func );
 
@@ -217,32 +217,41 @@ void get_winproc_params( struct win_proc_params *params )
     {
         params->procA = proc->procA;
         params->procW = proc->procW;
+
+        if (fixup_ansi_dst)
+        {
+            if (params->ansi)
+            {
+                if (params->procA) params->ansi_dst = TRUE;
+                else if (params->procW) params->ansi_dst = FALSE;
+            }
+            else
+            {
+                if (params->procW) params->ansi_dst = FALSE;
+                else if (params->procA) params->ansi_dst = TRUE;
+            }
+        }
     }
+
+    if (!params->procA) params->procA = params->func;
+    if (!params->procW) params->procW = params->func;
 }
 
-DLGPROC get_dialog_proc( HWND hwnd, enum dialog_proc_type type )
+DLGPROC get_dialog_proc( DLGPROC ret, BOOL ansi )
 {
     WINDOWPROC *proc;
-    DLGPROC ret;
-    WND *win;
 
-    if (!(win = get_win_ptr( hwnd ))) return NULL;
-    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
-    {
-        ERR( "cannot get dlg proc %p from other process\n", hwnd );
-        return 0;
-    }
-    ret = *(DLGPROC *)((char *)win->wExtra + DWLP_DLGPROC);
-    release_win_ptr( win );
-    if (type == DLGPROC_WIN16 || !(proc = get_winproc_ptr( ret ))) return ret;
+    if (!(proc = get_winproc_ptr( ret ))) return ret;
     if (proc == WINPROC_PROC16) return WINPROC_PROC16;
+    return ansi ? proc->procA : proc->procW;
+}
 
-    if (type == DLGPROC_ANSI)
-        ret = proc->procA ? proc->procA : proc->procW;
-    else
-        ret = proc->procW ? proc->procW : proc->procA;
-
-    return ret;
+static void init_user(void)
+{
+    gdi_init();
+    winstation_init();
+    sysparams_init();
+    register_desktop_class();
 }
 
 /***********************************************************************
@@ -252,6 +261,8 @@ NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const struct user_client_procs 
                                                  const struct user_client_procs *client_procsW,
                                                  const void *client_workers, HINSTANCE user_module )
 {
+    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
+
     winproc_array[WINPROC_BUTTON].procA = client_procsA->pButtonWndProc;
     winproc_array[WINPROC_BUTTON].procW = client_procsW->pButtonWndProc;
     winproc_array[WINPROC_COMBO].procA = client_procsA->pComboWndProc;
@@ -282,6 +293,8 @@ NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const struct user_client_procs 
     winproc_array[WINPROC_MESSAGE].procW = client_procsW->pMessageWndProc;
 
     user32_module = user_module;
+
+    pthread_once( &init_once, init_user );
     return STATUS_SUCCESS;
 }
 

@@ -19,28 +19,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
-#include <stdarg.h>
-
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "winerror.h"
-#include "winnls.h"
-#include "dbt.h"
-#include "dde.h"
-#include "imm.h"
-#include "hidusage.h"
-#include "ddk/imm.h"
-#include "wine/server.h"
 #include "user_private.h"
-#include "win.h"
 #include "controls.h"
+#include "dde.h"
+#include "wine/server.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
@@ -588,13 +572,17 @@ LRESULT WINAPI SendMessageTimeoutA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 }
 
 
-static LRESULT dispatch_send_message( struct win_proc_params *params )
+static LRESULT dispatch_send_message( struct win_proc_params *params, WPARAM wparam, LPARAM lparam )
 {
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
     INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     LRESULT retval = 0;
 
     static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
+
+    /* params may contain arguments modified by wow, use original parameters instead */
+    params->wparam = wparam;
+    params->lparam = lparam;
 
     thread_info->recursion_count++;
 
@@ -621,7 +609,7 @@ LRESULT WINAPI SendMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 
     params.hwnd = 0;
     retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, FALSE );
-    if (params.hwnd) retval = dispatch_send_message( &params );
+    if (params.hwnd) retval = dispatch_send_message( &params, wparam, lparam );
     return retval;
 }
 
@@ -643,7 +631,7 @@ LRESULT WINAPI SendMessageA( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 
     params.hwnd = 0;
     retval = NtUserMessageCall( hwnd, msg, wparam, lparam, &params, NtUserSendMessage, TRUE );
-    if (params.hwnd) retval = dispatch_send_message( &params );
+    if (params.hwnd) retval = dispatch_send_message( &params, wparam, lparam );
     return retval;
 }
 

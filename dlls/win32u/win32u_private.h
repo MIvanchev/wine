@@ -251,7 +251,8 @@ extern LRESULT handle_nc_hit_test( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 
 /* hook.c */
 extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
-extern LRESULT call_hooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
+extern LRESULT call_hooks( INT id, INT code, WPARAM wparam, LPARAM lparam,
+                           size_t lparam_size ) DECLSPEC_HIDDEN;
 extern BOOL is_hooked( INT id ) DECLSPEC_HIDDEN;
 extern BOOL unhook_windows_hook( INT id, HOOKPROC proc ) DECLSPEC_HIDDEN;
 
@@ -308,7 +309,7 @@ extern LRESULT send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid, UI
                                               PDWORD_PTR res_ptr ) DECLSPEC_HIDDEN;
 extern LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-                                     UINT flags, UINT timeout, PDWORD_PTR res_ptr, BOOL ansi );
+                                     UINT flags, UINT timeout, BOOL ansi );
 
 /* rawinput.c */
 extern BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data ) DECLSPEC_HIDDEN;
@@ -325,7 +326,6 @@ extern void track_scroll_bar( HWND hwnd, int scrollbar, POINT pt ) DECLSPEC_HIDD
 
 /* sysparams.c */
 extern BOOL enable_thunk_lock DECLSPEC_HIDDEN;
-extern DWORD process_layout DECLSPEC_HIDDEN;
 extern HBRUSH get_55aa_brush(void) DECLSPEC_HIDDEN;
 extern DWORD get_dialog_base_units(void) DECLSPEC_HIDDEN;
 extern LONG get_char_dimensions( HDC hdc, TEXTMETRICW *metric, LONG *height ) DECLSPEC_HIDDEN;
@@ -334,6 +334,7 @@ extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info ) DECLSPEC_HIDDEN;
 extern UINT get_win_monitor_dpi( HWND hwnd ) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect( UINT dpi ) DECLSPEC_HIDDEN;
+extern DWORD get_process_layout(void) DECLSPEC_HIDDEN;
 extern COLORREF get_sys_color( int index ) DECLSPEC_HIDDEN;
 extern HBRUSH get_sys_color_brush( unsigned int index ) DECLSPEC_HIDDEN;
 extern HPEN get_sys_color_pen( unsigned int index ) DECLSPEC_HIDDEN;
@@ -410,7 +411,7 @@ static inline void release_win_ptr( struct tagWND *ptr )
 }
 
 extern void wrappers_init( unixlib_handle_t handle ) DECLSPEC_HIDDEN;
-extern NTSTATUS gdi_init(void) DECLSPEC_HIDDEN;
+extern void gdi_init(void) DECLSPEC_HIDDEN;
 extern NTSTATUS callbacks_init( void *args ) DECLSPEC_HIDDEN;
 extern void winstation_init(void) DECLSPEC_HIDDEN;
 extern void sysparams_init(void) DECLSPEC_HIDDEN;

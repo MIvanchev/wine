@@ -47,6 +47,18 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 #define MAX_PACK_COUNT 4
 
+/* info about the message currently being received by the current thread */
+struct received_message_info
+{
+    UINT  type;
+    MSG   msg;
+    UINT  flags;  /* InSendMessageEx return flags */
+    LRESULT result;
+    struct received_message_info *prev;
+};
+
+#define MSG_CLIENT_MESSAGE 0xff
+
 struct packed_hook_extra_info
 {
     user_handle_t handle;
@@ -202,11 +214,10 @@ static BOOL init_win_proc_params( struct win_proc_params *params, HWND hwnd, UIN
     params->wparam = wparam;
     params->lparam = lparam;
     params->ansi = params->ansi_dst = ansi;
-    params->is_dialog = FALSE;
     params->needs_unpack = FALSE;
     params->mapping = WMCHAR_MAP_CALLWINDOWPROC;
     params->dpi_awareness = get_window_dpi_awareness_context( params->hwnd );
-    get_winproc_params( params );
+    get_winproc_params( params, TRUE );
     return TRUE;
 }
 
@@ -214,6 +225,7 @@ static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, 
                                      LPARAM lParam, LRESULT *result, BOOL ansi,
                                      enum wm_char_mapping mapping )
 {
+    BOOL is_dialog;
     WND *win;
 
     user_check_not_lock();
@@ -227,11 +239,10 @@ static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, 
     }
     params->func = win->winproc;
     params->ansi_dst = !(win->flags & WIN_ISUNICODE);
-    params->is_dialog = win->dlgInfo != NULL;
+    is_dialog = win->dlgInfo != NULL;
     release_win_ptr( win );
 
     params->hwnd = get_full_window_handle( hwnd );
-    get_winproc_params( params );
     params->msg = msg;
     params->wparam = wParam;
     params->lparam = lParam;
@@ -240,6 +251,7 @@ static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, 
     params->needs_unpack = FALSE;
     params->mapping = mapping;
     params->dpi_awareness = get_window_dpi_awareness_context( params->hwnd );
+    get_winproc_params( params, !is_dialog );
     return TRUE;
 }
 
@@ -253,6 +265,7 @@ static BOOL dispatch_win_proc_params( struct win_proc_params *params, size_t siz
     thread_info->recursion_count++;
 
     KeUserModeCallback( NtUserCallWinProc, params, size, &ret_ptr, &ret_len );
+    if (ret_len == sizeof(*params->result)) *params->result = *(LRESULT *)ret_ptr;
 
     thread_info->recursion_count--;
     return TRUE;
@@ -1030,6 +1043,117 @@ static void unpack_reply( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
 }
 
 /***********************************************************************
+ *           copy_reply
+ *
+ * Copy a message reply received from client.
+ */
+static void copy_reply( LRESULT result, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
+                        WPARAM wparam_src, LPARAM lparam_src )
+{
+    size_t copy_size = 0;
+
+    switch(message)
+    {
+    case WM_NCCREATE:
+    case WM_CREATE:
+        {
+            CREATESTRUCTW *dst = (CREATESTRUCTW *)lparam;
+            CREATESTRUCTW *src = (CREATESTRUCTW *)lparam_src;
+            dst->lpCreateParams = src->lpCreateParams;
+            dst->hInstance      = src->hInstance;
+            dst->hMenu          = src->hMenu;
+            dst->hwndParent     = src->hwndParent;
+            dst->cy             = src->cy;
+            dst->cx             = src->cx;
+            dst->y              = src->y;
+            dst->x              = src->x;
+            dst->style          = src->style;
+            dst->dwExStyle      = src->dwExStyle;
+            /* don't allow changing name and class pointers */
+        }
+        return;
+    case WM_GETTEXT:
+    case CB_GETLBTEXT:
+    case LB_GETTEXT:
+        copy_size = (result + 1) * sizeof(WCHAR);
+        break;
+    case WM_GETMINMAXINFO:
+        copy_size = sizeof(MINMAXINFO);
+        break;
+    case WM_MEASUREITEM:
+        copy_size = sizeof(MEASUREITEMSTRUCT);
+        break;
+    case WM_WINDOWPOSCHANGING:
+    case WM_WINDOWPOSCHANGED:
+        copy_size = sizeof(WINDOWPOS);
+        break;
+    case WM_STYLECHANGING:
+        copy_size = sizeof(STYLESTRUCT);
+        break;
+    case WM_GETDLGCODE:
+        if (lparam) copy_size = sizeof(MSG);
+        break;
+    case SBM_GETSCROLLINFO:
+        copy_size = sizeof(SCROLLINFO);
+        break;
+    case SBM_GETSCROLLBARINFO:
+        copy_size = sizeof(SCROLLBARINFO);
+        break;
+    case EM_GETRECT:
+    case LB_GETITEMRECT:
+    case CB_GETDROPPEDCONTROLRECT:
+    case WM_SIZING:
+    case WM_MOVING:
+        copy_size = sizeof(RECT);
+        break;
+    case EM_GETLINE:
+    {
+        WORD *ptr = (WORD *)lparam;
+        copy_size = ptr[-1] * sizeof(WCHAR);
+        break;
+    }
+    case LB_GETSELITEMS:
+        copy_size = wparam * sizeof(UINT);
+        break;
+    case WM_MDIGETACTIVE:
+        if (lparam) copy_size = sizeof(BOOL);
+        break;
+    case WM_NCCALCSIZE:
+        if (wparam)
+        {
+            NCCALCSIZE_PARAMS *dst = (NCCALCSIZE_PARAMS *)lparam;
+            NCCALCSIZE_PARAMS *src = (NCCALCSIZE_PARAMS *)lparam_src;
+            dst->rgrc[0] = src->rgrc[0];
+            dst->rgrc[1] = src->rgrc[1];
+            dst->rgrc[2] = src->rgrc[2];
+            *dst->lppos = *src->lppos;
+            return;
+        }
+        copy_size = sizeof(RECT);
+        break;
+    case EM_GETSEL:
+    case SBM_GETRANGE:
+    case CB_GETEDITSEL:
+        if (wparam) *(DWORD *)wparam = *(DWORD *)wparam_src;
+        if (lparam) copy_size = sizeof(DWORD);
+        break;
+    case WM_NEXTMENU:
+        copy_size = sizeof(MDINEXTMENU);
+        break;
+    case WM_MDICREATE:
+        copy_size = sizeof(MDICREATESTRUCTW);
+        break;
+    case WM_ASKCBFORMATNAME:
+        copy_size = (lstrlenW((WCHAR *)lparam) + 1) * sizeof(WCHAR);
+        break;
+    default:
+        return;
+    }
+
+    if (copy_size) memcpy( (void *)lparam, (void *)lparam_src, copy_size );
+}
+
+/***********************************************************************
  *           reply_message
  *
  * Send a reply to a sent message.
@@ -1074,6 +1198,7 @@ BOOL reply_message_result( LRESULT result )
     struct user_thread_info *thread_info = get_user_thread_info();
     struct received_message_info *info = thread_info->receive_info;
 
+    while (info && info->type == MSG_CLIENT_MESSAGE) info = info->prev;
     if (!info) return FALSE;
     reply_message( info, result, NULL );
     return TRUE;
@@ -1091,6 +1216,13 @@ static BOOL reply_winproc_result( LRESULT result, HWND hwnd, UINT message, WPARA
     MSG msg;
 
     if (!info) return FALSE;
+
+    if (info->type == MSG_CLIENT_MESSAGE)
+    {
+        copy_reply( result, hwnd, message, info->msg.wParam, info->msg.lParam, wparam, lparam );
+        info->result = result;
+        return TRUE;
+    }
 
     msg.hwnd = hwnd;
     msg.message = message;
@@ -1221,15 +1353,19 @@ static LRESULT call_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         return 0;
     }
 
-    params->needs_unpack = needs_unpack;
-    if (size) memcpy( params + 1, buffer, size );
+    if (needs_unpack)
+    {
+        params->needs_unpack = TRUE;
+        params->ansi = FALSE;
+        if (size) memcpy( params + 1, buffer, size );
+    }
 
     /* first the WH_CALLWNDPROC hook */
     cwp.lParam  = lparam;
     cwp.wParam  = wparam;
     cwp.message = msg;
     cwp.hwnd    = params->hwnd;
-    call_hooks( WH_CALLWNDPROC, HC_ACTION, same_thread, (LPARAM)&cwp, unicode );
+    call_hooks( WH_CALLWNDPROC, HC_ACTION, same_thread, (LPARAM)&cwp, sizeof(cwp) );
 
     dispatch_win_proc_params( params, sizeof(*params) + size );
     if (params != &p) free( params );
@@ -1240,7 +1376,7 @@ static LRESULT call_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     cwpret.wParam  = wparam;
     cwpret.message = msg;
     cwpret.hwnd    = params->hwnd;
-    call_hooks( WH_CALLWNDPROCRET, HC_ACTION, same_thread, (LPARAM)&cwpret, unicode );
+    call_hooks( WH_CALLWNDPROCRET, HC_ACTION, same_thread, (LPARAM)&cwpret, sizeof(cwpret) );
     return result;
 }
 
@@ -1347,7 +1483,7 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
     event.paramL  = (msg->wParam & 0xFF) | (HIWORD(msg->lParam) << 8);
     event.paramH  = msg->lParam & 0x7FFF;
     if (HIWORD(msg->lParam) & 0x0100) event.paramH |= 0x8000; /* special_key - bit */
-    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, TRUE );
+    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, sizeof(event) );
 
     /* check message filters */
     if (msg->message < first || msg->message > last) return FALSE;
@@ -1380,10 +1516,10 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
     }
 
     if (call_hooks( WH_KEYBOARD, remove ? HC_ACTION : HC_NOREMOVE,
-                    LOWORD(msg->wParam), msg->lParam, TRUE ))
+                    LOWORD(msg->wParam), msg->lParam, 0 ))
     {
         /* skip this message */
-        call_hooks( WH_CBT, HCBT_KEYSKIPPED, LOWORD(msg->wParam), msg->lParam, TRUE );
+        call_hooks( WH_CBT, HCBT_KEYSKIPPED, LOWORD(msg->wParam), msg->lParam, 0 );
         accept_hardware_message( hw_id );
         return FALSE;
     }
@@ -1455,7 +1591,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     event.hwnd    = msg->hwnd;
     event.paramL  = msg->pt.x;
     event.paramH  = msg->pt.y;
-    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, TRUE );
+    call_hooks( WH_JOURNALRECORD, HC_ACTION, 0, (LPARAM)&event, sizeof(event) );
 
     if (!check_hwnd_filter( msg, hwnd_filter )) return FALSE;
 
@@ -1529,14 +1665,14 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     hook.wHitTestCode = hittest;
     hook.dwExtraInfo  = extra_info;
     hook.mouseData    = msg->wParam;
-    if (call_hooks( WH_MOUSE, remove ? HC_ACTION : HC_NOREMOVE, message, (LPARAM)&hook, TRUE ))
+    if (call_hooks( WH_MOUSE, remove ? HC_ACTION : HC_NOREMOVE, message, (LPARAM)&hook, sizeof(hook) ))
     {
         hook.pt           = msg->pt;
         hook.hwnd         = msg->hwnd;
         hook.wHitTestCode = hittest;
         hook.dwExtraInfo  = extra_info;
         hook.mouseData    = msg->wParam;
-        call_hooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook, TRUE );
+        call_hooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook, sizeof(hook) );
         accept_hardware_message( hw_id );
         return FALSE;
     }
@@ -1760,7 +1896,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                     memcpy( params.module, &msg_data->winevent + 1, size );
                 }
                 params.module[size / sizeof(WCHAR)] = 0;
-                size = FIELD_OFFSET( struct win_hook_params, module[size / sizeof(WCHAR) + 1] );
+                size = FIELD_OFFSET( struct win_event_hook_params, module[size / sizeof(WCHAR) + 1] );
 
                 params.handle    = wine_server_ptr_handle( msg_data->winevent.hook );
                 params.event     = info.msg.message;
@@ -1787,7 +1923,8 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 hook.dwExtraInfo = msg_data->hardware.info;
                 TRACE( "calling keyboard LL hook vk %x scan %x flags %x time %u info %lx\n",
                        hook.vkCode, hook.scanCode, hook.flags, hook.time, hook.dwExtraInfo );
-                result = call_hooks( WH_KEYBOARD_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
+                result = call_hooks( WH_KEYBOARD_LL, HC_ACTION, info.msg.wParam,
+                                     (LPARAM)&hook, sizeof(hook) );
             }
             else if (info.msg.message == WH_MOUSE_LL && size >= sizeof(msg_data->hardware))
             {
@@ -1800,7 +1937,8 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 hook.dwExtraInfo = msg_data->hardware.info;
                 TRACE( "calling mouse LL hook pos %d,%d data %x flags %x time %u info %lx\n",
                        hook.pt.x, hook.pt.y, hook.mouseData, hook.flags, hook.time, hook.dwExtraInfo );
-                result = call_hooks( WH_MOUSE_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
+                result = call_hooks( WH_MOUSE_LL, HC_ACTION, info.msg.wParam,
+                                     (LPARAM)&hook, sizeof(hook) );
             }
             reply_message( &info, result, &info.msg );
             continue;
@@ -1830,7 +1968,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 thread_info->client_info.message_time  = info.msg.time;
                 thread_info->client_info.message_extra = msg_data->hardware.info;
                 free( buffer );
-                call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
+                call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, sizeof(*msg) );
                 return 1;
             }
             continue;
@@ -1871,6 +2009,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 params->lparam  = info.msg.lParam;
                 if (size) memcpy( params->data, buffer, size );
                 ret = KeUserModeCallback( NtUserUnpackDDEMessage, params, len, &ret_ptr, &len );
+                if (len == sizeof(result)) result = *(struct unpack_dde_message_result *)ret_ptr;
                 free( params );
                 if (!ret) continue; /* ignore it */
                 info.msg.wParam = result.wparam;
@@ -1883,7 +2022,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             thread_info->client_info.message_extra = 0;
             thread_info->client_info.msg_source = msg_source_unavailable;
             free( buffer );
-            call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
+            call_hooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, sizeof(*msg) );
             return 1;
         }
 
@@ -2608,12 +2747,13 @@ static BOOL broadcast_message( struct send_message_info *info, DWORD_PTR *res_pt
             switch(info->type)
             {
             case MSG_UNICODE:
+            case MSG_OTHER_PROCESS:
                 send_message_timeout( list[i], info->msg, info->wparam, info->lparam,
-                                      info->flags, info->timeout, NULL, FALSE );
+                                      info->flags, info->timeout, FALSE );
                 break;
             case MSG_ASCII:
                 send_message_timeout( list[i], info->msg, info->wparam, info->lparam,
-                                      info->flags, info->timeout, NULL, TRUE );
+                                      info->flags, info->timeout, TRUE );
                 break;
             case MSG_NOTIFY:
                 NtUserMessageCall( list[i], info->msg, info->wparam, info->lparam,
@@ -2641,6 +2781,48 @@ static BOOL broadcast_message( struct send_message_info *info, DWORD_PTR *res_pt
     return TRUE;
 }
 
+static BOOL process_packed_message( struct send_message_info *info, LRESULT *res_ptr, BOOL ansi )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct received_message_info receive_info;
+    struct packed_message data;
+    size_t buffer_size = 0, i;
+    void *buffer = NULL;
+    char *ptr;
+
+    pack_message( info->hwnd, info->msg, info->wparam, info->lparam, &data );
+    if (data.count == -1) return FALSE;
+
+    for (i = 0; i < data.count; i++) buffer_size += data.size[i];
+    if (!(buffer = malloc( buffer_size ))) return FALSE;
+    for (ptr = buffer, i = 0; i < data.count; i++)
+    {
+        memcpy( ptr, data.data[i], data.size[i] );
+        ptr += data.size[i];
+    }
+
+    receive_info.type = MSG_CLIENT_MESSAGE;
+    receive_info.msg.hwnd = info->hwnd;
+    receive_info.msg.message = info->msg;
+    receive_info.msg.wParam = info->wparam;
+    receive_info.msg.lParam = info->lparam;
+    receive_info.flags = 0;
+    receive_info.prev = thread_info->receive_info;
+    receive_info.result = 0;
+    thread_info->receive_info = &receive_info;
+
+    *res_ptr = call_window_proc( info->hwnd, info->msg, info->wparam, info->lparam,
+                                 !ansi, TRUE, info->wm_char, TRUE, buffer, buffer_size );
+    if (thread_info->receive_info == &receive_info)
+    {
+        thread_info->receive_info = receive_info.prev;
+        *res_ptr = receive_info.result;
+    }
+    free( buffer );
+    return TRUE;
+}
+
+
 /***********************************************************************
  *           process_message
  *
@@ -2652,7 +2834,7 @@ static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr,
     INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     DWORD dest_pid;
     BOOL ret;
-    LRESULT result;
+    LRESULT result = 0;
 
     if (is_broadcast( info->hwnd )) return broadcast_message( info, res_ptr );
 
@@ -2672,7 +2854,13 @@ static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr,
     thread_info->msg_source = msg_source_unavailable;
     spy_enter_message( SPY_SENDMESSAGE, info->hwnd, info->msg, info->wparam, info->lparam );
 
-    if (info->dest_tid == GetCurrentThreadId())
+    if (info->dest_tid != GetCurrentThreadId())
+    {
+        if (dest_pid != GetCurrentProcessId() && (info->type == MSG_ASCII || info->type == MSG_UNICODE))
+            info->type = MSG_OTHER_PROCESS;
+        ret = send_inter_thread_message( info, &result );
+    }
+    else if (info->type != MSG_OTHER_PROCESS)
     {
         result = call_window_proc( info->hwnd, info->msg, info->wparam, info->lparam,
                                    !ansi, TRUE, info->wm_char, FALSE, NULL, 0 );
@@ -2682,9 +2870,7 @@ static BOOL process_message( struct send_message_info *info, DWORD_PTR *res_ptr,
     }
     else
     {
-        if (dest_pid != GetCurrentProcessId() && (info->type == MSG_ASCII || info->type == MSG_UNICODE))
-            info->type = MSG_OTHER_PROCESS;
-        ret = send_inter_thread_message( info, &result );
+        ret = process_packed_message( info, &result, ansi );
     }
 
     spy_exit_message( SPY_RESULT_OK, info->hwnd, info->msg, result, info->wparam, info->lparam );
@@ -2810,8 +2996,8 @@ static LRESULT send_window_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 }
 
 /* see SendMessageTimeoutW */
-LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-                              UINT flags, UINT timeout, DWORD_PTR *res_ptr, BOOL ansi )
+static LRESULT send_client_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                                    UINT flags, UINT timeout, DWORD_PTR *res_ptr, BOOL ansi )
 {
     struct send_message_info info;
 
@@ -2828,10 +3014,36 @@ LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
     return process_message( &info, res_ptr, ansi );
 }
 
+LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                              UINT flags, UINT timeout, BOOL ansi )
+{
+    struct send_message_info info;
+    DWORD_PTR res = 0;
+
+    if (!is_pointer_message( msg, wparam ))
+    {
+        send_client_message( hwnd, msg, wparam, lparam, flags, timeout, &res, ansi );
+        return res;
+    }
+
+    info.type    = MSG_OTHER_PROCESS;
+    info.hwnd    = hwnd;
+    info.msg     = msg;
+    info.wparam  = wparam;
+    info.lparam  = lparam;
+    info.flags   = flags;
+    info.timeout = timeout;
+    info.wm_char = WMCHAR_MAP_SENDMESSAGETIMEOUT;
+    info.params  = NULL;
+
+    process_message( &info, &res, ansi );
+    return res;
+}
+
 /* see SendMessageW */
 LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return send_window_message( hwnd, msg, wparam, lparam, NULL, FALSE );
+    return send_message_timeout( hwnd, msg, wparam, lparam, SMTO_NORMAL, 0, FALSE );
 }
 
 /* see SendNotifyMessageW */
@@ -2971,8 +3183,8 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         {
             struct send_message_timeout_params *params = (void *)result_info;
             DWORD_PTR res = 0;
-            params->result = send_message_timeout( hwnd, msg, wparam, lparam, params->flags,
-                                                   params->timeout, &res, ansi );
+            params->result = send_client_message( hwnd, msg, wparam, lparam, params->flags,
+                                                  params->timeout, &res, ansi );
             return res;
         }
 
