@@ -363,6 +363,8 @@ static BOOL pulse_stream_valid(struct pulse_stream *stream)
 
 static HRESULT pulse_connect(const char *name)
 {
+    pa_context_state_t state;
+
     if (pulse_ctx && PA_CONTEXT_IS_GOOD(pa_context_get_state(pulse_ctx)))
         return S_OK;
     if (pulse_ctx)
@@ -381,15 +383,12 @@ static HRESULT pulse_connect(const char *name)
         goto fail;
 
     /* Wait for connection */
-    while (pulse_cond_wait()) {
-        pa_context_state_t state = pa_context_get_state(pulse_ctx);
+    while ((state = pa_context_get_state(pulse_ctx)) != PA_CONTEXT_READY &&
+           state != PA_CONTEXT_FAILED && state != PA_CONTEXT_TERMINATED)
+        pulse_cond_wait();
 
-        if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED)
-            goto fail;
-
-        if (state == PA_CONTEXT_READY)
-            break;
-    }
+    if (state != PA_CONTEXT_READY)
+        goto fail;
 
     TRACE("Connected to server %s with protocol version: %i.\n",
         pa_context_get_server(pulse_ctx),
@@ -774,7 +773,7 @@ static NTSTATUS pulse_test_connect(void *args)
         pa_mainloop_free(pulse_ml);
         pulse_ml = NULL;
         pulse_unlock();
-        params->result = E_FAIL;
+        params->priority = Priority_Unavailable;
         return STATUS_SUCCESS;
     }
 
@@ -840,7 +839,7 @@ static NTSTATUS pulse_test_connect(void *args)
 
     pulse_unlock();
 
-    params->result = S_OK;
+    params->priority = Priority_Preferred;
     return STATUS_SUCCESS;
 
 fail:
@@ -849,7 +848,7 @@ fail:
     pa_mainloop_free(pulse_ml);
     pulse_ml = NULL;
     pulse_unlock();
-    params->result = E_FAIL;
+    params->priority = Priority_Unavailable;
     return STATUS_SUCCESS;
 }
 
@@ -2393,6 +2392,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 #ifdef _WIN64
@@ -2735,14 +2735,14 @@ static NTSTATUS pulse_wow64_test_connect(void *args)
     struct
     {
         PTR32 name;
-        HRESULT result;
+        enum driver_priority priority;
     } *params32 = args;
     struct test_connect_params params =
     {
         .name = ULongToPtr(params32->name),
     };
     pulse_test_connect(&params);
-    params32->result = params.result;
+    params32->priority = params.priority;
     return STATUS_SUCCESS;
 }
 
@@ -2832,6 +2832,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,
+    NULL,
     NULL,
     NULL,
     NULL,
