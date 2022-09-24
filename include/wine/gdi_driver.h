@@ -269,6 +269,8 @@ struct gdi_device_manager
     void (*add_mode)( const DEVMODEW *mode, void *param );
 };
 
+#define WINE_DM_UNSUPPORTED 0x80000000
+
 struct tagUPDATELAYEREDWINDOWINFO;
 
 struct user_driver_funcs
@@ -296,7 +298,6 @@ struct user_driver_funcs
     void    (*pUpdateClipboard)(void);
     /* display modes */
     LONG    (*pChangeDisplaySettings)(LPDEVMODEW,HWND,DWORD,LPVOID);
-    BOOL    (*pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
     BOOL    (*pGetCurrentDisplaySettings)(LPCWSTR,LPDEVMODEW);
     BOOL    (*pUpdateDisplayDevices)(const struct gdi_device_manager *,BOOL,void*);
     /* windowing functions */

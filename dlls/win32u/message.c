@@ -356,7 +356,7 @@ static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lpa
         wp.cx              = ps->wp.cx;
         wp.cy              = ps->wp.cy;
         wp.flags           = ps->wp.flags;
-        memcpy( &ps->wp, &wp, sizeof(wp) );
+        memcpy( ps, &wp, sizeof(wp) );
         break;
     }
     case WM_WINE_KEYBOARD_LL_HOOK:
@@ -3208,6 +3208,10 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         if (!is_window( hwnd )) RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
         else RtlSetLastWin32Error( ERROR_MESSAGE_SYNC_ONLY );
         return FALSE;
+
+    case NtUserSendDriverMessage:
+        /* used by driver to send packed messages */
+        return send_message( hwnd, msg, wparam, lparam );
 
     case NtUserSpyEnter:
         spy_enter_message( ansi, hwnd, msg, wparam, lparam );

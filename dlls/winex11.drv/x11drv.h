@@ -214,8 +214,6 @@ extern BOOL X11DRV_SetCursorPos( INT x, INT y ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetCursorPos( LPPOINT pos ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_ClipCursor( LPCRECT clip ) DECLSPEC_HIDDEN;
 extern LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode,
-                                          DWORD flags ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
                                          BOOL force, void *param ) DECLSPEC_HIDDEN;
@@ -750,7 +748,7 @@ struct x11drv_settings_handler
 extern void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *handler) DECLSPEC_HIDDEN;
 
 extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
-extern void X11DRV_resize_desktop(BOOL) DECLSPEC_HIDDEN;
+extern void X11DRV_resize_desktop(void) DECLSPEC_HIDDEN;
 extern void init_registry_display_settings(void) DECLSPEC_HIDDEN;
 extern BOOL is_virtual_desktop(void) DECLSPEC_HIDDEN;
 extern BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
@@ -809,7 +807,7 @@ extern BOOL get_host_primary_gpu(struct gdi_gpu *gpu) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_Init(BOOL force) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_RegisterEventHandlers(void) DECLSPEC_HIDDEN;
-extern void X11DRV_DisplayDevices_Update(BOOL) DECLSPEC_HIDDEN;
+extern void X11DRV_DisplayDevices_Update(void) DECLSPEC_HIDDEN;
 /* Display device handler used in virtual desktop mode */
 extern struct x11drv_display_device_handler desktop_handler DECLSPEC_HIDDEN;
 
@@ -864,7 +862,7 @@ static inline UINT get_palette_entries( HPALETTE palette, UINT start, UINT count
 
 static inline LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendMessage, FALSE );
+    return NtUserMessageCall( hwnd, msg, wparam, lparam, NULL, NtUserSendDriverMessage, FALSE );
 }
 
 static inline LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
