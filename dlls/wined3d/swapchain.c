@@ -1459,7 +1459,13 @@ static HRESULT wined3d_swapchain_init(struct wined3d_swapchain *swapchain, struc
             && desc->swap_effect != WINED3D_SWAP_EFFECT_COPY)
         FIXME("Unimplemented swap effect %#x.\n", desc->swap_effect);
 
-    window = desc->device_window ? desc->device_window : device->create_parms.focus_window;
+    if (!desc->device_window)
+    {
+        TRACE("Updating device_window to %p.\n", device->create_parms.focus_window);
+        desc->device_window = device->create_parms.focus_window;
+    }
+    window = desc->device_window;
+
     if (FAILED(hr = wined3d_swapchain_state_init(&swapchain->state, desc, window, device->wined3d, state_parent)))
     {
         ERR("Failed to initialise swapchain state, hr %#x.\n", hr);
@@ -2193,6 +2199,8 @@ static DWORD WINAPI wined3d_set_window_state(void *ctx)
 {
     struct wined3d_window_state *s = ctx;
     bool filter;
+
+    SetThreadDescription(GetCurrentThread(), L"wined3d_set_window_state");
 
     filter = wined3d_filter_messages(s->window, TRUE);
 

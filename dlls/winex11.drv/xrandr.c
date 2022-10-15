@@ -1154,8 +1154,9 @@ static BOOL xrandr14_device_change_handler( HWND hwnd, XEvent *event )
     xrandr14_invalidate_current_mode_cache();
     if (hwnd == NtUserGetDesktopWindow() && NtUserGetWindowThread( hwnd, NULL ) == GetCurrentThreadId())
     {
-        X11DRV_DisplayDevices_Update();
+        X11DRV_DisplayDevices_Init( TRUE );
         init_registry_display_settings();
+        X11DRV_resize_desktop();
     }
     return FALSE;
 }

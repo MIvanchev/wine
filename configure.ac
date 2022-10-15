@@ -494,6 +494,7 @@ AC_CHECK_HEADERS(\
 	sys/user.h \
 	sys/utsname.h \
 	sys/vnode.h \
+	sys/xattr.h \
 	syscall.h \
 	utime.h \
 	valgrind/memcheck.h \
@@ -634,6 +635,14 @@ AC_CHECK_HEADERS([libprocstat.h],,,
 #ifdef HAVE_SYS_QUEUE_H
 #include <sys/queue.h>
 #endif])
+
+if test "x$ac_cv_header_sys_xattr_h" = xyes
+then
+    AC_CACHE_CHECK([whether getxattr takes additional arguments], wine_cv_xattr_extra_args,
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/xattr.h>]], [[getxattr("", "", "", 0, 0, 0);]])],
+                           [wine_cv_xattr_extra_args=yes],[wine_cv_xattr_extra_args=no])])
+    test $wine_cv_xattr_extra_args != yes || AC_DEFINE(XATTR_ADDITIONAL_OPTIONS, 1, [Define if xattr functions take additional arguments (macOS)])
+fi
 
 dnl **** Check for working dll ****
 
@@ -987,8 +996,6 @@ then
             pdb)     WINE_TRY_CROSSCFLAGS([-gcodeview]) ;;
           esac
         fi
-
-        WINE_TRY_CROSSCFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
 
         if test "x$enable_werror" = "xyes"
         then
@@ -1849,11 +1856,6 @@ then
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
   WINE_TRY_CFLAGS([-Wvla])
   WINE_TRY_CFLAGS([-Wwrite-strings])
-
-  if test -z "$CROSSTARGET"
-  then
-    WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
-  fi
 
   dnl Check for noisy string.h
   WINE_TRY_CFLAGS([-Wpointer-arith],
