@@ -169,15 +169,6 @@ static const WCHAR displayW[] = {'D','i','s','p','l','a','y',0};
 static const WCHAR monitorW[] = {'M','o','n','i','t','o','r',0};
 static const WCHAR yesW[] = {'Y','e','s',0};
 static const WCHAR noW[] = {'N','o',0};
-static const WCHAR bits_per_pelW[] = {'B','i','t','s','P','e','r','P','e','l',0};
-static const WCHAR x_resolutionW[] = {'X','R','e','s','o','l','u','t','i','o','n',0};
-static const WCHAR y_resolutionW[] = {'Y','R','e','s','o','l','u','t','i','o','n',0};
-static const WCHAR v_refreshW[] = {'V','R','e','f','r','e','s','h',0};
-static const WCHAR flagsW[] = {'F','l','a','g','s',0};
-static const WCHAR x_panningW[] = {'X','P','a','n','n','i','n','g',0};
-static const WCHAR y_panningW[] = {'Y','P','a','n','n','i','n','g',0};
-static const WCHAR orientationW[] = {'O','r','i','e','n','t','a','t','i','o','n',0};
-static const WCHAR fixed_outputW[] = {'F','i','x','e','d','O','u','t','p','u','t',0};
 static const WCHAR mode_countW[] = {'M','o','d','e','C','o','u','n','t',0};
 
 static const char  guid_devclass_displayA[] = "{4D36E968-E325-11CE-BFC1-08002BE10318}";
@@ -220,6 +211,7 @@ struct adapter
     LONG refcount;
     struct list entry;
     struct display_device dev;
+    LUID gpu_luid;
     unsigned int id;
     const WCHAR *config_key;
     unsigned int mode_count;
@@ -234,6 +226,7 @@ struct monitor
     HANDLE handle;
     unsigned int id;
     unsigned int flags;
+    unsigned int output_id;
     RECT rc_monitor;
     RECT rc_work;
     BOOL is_clone;
@@ -406,13 +399,15 @@ void user_check_not_lock(void)
 
 static HANDLE get_display_device_init_mutex( void )
 {
-    static const WCHAR display_device_initW[] =
-        {'\\','B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s',
-         '\\','d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
-    UNICODE_STRING name = { sizeof(display_device_initW), sizeof(display_device_initW),
-        (WCHAR *)display_device_initW };
+    WCHAR bufferW[256];
+    UNICODE_STRING name = {.Buffer = bufferW};
     OBJECT_ATTRIBUTES attr;
+    char buffer[256];
     HANDLE mutex;
+
+    snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\display_device_init",
+              NtCurrentTeb()->Peb->SessionId );
+    name.Length = name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if (NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE ) < 0) return 0;
@@ -441,84 +436,30 @@ static void adapter_release( struct adapter *adapter )
     }
 }
 
+C_ASSERT(sizeof(DEVMODEW) - offsetof(DEVMODEW, dmFields) == 0x94);
+
 static BOOL write_adapter_mode( HKEY adapter_key, DWORD index, const DEVMODEW *mode )
 {
-    WCHAR bufferW[MAX_PATH];
+    WCHAR bufferW[MAX_PATH] = {0};
     char buffer[MAX_PATH];
-    BOOL ret = TRUE;
-    HKEY hkey;
 
     sprintf( buffer, "Modes\\%08X", index );
-    reg_delete_tree( adapter_key, bufferW, asciiz_to_unicode( bufferW, buffer ) - sizeof(WCHAR) );
-    if (!(hkey = reg_create_key( adapter_key, bufferW, asciiz_to_unicode( bufferW, buffer ) - sizeof(WCHAR),
-                                 REG_OPTION_VOLATILE, NULL )))
-        return FALSE;
-
-#define set_mode_field( name, field, flag )                                                      \
-    if ((mode->dmFields & (flag)) &&                                                             \
-        !(ret = set_reg_value( hkey, (name), REG_DWORD, &mode->field,                            \
-                               sizeof(mode->field) )))                                           \
-        goto done
-
-    set_mode_field( bits_per_pelW, dmBitsPerPel, DM_BITSPERPEL );
-    set_mode_field( x_resolutionW, dmPelsWidth, DM_PELSWIDTH );
-    set_mode_field( y_resolutionW, dmPelsHeight, DM_PELSHEIGHT );
-    set_mode_field( v_refreshW, dmDisplayFrequency, DM_DISPLAYFREQUENCY );
-    set_mode_field( flagsW, dmDisplayFlags, DM_DISPLAYFLAGS );
-    set_mode_field( orientationW, dmDisplayOrientation, DM_DISPLAYORIENTATION );
-    set_mode_field( fixed_outputW, dmDisplayFixedOutput, DM_DISPLAYFIXEDOUTPUT );
-    if (index == ENUM_CURRENT_SETTINGS || index == ENUM_REGISTRY_SETTINGS)
-    {
-        set_mode_field( x_panningW, dmPosition.x, DM_POSITION );
-        set_mode_field( y_panningW, dmPosition.y, DM_POSITION );
-    }
-
-#undef set_mode_field
-
-done:
-    NtClose( hkey );
-    return ret;
+    asciiz_to_unicode( bufferW, buffer );
+    return set_reg_value( adapter_key, bufferW, REG_BINARY, &mode->dmFields, sizeof(*mode) - offsetof(DEVMODEW, dmFields) );
 }
 
 static BOOL read_adapter_mode( HKEY adapter_key, DWORD index, DEVMODEW *mode )
 {
-    char value_buf[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
+    char value_buf[offsetof(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(*mode)])];
     KEY_VALUE_PARTIAL_INFORMATION *value = (void *)value_buf;
-    WCHAR bufferW[MAX_PATH];
+    WCHAR bufferW[MAX_PATH] = {0};
     char buffer[MAX_PATH];
-    HKEY hkey;
 
     sprintf( buffer, "Modes\\%08X", index );
-    if (!(hkey = reg_open_key( adapter_key, bufferW, asciiz_to_unicode( bufferW, buffer ) - sizeof(WCHAR) )))
-        return FALSE;
+    asciiz_to_unicode( bufferW, buffer );
+    if (!query_reg_value( adapter_key, bufferW, value, sizeof(value_buf) )) return FALSE;
 
-#define query_mode_field( name, field, flag )                                                      \
-    do                                                                                             \
-    {                                                                                              \
-        if (query_reg_value( hkey, (name), value, sizeof(value_buf) ) &&                           \
-            value->Type == REG_DWORD)                                                              \
-        {                                                                                          \
-            mode->field = *(const DWORD *)value->Data;                                             \
-            mode->dmFields |= (flag);                                                              \
-        }                                                                                          \
-    } while (0)
-
-    query_mode_field( bits_per_pelW, dmBitsPerPel, DM_BITSPERPEL );
-    query_mode_field( x_resolutionW, dmPelsWidth, DM_PELSWIDTH );
-    query_mode_field( y_resolutionW, dmPelsHeight, DM_PELSHEIGHT );
-    query_mode_field( v_refreshW, dmDisplayFrequency, DM_DISPLAYFREQUENCY );
-    query_mode_field( flagsW, dmDisplayFlags, DM_DISPLAYFLAGS );
-    query_mode_field( orientationW, dmDisplayOrientation, DM_DISPLAYORIENTATION );
-    query_mode_field( fixed_outputW, dmDisplayFixedOutput, DM_DISPLAYFIXEDOUTPUT );
-    if (index == ENUM_CURRENT_SETTINGS || index == ENUM_REGISTRY_SETTINGS)
-    {
-        query_mode_field( x_panningW, dmPosition.x, DM_POSITION );
-        query_mode_field( y_panningW, dmPosition.y, DM_POSITION );
-    }
-
-#undef query_mode_field
-
-    NtClose( hkey );
+    memcpy( &mode->dmFields, value->Data, sizeof(*mode) - offsetof(DEVMODEW, dmFields) );
     return TRUE;
 }
 
@@ -626,6 +567,17 @@ static int mode_compare(const void *p1, const void *p2)
     return 0;
 }
 
+static unsigned int query_reg_subkey_value( HKEY hkey, const WCHAR *name, unsigned int name_size,
+                                            KEY_VALUE_PARTIAL_INFORMATION *value, unsigned int size )
+{
+    HKEY subkey;
+
+    if (!(subkey = reg_open_key( hkey, name, name_size ))) return 0;
+    size = query_reg_value( subkey, NULL, value, size );
+    NtClose( subkey );
+    return size;
+}
+
 static BOOL read_display_adapter_settings( unsigned int index, struct adapter *info )
 {
     char buffer[4096];
@@ -698,6 +650,14 @@ static BOOL read_display_adapter_settings( unsigned int index, struct adapter *i
     if (!(hkey = reg_open_key( enum_key, value_str, value->DataLength - sizeof(WCHAR) )))
         return FALSE;
 
+    size = query_reg_subkey_value( hkey, devpropkey_gpu_luidW, sizeof(devpropkey_gpu_luidW), value, sizeof(buffer) );
+    if (size != sizeof(info->gpu_luid))
+    {
+        NtClose( hkey );
+        return FALSE;
+    }
+    memcpy( &info->gpu_luid, value->Data, sizeof(info->gpu_luid) );
+
     size = query_reg_value( hkey, hardware_idW, value, sizeof(buffer) );
     NtClose( hkey );
     if (!size || (value->Type != REG_SZ && value->Type != REG_MULTI_SZ))
@@ -705,17 +665,6 @@ static BOOL read_display_adapter_settings( unsigned int index, struct adapter *i
 
     lstrcpyW( info->dev.device_id, value_str );
     return TRUE;
-}
-
-static unsigned int query_reg_subkey_value( HKEY hkey, const WCHAR *name, unsigned int name_size,
-                                            KEY_VALUE_PARTIAL_INFORMATION *value, unsigned int size )
-{
-    HKEY subkey;
-
-    if (!(subkey = reg_open_key( hkey, name, name_size ))) return 0;
-    size = query_reg_value( subkey, NULL, value, size );
-    NtClose( subkey );
-    return size;
 }
 
 static BOOL read_monitor_settings( struct adapter *adapter, DWORD index, struct monitor *monitor )
@@ -765,6 +714,17 @@ static BOOL read_monitor_settings( struct adapter *adapter, DWORD index, struct 
         return FALSE;
     }
     monitor->dev.state_flags = *(const DWORD *)value->Data;
+
+    /* Output ID */
+    size = query_reg_subkey_value( hkey, devpropkey_monitor_output_idW,
+                                   sizeof(devpropkey_monitor_output_idW),
+                                   value, sizeof(buffer) );
+    if (size != sizeof(monitor->output_id))
+    {
+        NtClose( hkey );
+        return FALSE;
+    }
+    monitor->output_id = *(const unsigned int *)value->Data;
 
     /* rc_monitor, WINE_DEVPROPKEY_MONITOR_RCMONITOR */
     size = query_reg_subkey_value( hkey, wine_devpropkey_monitor_rcmonitorW,
@@ -5328,14 +5288,17 @@ BOOL WINAPI NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown 
  */
 ULONG WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process )
 {
+    DPI_AWARENESS val;
+
     if (process && process != GetCurrentProcess())
     {
         WARN( "not supported on other process %p\n", process );
         return NTUSER_DPI_UNAWARE;
     }
 
-    if (!dpi_awareness) return NTUSER_DPI_UNAWARE;
-    return dpi_awareness;
+    val = ReadNoFence( &dpi_awareness );
+    if (!val) return NTUSER_DPI_UNAWARE;
+    return val;
 }
 
 BOOL message_beep( UINT i )
@@ -5538,5 +5501,113 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
     default:
         FIXME( "invalid code %u\n", code );
         return 0;
+    }
+}
+
+/***********************************************************************
+ *           NtUserDisplayConfigGetDeviceInfo    (win32u.@)
+ */
+NTSTATUS WINAPI NtUserDisplayConfigGetDeviceInfo( DISPLAYCONFIG_DEVICE_INFO_HEADER *packet )
+{
+    NTSTATUS ret = STATUS_UNSUCCESSFUL;
+
+    TRACE( "packet %p.\n", packet );
+
+    if (!packet || packet->size < sizeof(*packet))
+        return STATUS_UNSUCCESSFUL;
+
+    switch (packet->type)
+    {
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
+    {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME *source_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME *)packet;
+        struct adapter *adapter;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME.\n" );
+
+        if (packet->size < sizeof(*source_name))
+            return STATUS_INVALID_PARAMETER;
+
+        if (!lock_display_devices()) return STATUS_UNSUCCESSFUL;
+
+        LIST_FOR_EACH_ENTRY(adapter, &adapters, struct adapter, entry)
+        {
+            if (source_name->header.id != adapter->id) continue;
+            if (memcmp( &source_name->header.adapterId, &adapter->gpu_luid, sizeof(adapter->gpu_luid) )) continue;
+
+            lstrcpyW( source_name->viewGdiDeviceName, adapter->dev.device_name );
+            ret = STATUS_SUCCESS;
+            break;
+        }
+
+        unlock_display_devices();
+        return ret;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME:
+    {
+        DISPLAYCONFIG_TARGET_DEVICE_NAME *target_name = (DISPLAYCONFIG_TARGET_DEVICE_NAME *)packet;
+        char buffer[ARRAY_SIZE(target_name->monitorFriendlyDeviceName)];
+        struct monitor *monitor;
+
+        TRACE( "DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME.\n" );
+
+        if (packet->size < sizeof(*target_name))
+            return STATUS_INVALID_PARAMETER;
+
+        if (!lock_display_devices()) return STATUS_UNSUCCESSFUL;
+
+        memset( &target_name->flags, 0, sizeof(*target_name) - offsetof(DISPLAYCONFIG_TARGET_DEVICE_NAME, flags) );
+
+        LIST_FOR_EACH_ENTRY(monitor, &monitors, struct monitor, entry)
+        {
+            if (target_name->header.id != monitor->output_id) continue;
+            if (memcmp( &target_name->header.adapterId, &monitor->adapter->gpu_luid,
+                        sizeof(monitor->adapter->gpu_luid) ))
+                continue;
+
+            target_name->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL;
+            /* FIXME: get real monitor name. */
+            snprintf( buffer, ARRAY_SIZE(buffer), "Display%u", monitor->output_id + 1 );
+            asciiz_to_unicode( target_name->monitorFriendlyDeviceName, buffer );
+            lstrcpyW( target_name->monitorDevicePath, monitor->dev.interface_name );
+            ret = STATUS_SUCCESS;
+            break;
+        }
+
+        unlock_display_devices();
+        return ret;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE:
+    {
+        DISPLAYCONFIG_TARGET_PREFERRED_MODE *preferred_mode = (DISPLAYCONFIG_TARGET_PREFERRED_MODE *)packet;
+
+        FIXME( "DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE stub.\n" );
+
+        if (packet->size < sizeof(*preferred_mode))
+            return STATUS_INVALID_PARAMETER;
+
+        return STATUS_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME:
+    {
+        DISPLAYCONFIG_ADAPTER_NAME *adapter_name = (DISPLAYCONFIG_ADAPTER_NAME *)packet;
+
+        FIXME( "DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME stub.\n" );
+
+        if (packet->size < sizeof(*adapter_name))
+            return STATUS_INVALID_PARAMETER;
+
+        return STATUS_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_SET_TARGET_PERSISTENCE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_BASE_TYPE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SUPPORT_VIRTUAL_RESOLUTION:
+    case DISPLAYCONFIG_DEVICE_INFO_SET_SUPPORT_VIRTUAL_RESOLUTION:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO:
+    case DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL:
+    default:
+        FIXME( "Unimplemented packet type %u.\n", packet->type );
+        return STATUS_INVALID_PARAMETER;
     }
 }
