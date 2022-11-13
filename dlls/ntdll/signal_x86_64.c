@@ -280,8 +280,9 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 
     if (!module || (module->Flags & LDR_WINE_INTERNAL))
     {
-        status = unix_funcs->unwind_builtin_dll( type, dispatch, context );
+        struct unwind_builtin_dll_params params = { type, dispatch, context };
 
+        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
         if (!status && dispatch->LanguageHandler && !module)
         {
             FIXME( "calling personality routine in system library not supported yet\n" );
@@ -531,6 +532,8 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
         else
             WARN_(threadname)( "Thread ID %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
                                debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {
