@@ -1159,7 +1159,7 @@ struct wined3d_shader_reg_maps
     WORD labels;                                    /* MAX_LABELS, 16 */
     DWORD temporary;                                /* 32 */
     unsigned int temporary_count;
-    DWORD *constf;                                  /* pixel, vertex */
+    uint32_t *constf;                               /* pixel, vertex */
     struct list indexable_temps;
     const struct wined3d_shader_immediate_constant_buffer *icb;
     union
@@ -1557,7 +1557,7 @@ struct vs_compile_args
 {
     DWORD swizzle_map;   /* MAX_ATTRIBS, 32 */
     unsigned int next_shader_input_count;
-    DWORD interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
+    uint32_t interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
     BYTE fog_src;
     BYTE clip_enabled : 1;
     BYTE point_size : 1;
@@ -1575,14 +1575,14 @@ struct ds_compile_args
     unsigned int next_shader_type : 3;
     unsigned int render_offscreen : 1;
     unsigned int padding : 12;
-    DWORD interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
+    uint32_t interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
 };
 
 struct gs_compile_args
 {
     unsigned int output_count;
     enum wined3d_primitive_type primitive_type;
-    DWORD interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
+    uint32_t interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
 };
 
 struct wined3d_shader_backend_ops
@@ -2833,7 +2833,7 @@ struct wined3d_fragment_pipe_ops
 {
     void (*fp_enable)(const struct wined3d_context *context, BOOL enable);
     void (*get_caps)(const struct wined3d_adapter *adapter, struct fragment_caps *caps);
-    DWORD (*get_emul_mask)(const struct wined3d_gl_info *gl_info);
+    unsigned int (*get_emul_mask)(const struct wined3d_gl_info *gl_info);
     void *(*alloc_private)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
     void (*free_private)(struct wined3d_device *device, struct wined3d_context *context);
     BOOL (*allocate_context_data)(struct wined3d_context *context);
@@ -2860,7 +2860,7 @@ struct wined3d_vertex_pipe_ops
 {
     void (*vp_enable)(const struct wined3d_context *context, BOOL enable);
     void (*vp_get_caps)(const struct wined3d_adapter *adapter, struct wined3d_vertex_caps *caps);
-    DWORD (*vp_get_emul_mask)(const struct wined3d_gl_info *gl_info);
+    unsigned int (*vp_get_emul_mask)(const struct wined3d_gl_info *gl_info);
     void *(*vp_alloc)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
     void (*vp_free)(struct wined3d_device *device, struct wined3d_context *context);
     const struct wined3d_state_entry_template *vp_states;
@@ -4433,8 +4433,8 @@ struct wined3d_resource
 
     struct list resource_list_entry;
 
-    int32_t srv_bind_count_device;
-    int32_t rtv_bind_count_device;
+    LONG srv_bind_count_device;
+    LONG rtv_bind_count_device;
 };
 
 static inline ULONG wined3d_resource_incref(struct wined3d_resource *resource)
@@ -5092,7 +5092,7 @@ struct wined3d_cs
     BOOL queries_flushed;
 
     HANDLE event;
-    BOOL waiting_for_event;
+    LONG waiting_for_event;
     LONG pending_presents;
 };
 
@@ -5946,7 +5946,7 @@ struct wined3d_pixel_shader
 
     BOOL force_early_depth_stencil;
     enum wined3d_shader_register_type depth_output;
-    DWORD interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
+    uint32_t interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
 };
 
 struct wined3d_compute_shader
@@ -6443,7 +6443,7 @@ static inline uint32_t wined3d_mask_from_size(unsigned int size)
     return size < 32 ? (1u << size) - 1 : ~0u;
 }
 
-static inline DWORD wined3d_extract_bits(const DWORD *bitstream,
+static inline DWORD wined3d_extract_bits(const uint32_t *bitstream,
         unsigned int offset, unsigned int count)
 {
     const unsigned int word_bit_count = sizeof(*bitstream) * CHAR_BIT;
@@ -6463,7 +6463,7 @@ static inline DWORD wined3d_extract_bits(const DWORD *bitstream,
     return ret;
 }
 
-static inline void wined3d_insert_bits(DWORD *bitstream,
+static inline void wined3d_insert_bits(uint32_t *bitstream,
         unsigned int offset, unsigned int count, DWORD bits)
 {
     const unsigned int word_bit_count = sizeof(*bitstream) * CHAR_BIT;
@@ -6816,7 +6816,7 @@ static inline unsigned int wined3d_bitmap_ffz(const uint32_t *bitmap, unsigned i
     return wined3d_bitmap_ffs_xor(bitmap, bit_count, start, ~0u);
 }
 
-static inline BOOL wined3d_bitmap_get_range(const DWORD *bitmap, unsigned int bit_count,
+static inline BOOL wined3d_bitmap_get_range(const uint32_t *bitmap, unsigned int bit_count,
         unsigned int start, struct wined3d_range *range)
 {
     unsigned int range_start, range_end;
