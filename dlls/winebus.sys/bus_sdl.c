@@ -118,6 +118,7 @@ static struct list device_list = LIST_INIT(device_list);
 #define pSDL_JoystickGetProductVersion  SDL_JoystickGetProductVersion
 #define pSDL_JoystickGetVendor          SDL_JoystickGetVendor
 #define pSDL_JoystickGetType            SDL_JoystickGetType
+#define pSDL_JoystickGetSerial          SDL_JoystickGetSerial
 
 #define SDL_HAS_JOYSTICKRUMBLE              (SDL_VERSION_ATLEAST(2, 0, 9))
 #define SDL_HAS_JOYSTICKRUMBLETRIGGERS      (SDL_VERSION_ATLEAST(2, 0, 14))
@@ -125,6 +126,7 @@ static struct list device_list = LIST_INIT(device_list);
 #define SDL_HAS_JOYSTICKGETPRODUCTVERSION   (SDL_VERSION_ATLEAST(2, 0, 6))
 #define SDL_HAS_JOYSTICKGETVENDOR           (SDL_VERSION_ATLEAST(2, 0, 6))
 #define SDL_HAS_JOYSTICKGETTYPE             (SDL_VERSION_ATLEAST(2, 0, 6))
+#define SDK_HAS_JOYSTICKGETSERIAL           (SDL_VERSION_ATLEAST(2, 0, 14))
 
 /* internal bits for extended rumble support, SDL_Haptic types are 16-bits */
 #define WINE_SDL_JOYSTICK_RUMBLE  0x40000000 /* using SDL_JoystickRumble API */
@@ -948,9 +950,8 @@ static void sdl_add_device(unsigned int index)
 
     SDL_Joystick* joystick;
     SDL_JoystickID id;
-    SDL_JoystickGUID guid;
     SDL_GameController *controller = NULL;
-    const char *product;
+    const char *product, *sdl_serial;
     char guid_str[33], buffer[ARRAY_SIZE(desc.product)];
     int axis_count, axis_offset;
 
@@ -979,9 +980,25 @@ static void sdl_add_device(unsigned int index)
     desc.version = 0;
 #endif
 
-    guid = pSDL_JoystickGetGUID(joystick);
-    pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
-    ntdll_umbstowcs(guid_str, strlen(guid_str) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
+#if SDL_HAS_JOYSTICKGETSERIAL
+    if (sdl_serial = pSDL_JoystickGetSerial(joystick)))
+    {
+        ntdll_umbstowcs(sdl_serial, strlen(sdl_serial) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
+    }
+#else
+    if (0)
+    {
+    }
+#endif
+    else
+    {
+        /* Overcooked! All You Can Eat only adds controllers with unique serial numbers
+         * Prefer keeping serial numbers unique over keeping them consistent across runs */
+        pSDL_JoystickGetGUIDString(pSDL_JoystickGetGUID(joystick), guid_str, sizeof(guid_str));
+        snprintf(buffer, sizeof(buffer), "%s.%d", guid_str, index);
+        TRACE("Making up serial number for %s: %s\n", product, buffer);
+        ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
+    }
 
     if (controller)
     {

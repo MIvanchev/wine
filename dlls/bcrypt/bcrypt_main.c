@@ -121,6 +121,26 @@ builtin_algorithms[] =
     {  BCRYPT_RNG_ALGORITHM,        BCRYPT_RNG_INTERFACE,                   0,      0,    0 },
 };
 
+static inline BOOL is_symmetric_key( struct key *key )
+{
+    return builtin_algorithms[key->alg_id].class == BCRYPT_CIPHER_INTERFACE;
+}
+
+static inline BOOL is_asymmetric_encryption_key( struct key *key )
+{
+    return builtin_algorithms[key->alg_id].class == BCRYPT_ASYMMETRIC_ENCRYPTION_INTERFACE;
+}
+
+static inline BOOL is_agreement_key( struct key *key )
+{
+    return builtin_algorithms[key->alg_id].class == BCRYPT_SECRET_AGREEMENT_INTERFACE;
+}
+
+static inline BOOL is_signature_key( struct key *key )
+{
+    return builtin_algorithms[key->alg_id].class == BCRYPT_SIGNATURE_INTERFACE || key->alg_id == ALG_ID_RSA;
+}
+
 static BOOL match_operation_type( ULONG type, ULONG class )
 {
     if (!type) return TRUE;
@@ -1039,10 +1059,10 @@ NTSTATUS WINAPI BCryptHashData( BCRYPT_HASH_HANDLE handle, UCHAR *input, ULONG s
     return hash_update( &hash->inner, hash->alg_id, input, size );
 }
 
-static NTSTATUS hash_finalize( struct hash *hash, UCHAR *output, ULONG size )
+static NTSTATUS hash_finalize( struct hash *hash, UCHAR *output )
 {
     UCHAR buffer[MAX_HASH_OUTPUT_BYTES];
-    int hash_length;
+    ULONG hash_length = builtin_algorithms[hash->alg_id].hash_length;
     NTSTATUS status;
 
     if (!(hash->flags & HASH_FLAG_HMAC))
@@ -1052,7 +1072,6 @@ static NTSTATUS hash_finalize( struct hash *hash, UCHAR *output, ULONG size )
         return STATUS_SUCCESS;
     }
 
-    hash_length = builtin_algorithms[hash->alg_id].hash_length;
     if ((status = hash_finish( &hash->inner, hash->alg_id, buffer ))) return status;
     if ((status = hash_update( &hash->outer, hash->alg_id, buffer, hash_length ))) return status;
     if ((status = hash_finish( &hash->outer, hash->alg_id, output ))) return status;
@@ -1070,7 +1089,7 @@ NTSTATUS WINAPI BCryptFinishHash( BCRYPT_HASH_HANDLE handle, UCHAR *output, ULON
     if (!hash) return STATUS_INVALID_HANDLE;
     if (!output || size != builtin_algorithms[hash->alg_id].hash_length) return STATUS_INVALID_PARAMETER;
 
-    return hash_finalize( hash, output, size );
+    return hash_finalize( hash, output );
 }
 
 NTSTATUS WINAPI BCryptHash( BCRYPT_ALG_HANDLE handle, UCHAR *secret, ULONG secret_len,
@@ -1096,7 +1115,7 @@ NTSTATUS WINAPI BCryptHash( BCRYPT_ALG_HANDLE handle, UCHAR *secret, ULONG secre
         hash_destroy( hash );
         return status;
     }
-    status = hash_finalize( hash, output, output_len );
+    status = hash_finalize( hash, output );
     hash_destroy( hash );
     return status;
 }
@@ -1118,11 +1137,6 @@ static NTSTATUS key_asymmetric_create( enum alg_id alg_id, ULONG bitlen, struct 
 
     *ret_key = key;
     return STATUS_SUCCESS;
-}
-
-static BOOL key_is_symmetric( struct key *key )
-{
-    return builtin_algorithms[key->alg_id].class == BCRYPT_CIPHER_INTERFACE;
 }
 
 static BOOL is_equal_vector( const UCHAR *vector, ULONG len, const UCHAR *vector2, ULONG len2 )
@@ -1506,7 +1520,7 @@ static NTSTATUS key_symmetric_decrypt( struct key *key, UCHAR *input, ULONG inpu
 
 static void key_destroy( struct key *key )
 {
-    if (key_is_symmetric( key ))
+    if (is_symmetric_key( key ))
     {
         UNIX_CALL( key_symmetric_destroy, key );
         free( key->u.s.vector );
@@ -1869,7 +1883,7 @@ static NTSTATUS key_duplicate( struct key *key_orig, struct key *key_copy )
     key_copy->hdr    = key_orig->hdr;
     key_copy->alg_id = key_orig->alg_id;
 
-    if (key_is_symmetric( key_orig ))
+    if (is_symmetric_key( key_orig ))
     {
         if (!(buffer = malloc( key_orig->u.s.secret_len ))) return STATUS_NO_MEMORY;
         memcpy( buffer, key_orig->u.s.secret, key_orig->u.s.secret_len );
@@ -1978,11 +1992,7 @@ NTSTATUS WINAPI BCryptSignHash( BCRYPT_KEY_HANDLE handle, void *padding, UCHAR *
            ret_len, flags );
 
     if (!key) return STATUS_INVALID_HANDLE;
-    if (key_is_symmetric( key ))
-    {
-        FIXME( "signing with symmetric keys not yet supported\n" );
-        return STATUS_NOT_IMPLEMENTED;
-    }
+    if (!is_signature_key( key )) return STATUS_NOT_SUPPORTED;
 
     params.key        = key;
     params.padding    = padding;
@@ -2004,8 +2014,8 @@ NTSTATUS WINAPI BCryptVerifySignature( BCRYPT_KEY_HANDLE handle, void *padding, 
     TRACE( "%p, %p, %p, %lu, %p, %lu, %#lx\n", handle, padding, hash, hash_len, signature, signature_len, flags );
 
     if (!key) return STATUS_INVALID_HANDLE;
+    if (!is_signature_key( key )) return STATUS_NOT_SUPPORTED;
     if (!hash || !hash_len || !signature || !signature_len) return STATUS_INVALID_PARAMETER;
-    if (key_is_symmetric( key )) return STATUS_NOT_SUPPORTED;
 
     params.key = key;
     params.padding = padding;
@@ -2040,7 +2050,7 @@ NTSTATUS WINAPI BCryptEncrypt( BCRYPT_KEY_HANDLE handle, UCHAR *input, ULONG inp
 
     if (!key) return STATUS_INVALID_HANDLE;
 
-    if (key_is_symmetric( key ))
+    if (is_symmetric_key( key ))
     {
         if (flags & ~BCRYPT_BLOCK_PADDING)
         {
@@ -2058,6 +2068,8 @@ NTSTATUS WINAPI BCryptEncrypt( BCRYPT_KEY_HANDLE handle, UCHAR *input, ULONG inp
             FIXME( "flags %#lx not implemented\n", flags );
             return STATUS_NOT_IMPLEMENTED;
         }
+        if (!is_asymmetric_encryption_key( key )) return STATUS_NOT_SUPPORTED;
+
         asymmetric_params.input = input;
         asymmetric_params.input_len = input_len;
         asymmetric_params.key = key;
@@ -2082,7 +2094,7 @@ NTSTATUS WINAPI BCryptDecrypt( BCRYPT_KEY_HANDLE handle, UCHAR *input, ULONG inp
 
     if (!key) return STATUS_INVALID_HANDLE;
 
-    if (key_is_symmetric( key ))
+    if (is_symmetric_key( key ))
     {
         if (flags & ~BCRYPT_BLOCK_PADDING)
         {
@@ -2101,6 +2113,8 @@ NTSTATUS WINAPI BCryptDecrypt( BCRYPT_KEY_HANDLE handle, UCHAR *input, ULONG inp
             FIXME( "flags %#lx not implemented\n", flags );
             return STATUS_NOT_IMPLEMENTED;
         }
+        if (!is_asymmetric_encryption_key( key )) return STATUS_NOT_SUPPORTED;
+
         params.key = key;
         params.input = input;
         params.input_len = input_len;
@@ -2159,9 +2173,9 @@ NTSTATUS WINAPI BCryptDeriveKeyCapi( BCRYPT_HASH_HANDLE handle, BCRYPT_ALG_HANDL
         return STATUS_NOT_IMPLEMENTED;
     }
 
-    len = builtin_algorithms[hash->alg_id].hash_length;
-    if ((status = hash_finalize( hash, buf, len ))) return status;
+    if ((status = hash_finalize( hash, buf ))) return status;
 
+    len = builtin_algorithms[hash->alg_id].hash_length;
     if (len < keylen)
     {
         UCHAR pad1[HMAC_PAD_LEN], pad2[HMAC_PAD_LEN];
@@ -2175,11 +2189,11 @@ NTSTATUS WINAPI BCryptDeriveKeyCapi( BCRYPT_HASH_HANDLE handle, BCRYPT_ALG_HANDL
 
         if ((status = hash_prepare( hash )) ||
             (status = hash_update( &hash->inner, hash->alg_id, pad1, sizeof(pad1) )) ||
-            (status = hash_finalize( hash, buf, len ))) return status;
+            (status = hash_finalize( hash, buf ))) return status;
 
         if ((status = hash_prepare( hash )) ||
             (status = hash_update( &hash->inner, hash->alg_id, pad2, sizeof(pad2) )) ||
-            (status = hash_finalize( hash, buf + len, len ))) return status;
+            (status = hash_finalize( hash, buf + len ))) return status;
     }
 
     memcpy( key, buf, keylen );
@@ -2219,7 +2233,7 @@ static NTSTATUS pbkdf2( struct hash *hash, UCHAR *pwd, ULONG pwd_len, UCHAR *sal
             return status;
         }
 
-        if ((status = hash_finalize( hash, buf, hash_len )))
+        if ((status = hash_finalize( hash, buf )))
         {
             free( buf );
             return status;
@@ -2301,6 +2315,7 @@ NTSTATUS WINAPI BCryptSecretAgreement( BCRYPT_KEY_HANDLE privkey_handle, BCRYPT_
     FIXME( "%p, %p, %p, %#lx\n", privkey_handle, pubkey_handle, ret_handle, flags );
 
     if (!privkey || !pubkey) return STATUS_INVALID_HANDLE;
+    if (!is_agreement_key( privkey ) || !is_agreement_key( pubkey )) return STATUS_NOT_SUPPORTED;
     if (!ret_handle) return STATUS_INVALID_PARAMETER;
 
     if (!(secret = calloc( 1, sizeof(*secret) ))) return STATUS_NO_MEMORY;

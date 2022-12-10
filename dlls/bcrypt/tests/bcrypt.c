@@ -1977,12 +1977,7 @@ static void test_key_import_export(void)
 
     key = NULL;
     ret = BCryptImportKey(aes, NULL, BCRYPT_KEY_DATA_BLOB, &key, NULL, 0, buffer1, sizeof(buffer1), 0);
-    ok(ret == STATUS_SUCCESS || broken(ret == STATUS_INVALID_PARAMETER) /* vista */, "got %#lx\n", ret);
-    if (ret == STATUS_INVALID_PARAMETER)
-    {
-        win_skip("broken BCryptImportKey\n");
-        return;
-    }
+    ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     ok(key != NULL, "key not set\n");
 
     size = 0;
@@ -2076,11 +2071,7 @@ static void test_ECDSA(void)
     ULONG size;
 
     status = BCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
-    if (status)
-    {
-        skip("Failed to open ECDSA provider: %#lx, skipping test\n", status);
-        return;
-    }
+    ok(!status, "got %#lx\n", status);
 
     ecckey->dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
     memcpy(ecckey + 1, eccPubkey, sizeof(eccPubkey));
@@ -2395,22 +2386,23 @@ static void test_RSA(void)
 {
     static UCHAR hash[] =
         {0x7e,0xe3,0x74,0xe7,0xc5,0x0b,0x6b,0x70,0xdb,0xab,0x32,0x6d,0x1d,0x51,0xd6,0x74,0x79,0x8e,0x5b,0x4b};
+    static UCHAR hash48[] =
+        {0x62,0xb2,0x1e,0x90,0xc9,0x02,0x2b,0x10,0x16,0x71,0xba,0x1f,0x80,0x8f,0x86,0x31,0xa8,0x14,0x9f,0x0f,
+         0x12,0x90,0x40,0x55,0x83,0x9a,0x35,0xc1,0xca,0x78,0xae,0x53,0x1b,0xb3,0x36,0x06,0xba,0x90,0x89,0x12,
+         0xa8,0x42,0x21,0x10,0x9d,0x29,0xcd,0x7e};
     BCRYPT_PKCS1_PADDING_INFO pad;
+    BCRYPT_PSS_PADDING_INFO pad_pss;
     BCRYPT_ALG_HANDLE alg;
     BCRYPT_KEY_HANDLE key;
     BCRYPT_RSAKEY_BLOB *rsablob;
-    UCHAR sig[64];
+    UCHAR sig[256], sig_pss[256];
     ULONG len, size, size2, schemes;
     NTSTATUS ret;
     BYTE *buf;
     DWORD keylen;
 
     ret = BCryptOpenAlgorithmProvider(&alg, BCRYPT_RSA_ALGORITHM, NULL, 0);
-    if (ret)
-    {
-        win_skip("Failed to open RSA provider: %#lx, skipping test\n", ret);
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     schemes = size = 0;
     ret = BCryptGetProperty(alg, L"PaddingSchemes", (UCHAR *)&schemes, sizeof(schemes), &size, 0);
@@ -2454,7 +2446,7 @@ static void test_RSA(void)
     ret = BCryptGenerateKeyPair(alg, &key, 1024, 0);
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
 
-    keylen = 512;
+    keylen = 2048;
     ret = BCryptSetProperty(key, BCRYPT_KEY_LENGTH, (UCHAR *)&keylen, 2, 0);
     ok(ret == STATUS_INVALID_PARAMETER, "got %#lx\n", ret);
     ret = BCryptSetProperty(key, BCRYPT_KEY_LENGTH, (UCHAR *)&keylen, sizeof(keylen), 0);
@@ -2468,8 +2460,18 @@ static void test_RSA(void)
 
     pad.pszAlgId = BCRYPT_SHA1_ALGORITHM;
     memset(sig, 0, sizeof(sig));
+    len = 0;
     ret = BCryptSignHash(key, &pad, hash, sizeof(hash), sig, sizeof(sig), &len, BCRYPT_PAD_PKCS1);
     ok(!ret, "got %#lx\n", ret);
+    ok(len == 256, "got %lu\n", len);
+
+    pad_pss.pszAlgId = BCRYPT_SHA384_ALGORITHM;
+    pad_pss.cbSalt = 48;
+    memset(sig_pss, 0, sizeof(sig_pss));
+    len = 0;
+    ret = BCryptSignHash(key, &pad_pss, hash48, sizeof(hash48), sig_pss, sizeof(sig_pss), &len, BCRYPT_PAD_PSS);
+    ok(!ret, "got %#lx\n", ret);
+    ok(len == 256, "got %lu\n", len);
 
     /* export private key */
     size = 0;
@@ -2482,11 +2484,11 @@ static void test_RSA(void)
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     rsablob = (BCRYPT_RSAKEY_BLOB *)buf;
     ok(rsablob->Magic == BCRYPT_RSAPRIVATE_MAGIC, "got %#lx\n", rsablob->Magic);
-    ok(rsablob->BitLength == 512, "got %lu\n", rsablob->BitLength);
+    ok(rsablob->BitLength == 2048, "got %lu\n", rsablob->BitLength);
     ok(rsablob->cbPublicExp == 3, "got %lu\n", rsablob->cbPublicExp);
-    ok(rsablob->cbModulus == 64, "got %lu\n", rsablob->cbModulus);
-    ok(rsablob->cbPrime1 == 32, "got %lu\n", rsablob->cbPrime1);
-    ok(rsablob->cbPrime2 == 32, "got %lu\n", rsablob->cbPrime2);
+    ok(rsablob->cbModulus == 256, "got %lu\n", rsablob->cbModulus);
+    ok(rsablob->cbPrime1 == 128, "got %lu\n", rsablob->cbPrime1);
+    ok(rsablob->cbPrime2 == 128, "got %lu\n", rsablob->cbPrime2);
     size2 = sizeof(*rsablob) + rsablob->cbPublicExp + rsablob->cbModulus + rsablob->cbPrime1 + rsablob->cbPrime2;
     ok(size == size2, "got %lu expected %lu\n", size2, size);
     free(buf);
@@ -2501,11 +2503,11 @@ static void test_RSA(void)
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     rsablob = (BCRYPT_RSAKEY_BLOB *)buf;
     ok(rsablob->Magic == BCRYPT_RSAFULLPRIVATE_MAGIC, "got %#lx\n", rsablob->Magic);
-    ok(rsablob->BitLength == 512, "got %lu\n", rsablob->BitLength);
+    ok(rsablob->BitLength == 2048, "got %lu\n", rsablob->BitLength);
     ok(rsablob->cbPublicExp == 3, "got %lu\n", rsablob->cbPublicExp);
-    ok(rsablob->cbModulus == 64, "got %lu\n", rsablob->cbModulus);
-    ok(rsablob->cbPrime1 == 32, "got %lu\n", rsablob->cbPrime1);
-    ok(rsablob->cbPrime2 == 32, "got %lu\n", rsablob->cbPrime2);
+    ok(rsablob->cbModulus == 256, "got %lu\n", rsablob->cbModulus);
+    ok(rsablob->cbPrime1 == 128, "got %lu\n", rsablob->cbPrime1);
+    ok(rsablob->cbPrime2 == 128, "got %lu\n", rsablob->cbPrime2);
     size2 = sizeof(*rsablob) + rsablob->cbPublicExp + rsablob->cbModulus * 2 + rsablob->cbPrime1 * 3 + rsablob->cbPrime2 * 2;
     ok(size == size2, "got %lu expected %lu\n", size2, size);
     free(buf);
@@ -2521,9 +2523,9 @@ static void test_RSA(void)
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     rsablob = (BCRYPT_RSAKEY_BLOB *)buf;
     ok(rsablob->Magic == BCRYPT_RSAPUBLIC_MAGIC, "got %#lx\n", rsablob->Magic);
-    ok(rsablob->BitLength == 512, "got %lu\n", rsablob->BitLength);
+    ok(rsablob->BitLength == 2048, "got %lu\n", rsablob->BitLength);
     ok(rsablob->cbPublicExp == 3, "got %lu\n", rsablob->cbPublicExp);
-    ok(rsablob->cbModulus == 64, "got %lu\n", rsablob->cbModulus);
+    ok(rsablob->cbModulus == 256, "got %lu\n", rsablob->cbModulus);
     ok(!rsablob->cbPrime1, "got %lu\n", rsablob->cbPrime1);
     ok(!rsablob->cbPrime2, "got %lu\n", rsablob->cbPrime2);
     ok(size == sizeof(*rsablob) + rsablob->cbPublicExp + rsablob->cbModulus, "got %lu\n", size);
@@ -2538,7 +2540,9 @@ static void test_RSA(void)
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
     free(buf);
 
-    ret = BCryptVerifySignature(key, &pad, hash, sizeof(hash), sig, len, BCRYPT_PAD_PKCS1);
+    ret = BCryptVerifySignature(key, &pad, hash, sizeof(hash), sig, sizeof(sig), BCRYPT_PAD_PKCS1);
+    ok(!ret, "got %#lx\n", ret);
+    ret = BCryptVerifySignature(key, &pad_pss, hash48, sizeof(hash48), sig_pss, sizeof(sig_pss), BCRYPT_PAD_PSS);
     ok(!ret, "got %#lx\n", ret);
     ret = BCryptDestroyKey(key);
     ok(!ret, "got %#lx\n", ret);
@@ -2574,9 +2578,6 @@ static void test_RSA(void)
 
     ret = BCryptCloseAlgorithmProvider(alg, 0);
     ok(!ret, "got %#lx\n", ret);
-
-    /* RSA encryption */
-    test_rsa_encrypt();
 }
 
 static void test_RSA_SIGN(void)
@@ -2590,11 +2591,7 @@ static void test_RSA_SIGN(void)
     BYTE *buf, buf2[sizeof(BCRYPT_RSAKEY_BLOB) + sizeof(rsaPublicBlob)];
 
     ret = BCryptOpenAlgorithmProvider(&alg, BCRYPT_RSA_SIGN_ALGORITHM, NULL, 0);
-    if (ret)
-    {
-        win_skip("Failed to open RSA_SIGN provider: %#lx, skipping test\n", ret);
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     ret = BCryptImportKeyPair(alg, NULL, BCRYPT_RSAPUBLIC_BLOB, &key, rsaPublicBlob, sizeof(rsaPublicBlob), 0);
     ok(!ret, "BCryptImportKeyPair failed: %#lx\n", ret);
@@ -2750,11 +2747,7 @@ static void test_ECDH(void)
     ULONG size;
 
     status = BCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDH_P256_ALGORITHM, NULL, 0);
-    if (status)
-    {
-        skip("Failed to open BCRYPT_ECDH_P256_ALGORITHM provider %#lx\n", status);
-        return;
-    }
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     key = NULL;
     status = BCryptGenerateKeyPair(alg, &key, 256, 0);
@@ -2827,15 +2820,12 @@ static void test_ECDH(void)
     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     if (status != STATUS_SUCCESS) goto derive_end;
 
-    /* verify result on windows 10 */
     status = BCryptDeriveKey(secret, BCRYPT_KDF_RAW_SECRET, NULL, NULL, 0, &size, 0);
-
-    if (status == STATUS_NOT_SUPPORTED)
+    if (status == STATUS_NOT_SUPPORTED) /* < win10 */
     {
         win_skip("BCRYPT_KDF_RAW_SECRET not supported\n");
         goto raw_secret_end;
     }
-
     todo_wine ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     if (status != STATUS_SUCCESS) goto raw_secret_end;
 
@@ -2964,11 +2954,7 @@ static void test_BCryptSignHash(void)
 
     /* RSA */
     ret = BCryptOpenAlgorithmProvider(&alg, BCRYPT_RSA_ALGORITHM, NULL, 0);
-    if (ret)
-    {
-        win_skip("failed to open RSA provider: %#lx\n", ret);
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     /* public key */
     ret = BCryptImportKeyPair(alg, NULL, BCRYPT_RSAPUBLIC_BLOB, &key, rsapublic, sizeof(rsapublic), 0);
@@ -3025,11 +3011,7 @@ static void test_BCryptSignHash(void)
 
     /* ECDSA */
     ret = BCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
-    if (ret)
-    {
-        win_skip("failed to open ECDSA provider: %#lx\n", ret);
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     ret = BCryptGenerateKeyPair(alg, &key, 256, 0);
     ok(ret == STATUS_SUCCESS, "got %#lx\n", ret);
@@ -3124,13 +3106,7 @@ static void test_aes_vector(void)
     memcpy(data + sizeof(*blob), secret, sizeof(secret));
     size = sizeof(BCRYPT_KEY_DATA_BLOB_HEADER) + sizeof(secret);
     ret = BCryptImportKey(alg, NULL, BCRYPT_KEY_DATA_BLOB, &key, NULL, 0, data, size, 0);
-    ok(!ret || broken(ret == STATUS_INVALID_PARAMETER) /* vista */, "got %#lx\n", ret);
-    if (ret == STATUS_INVALID_PARAMETER)
-    {
-        win_skip("broken BCryptImportKey\n");
-        BCryptCloseAlgorithmProvider(alg, 0);
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     /* zero initialization vector */
     size = 0;
@@ -3180,12 +3156,7 @@ static void test_BcryptDeriveKeyCapi(void)
     ok(!ret, "got %#lx\n", ret);
 
     ret = BCryptCreateHash(alg, &hash, NULL, 0, NULL, 0, 0);
-    ok(!ret || broken(ret == STATUS_INVALID_PARAMETER) /* win2k8 */, "got %#lx\n", ret);
-    if (ret == STATUS_INVALID_PARAMETER)
-    {
-        win_skip( "broken BCryptCreateHash\n" );
-        return;
-    }
+    ok(!ret, "got %#lx\n", ret);
 
     ret = BCryptDeriveKeyCapi(NULL, NULL, NULL, 0, 0);
     ok(ret == STATUS_INVALID_PARAMETER || ret == STATUS_INVALID_HANDLE /* win7 */, "got %#lx\n", ret);
@@ -3408,11 +3379,7 @@ static void test_SecretAgreement(void)
     ULONG size;
 
     status = BCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDH_P256_ALGORITHM, NULL, 0);
-    if (status)
-    {
-        skip("Failed to open BCRYPT_ECDH_P256_ALGORITHM provider %#lx\n", status);
-        return;
-    }
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     key = NULL;
     status = BCryptGenerateKeyPair(alg, &key, 256, 0);
@@ -3504,6 +3471,7 @@ START_TEST(bcrypt)
     test_BcryptDeriveKeyCapi();
     test_DSA();
     test_SecretAgreement();
+    test_rsa_encrypt();
 
     FreeLibrary(module);
 }
