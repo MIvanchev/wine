@@ -1937,6 +1937,8 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         else
             hres = jsdisp_call_value(This, passed_this ? jsval_disp(passed_this) : jsval_undefined(), wFlags, argc, argv, pvarRes ? &r : NULL);
 
+        while(argc--)
+            jsval_release(argv[argc]);
         if(argv != buf)
             free(argv);
         if(SUCCEEDED(hres) && pvarRes) {
@@ -2245,7 +2247,7 @@ void jsdisp_free(jsdisp_t *obj)
 jsdisp_t *jsdisp_addref(jsdisp_t *jsdisp)
 {
     ULONG ref = ++jsdisp->ref;
-    TRACE("(%p) ref=%d\n", jsdisp, ref);
+    TRACE("(%p) ref=%ld\n", jsdisp, ref);
     return jsdisp;
 }
 
@@ -2253,7 +2255,7 @@ void jsdisp_release(jsdisp_t *jsdisp)
 {
     ULONG ref = --jsdisp->ref;
 
-    TRACE("(%p) ref=%d\n", jsdisp, ref);
+    TRACE("(%p) ref=%ld\n", jsdisp, ref);
 
     if(!ref)
         jsdisp_free(jsdisp);

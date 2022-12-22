@@ -260,6 +260,16 @@ static struct base_device *find_device_from_fd(int fd)
     return NULL;
 }
 
+static struct base_device *find_device_from_devnode(const char *path)
+{
+    struct base_device *impl;
+
+    LIST_FOR_EACH_ENTRY(impl, &device_list, struct base_device, unix_device.entry)
+        if (!strcmp(impl->devnode, path)) return impl;
+
+    return NULL;
+}
+
 static void hidraw_device_destroy(struct unix_device *iface)
 {
     struct hidraw_device *impl = hidraw_impl_from_unix_device(iface);
@@ -1319,7 +1329,9 @@ static void udev_add_device(struct udev_device *dev, int fd)
     if (!strcmp(subsystem, "hidraw"))
     {
         static const WCHAR hidraw[] = {'h','i','d','r','a','w',0};
+#ifdef HAVE_LINUX_HIDRAW_H
         char product[MAX_PATH];
+#endif
 
         if (!desc.manufacturer[0]) memcpy(desc.manufacturer, hidraw, sizeof(hidraw));
 
@@ -1544,16 +1556,6 @@ static int create_inotify(void)
     }
 
     return fd;
-}
-
-static struct base_device *find_device_from_devnode(const char *path)
-{
-    struct base_device *impl;
-
-    LIST_FOR_EACH_ENTRY(impl, &device_list, struct base_device, unix_device.entry)
-        if (!strcmp(impl->devnode, path)) return impl;
-
-    return NULL;
 }
 
 static void maybe_remove_devnode(const char *base, const char *dir)
