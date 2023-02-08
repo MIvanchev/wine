@@ -15371,8 +15371,7 @@ static BOOL CALLBACK test_window_position_cb(HMONITOR monitor, HDC hdc, RECT *mo
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
     window = CreateWindowA("static", "ddraw_test", WS_POPUP | WS_VISIBLE, monitor_rect->left,
-            monitor_rect->top, monitor_rect->right - monitor_rect->left,
-            monitor_rect->bottom - monitor_rect->top, NULL, NULL, NULL, NULL);
+            monitor_rect->top, 100, 100, NULL, NULL, NULL, NULL);
     ok(!!window, "Failed to create a window.\n");
     flush_events();
 
@@ -16162,6 +16161,10 @@ static HRESULT WINAPI test_enum_devices_caps_callback(GUID *guid, char *device_d
            "RGB Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
         ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
            "RGB Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWRASTERIZATION) == 0,
+           "RGB Device hal device caps has D3DDEVCAPS_HWRASTERIZATION set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWRASTERIZATION) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_HWRASTERIZATION set\n");
     }
     else if(IsEqualGUID(&IID_IDirect3DHALDevice, guid))
     {

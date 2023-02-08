@@ -3551,7 +3551,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
             {
                 if (!face_matches( family->family_name, face, face_name )) continue;
                 if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, orig_name ))
-                    return FALSE;
+                    return FALSE; /* enum_face_charsets() unlocked font_lock */
 	    }
 	}
     }
@@ -3562,7 +3562,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
         {
             face = LIST_ENTRY( list_head(get_family_face_list(family)), struct gdi_font_face, entry );
             if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, NULL ))
-                return FALSE;
+                return FALSE; /* enum_face_charsets() unlocked font_lock */
 	}
     }
     pthread_mutex_unlock( &font_lock );
@@ -7083,7 +7083,7 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 /***********************************************************************
  *           DrawTextW    (win32u.so)
  */
-INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
+INT WINAPI DECLSPEC_HIDDEN DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
 {
     struct draw_text_params *params;
     ULONG ret_len, size;

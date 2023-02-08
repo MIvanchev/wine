@@ -116,7 +116,6 @@ static HRESULT create_dinput_device( DWORD version, const GUID *guid, IDirectInp
     ok( hr == DI_OK, "CreateDevice returned %#lx\n", hr );
 
     ref = IDirectInput_Release( dinput );
-    todo_wine
     ok( ref == 0, "Release returned %ld\n", ref );
 
     return DI_OK;
@@ -1819,6 +1818,11 @@ static void test_sys_mouse( DWORD version )
     ok( hr == DIERR_UNSUPPORTED, "GetProperty DIPROP_SATURATION returned %#lx\n", hr );
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_CALIBRATIONMODE, &prop_dword.diph );
     ok( hr == DIERR_UNSUPPORTED, "GetProperty DIPROP_CALIBRATIONMODE returned %#lx\n", hr );
+    prop_dword.diph.dwObj = DIMOFS_Z;
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GRANULARITY, &prop_dword.diph );
+    ok( hr == DI_OK, "GetProperty DIPROP_GRANULARITY returned %#lx\n", hr );
+    ok( prop_dword.dwData == WHEEL_DELTA, "got %ld expected %ld\n", prop_dword.dwData, (DWORD)WHEEL_DELTA );
     prop_range.lMin = 0xdeadbeef;
     prop_range.lMax = 0xdeadbeef;
     hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );

@@ -378,6 +378,7 @@ SOURCES = \
 	iprtrmib.h \
 	iptypes.h \
 	isguids.h \
+	ivectorchangedeventargs.idl \
 	knownfolders.h \
 	ks.h \
 	ksguid.h \
@@ -512,6 +513,7 @@ SOURCES = \
 	msvcrt/setjmp.h \
 	msvcrt/share.h \
 	msvcrt/signal.h \
+	msvcrt/stdarg.h \
 	msvcrt/stdbool.h \
 	msvcrt/stddef.h \
 	msvcrt/stdint.h \
@@ -527,6 +529,7 @@ SOURCES = \
 	msvcrt/time.h \
 	msvcrt/uchar.h \
 	msvcrt/unistd.h \
+	msvcrt/vadefs.h \
 	msvcrt/wchar.h \
 	msvcrt/wctype.h \
 	mswsock.h \
@@ -746,6 +749,7 @@ SOURCES = \
 	uiautomationcore.idl \
 	uiautomationcoreapi.h \
 	uiribbon.idl \
+	uiviewsettingsinterop.idl \
 	unexposeenums2managed.h \
 	unknwn.idl \
 	urlhist.idl \
@@ -816,6 +820,7 @@ SOURCES = \
 	windows.storage.streams.idl \
 	windows.system.idl \
 	windows.system.power.idl \
+	windows.system.profile.systemmanufacturers.idl \
 	windows.system.threading.idl \
 	windows.system.userprofile.idl \
 	windows.ui.idl \
