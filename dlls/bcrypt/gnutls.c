@@ -144,7 +144,7 @@ static void (*pgnutls_x509_spki_set_rsa_pss_params)(gnutls_x509_spki_t, gnutls_d
 static int (*pgnutls_pubkey_set_spki)(gnutls_pubkey_t, const gnutls_x509_spki_t, unsigned int);
 static int (*pgnutls_privkey_set_spki)(gnutls_privkey_t, const gnutls_x509_spki_t, unsigned int);
 
-static void *libgnutls_handle;
+static int libgnutls_initialized;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_cipher_decrypt2);
 MAKE_FUNCPTR(gnutls_cipher_deinit);
@@ -322,18 +322,8 @@ static NTSTATUS gnutls_process_attach( void *args )
         setenv("GNUTLS_SYSTEM_PRIORITY_FILE", "/dev/null", 0);
     }
 
-    if (!(libgnutls_handle = dlopen( SONAME_LIBGNUTLS, RTLD_NOW )))
-    {
-        ERR_(winediag)( "failed to load libgnutls, no support for encryption\n" );
-        return STATUS_DLL_NOT_FOUND;
-    }
-
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( libgnutls_handle, #f ))) \
-    { \
-        ERR( "failed to load %s\n", #f ); \
-        goto fail; \
-    }
+    p##f = f;
 
     LOAD_FUNCPTR(gnutls_cipher_decrypt2)
     LOAD_FUNCPTR(gnutls_cipher_deinit)
@@ -353,39 +343,103 @@ static NTSTATUS gnutls_process_attach( void *args )
     LOAD_FUNCPTR(gnutls_pubkey_init);
 #undef LOAD_FUNCPTR
 
-#define LOAD_FUNCPTR_OPT(f) \
-    if (!(p##f = dlsym( libgnutls_handle, #f ))) \
-    { \
-        WARN( "failed to load %s\n", #f ); \
-        p##f =  compat_##f; \
-    }
+#if GNUTLS_VERSION_NUMBER >= 0x030000
+    pgnutls_cipher_tag             = gnutls_cipher_tag;
+    pgnutls_cipher_add_auth        = gnutls_cipher_add_auth;
+    pgnutls_pk_to_sign             = gnutls_pk_to_sign;
+    pgnutls_privkey_export_ecc_raw = gnutls_privkey_export_ecc_raw;
+    pgnutls_privkey_import_ecc_raw = gnutls_privkey_import_ecc_raw;
+    pgnutls_pubkey_verify_hash2    = gnutls_pubkey_verify_hash2;
+    pgnutls_pubkey_encrypt_data    = gnutls_pubkey_encrypt_data;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN( "failed to load %s\n", "gnutls_cipher_tag" );
+    pgnutls_cipher_tag = compat_gnutls_cipher_tag;
+    WARN( "failed to load %s\n", "gnutls_cipher_add_auth" );
+    pgnutls_cipher_add_auth = compat_gnutls_cipher_add_auth;
+    WARN( "failed to load %s\n", "gnutls_pk_to_sign" );
+    pgnutls_pk_to_sign = compat_gnutls_pk_to_sign;
+    WARN( "failed to load %s\n", "gnutls_privkey_export_ecc_raw" );
+    pgnutls_privkey_export_ecc_raw = compat_gnutls_privkey_export_ecc_raw;
+    WARN( "failed to load %s\n", "gnutls_privkey_import_ecc_raw" );
+    pgnutls_privkey_import_ecc_raw = compat_gnutls_privkey_import_ecc_raw;
+    WARN( "failed to load %s\n", "gnutls_pubkey_verify_hash2" );
+    pgnutls_pubkey_verify_hash2 = compat_gnutls_pubkey_verify_hash2;
+    WARN( "failed to load %s\n", "gnutls_pubkey_encrypt_data" );
+    pgnutls_pubkey_encrypt_data = compat_gnutls_pubkey_encrypt_data;
+#endif
 
-    LOAD_FUNCPTR_OPT(gnutls_cipher_tag)
-    LOAD_FUNCPTR_OPT(gnutls_cipher_add_auth)
-    LOAD_FUNCPTR_OPT(gnutls_decode_rs_value)
-    LOAD_FUNCPTR_OPT(gnutls_pk_to_sign)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_decrypt_data)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_export_dsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_export_ecc_raw)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_export_rsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_generate)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_import_ecc_raw)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_import_rsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_privkey_set_spki)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_encrypt_data)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_export_dsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_export_ecc_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_export_rsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_import_dsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_import_ecc_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_import_rsa_raw)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_set_spki)
-    LOAD_FUNCPTR_OPT(gnutls_pubkey_verify_hash2)
-    LOAD_FUNCPTR_OPT(gnutls_x509_spki_deinit)
-    LOAD_FUNCPTR_OPT(gnutls_x509_spki_init)
-    LOAD_FUNCPTR_OPT(gnutls_x509_spki_set_rsa_pss_params)
+/* Wine says at least 2.11.0 but the docs say 2.12.0... */
+#if GNUTLS_VERSION_NUMBER >= 0x020C00
+    pgnutls_pubkey_import_rsa_raw = gnutls_pubkey_import_rsa_raw;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN( "failed to load %s\n", "gnutls_pubkey_import_rsa_raw" );
+    pgnutls_pubkey_import_rsa_raw = compat_gnutls_pubkey_import_rsa_raw;
+#endif
 
-#undef LOAD_FUNCPTR_OPT
+#if GNUTLS_VERSION_NUMBER >= 0x020C00
+    pgnutls_pubkey_import_dsa_raw = gnutls_pubkey_import_dsa_raw;
+    pgnutls_pubkey_import_privkey = gnutls_pubkey_import_privkey;
+    pgnutls_privkey_decrypt_data  = gnutls_privkey_decrypt_data;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN( "failed to load %s\n", "gnutls_pubkey_import_dsa_raw" );
+    pgnutls_pubkey_import_dsa_raw = compat_gnutls_pubkey_import_dsa_raw;
+    WARN( "failed to load %s\n", "gnutls_pubkey_import_privkey" );
+    pgnutls_pubkey_import_privkey = compat_gnutls_pubkey_import_privkey;
+    WARN( "failed to load %s\n", "gnutls_privkey_decrypt_data" );
+    pgnutls_privkey_decrypt_data = compat_gnutls_privkey_decrypt_data;
+#endif
+
+#if GNUTLS_VERSION_NUMBER >= 0x030300
+    pgnutls_pubkey_export_dsa_raw  = gnutls_pubkey_export_dsa_raw;
+    pgnutls_pubkey_export_rsa_raw  = gnutls_pubkey_export_rsa_raw;
+    pgnutls_privkey_export_ecc_raw = gnutls_privkey_export_ecc_raw;
+    pgnutls_privkey_export_rsa_raw = gnutls_privkey_export_rsa_raw;
+    pgnutls_privkey_export_dsa_raw = gnutls_privkey_export_dsa_raw;
+    pgnutls_privkey_generate       = gnutls_privkey_generate;
+    pgnutls_privkey_import_rsa_raw = gnutls_privkey_import_rsa_raw;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN( "failed to load %s\n", "gnutls_pubkey_export_dsa_raw" );
+    pgnutls_pubkey_export_dsa_raw = compat_gnutls_pubkey_export_dsa_raw;
+    WARN( "failed to load %s\n", "gnutls_pubkey_export_rsa_raw" );
+    pgnutls_pubkey_export_rsa_raw = compat_gnutls_pubkey_export_rsa_raw;
+    WARN( "failed to load %s\n", "gnutls_privkey_export_ecc_raw" );
+    pgnutls_privkey_export_ecc_raw = compat_gnutls_privkey_export_ecc_raw;
+    WARN( "failed to load %s\n", "gnutls_privkey_export_rsa_raw" );
+    pgnutls_privkey_export_rsa_raw = compat_gnutls_privkey_export_rsa_raw;
+    WARN( "failed to load %s\n", "gnutls_privkey_export_dsa_raw" );
+    pgnutls_privkey_export_dsa_raw = compat_gnutls_privkey_export_dsa_raw;
+    WARN( "failed to load %s\n", "gnutls_privkey_generate" );
+    pgnutls_privkey_generate = compat_gnutls_privkey_generate;
+    WARN( "failed to load %s\n", "gnutls_privkey_import_rsa_raw" );
+    pgnutls_privkey_import_rsa_raw = compat_gnutls_privkey_import_rsa_raw;
+#endif
+
+#if GNUTLS_VERSION_NUMBER >= 0x030600
+    pgnutls_decode_rs_value              = gnutls_decode_rs_value;
+    pgnutls_x509_spki_init               = gnutls_x509_spki_init;
+    pgnutls_x509_spki_deinit             = gnutls_x509_spki_deinit;
+    pgnutls_x509_spki_set_rsa_pss_params = gnutls_x509_spki_set_rsa_pss_params;
+    pgnutls_pubkey_set_spki              = gnutls_pubkey_set_spki;
+    pgnutls_privkey_set_spki             = gnutls_privkey_set_spki;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN( "failed to load %s\n", "gnutls_decode_rs_value" );
+    pgnutls_decode_rs_value = compat_gnutls_decode_rs_value;
+    WARN( "failed to load %s\n", "gnutls_x509_spki_init" );
+    pgnutls_x509_spki_init = compat_gnutls_x509_spki_init;
+    WARN( "failed to load %s\n", "gnutls_x509_spki_deinit" );
+    pgnutls_x509_spki_deinit = compat_gnutls_x509_spki_deinit;
+    WARN( "failed to load %s\n", "gnutls_x509_spki_set_rsa_pss_params" );
+    pgnutls_x509_spki_set_rsa_pss_params = compat_gnutls_x509_spki_set_rsa_pss_params;
+    WARN( "failed to load %s\n", "gnutls_pubkey_set_spki" );
+    pgnutls_pubkey_set_spki = compat_gnutls_pubkey_set_spki;
+    WARN( "failed to load %s\n", "gnutls_privkey_set_spki" );
+    pgnutls_privkey_set_spki = compat_gnutls_privkey_set_spki;
+#endif
 
     if ((ret = pgnutls_global_init()) != GNUTLS_E_SUCCESS)
     {
@@ -399,22 +453,17 @@ static NTSTATUS gnutls_process_attach( void *args )
         pgnutls_global_set_log_function( gnutls_log );
     }
 
+    libgnutls_initialized = 1;
+
     return STATUS_SUCCESS;
 
 fail:
-    dlclose( libgnutls_handle );
-    libgnutls_handle = NULL;
     return STATUS_DLL_NOT_FOUND;
 }
 
 static NTSTATUS gnutls_process_detach( void *args )
 {
-    if (libgnutls_handle)
-    {
-        pgnutls_global_deinit();
-        dlclose( libgnutls_handle );
-        libgnutls_handle = NULL;
-    }
+    libgnutls_initialized = 0;
     return STATUS_SUCCESS;
 }
 
@@ -960,7 +1009,7 @@ static NTSTATUS key_asymmetric_generate( void *args )
     unsigned int bitlen;
     int ret;
 
-    if (!libgnutls_handle) return STATUS_INTERNAL_ERROR;
+    if (!libgnutls_initialized) return STATUS_INTERNAL_ERROR;
     if (key_data(key)->a.privkey) return STATUS_INVALID_HANDLE;
 
     switch (key->alg_id)

@@ -32,10 +32,15 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <dlfcn.h>
-#ifdef SONAME_LIBGNUTLS
+#ifdef HAVE_LIBGNUTLS
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
 #include <gnutls/abstract.h>
+#if GNUTLS_VERSION_NUMBER >= 0x030000
+#include <gnutls/dtls.h>
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+#endif
 #endif
 
 #include "ntstatus.h"
@@ -49,7 +54,7 @@
 #include "wine/unixlib.h"
 #include "wine/debug.h"
 
-#if defined(SONAME_LIBGNUTLS)
+#if defined(HAVE_LIBGNUTLS)
 
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -80,7 +85,6 @@ static int (*pgnutls_privkey_import_rsa_raw)(gnutls_privkey_t, const gnutls_datu
 /* Not present in gnutls version < 3.4.0. */
 static int (*pgnutls_privkey_export_x509)(gnutls_privkey_t, gnutls_x509_privkey_t *);
 
-static void *libgnutls_handle;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_alert_get);
 MAKE_FUNCPTR(gnutls_alert_get_name);
@@ -1415,19 +1419,8 @@ static NTSTATUS process_attach( void *args )
         setenv("GNUTLS_SYSTEM_PRIORITY_FILE", "/dev/null", 0);
     }
 
-    libgnutls_handle = dlopen(SONAME_LIBGNUTLS, RTLD_NOW);
-    if (!libgnutls_handle)
-    {
-        ERR_(winediag)("Failed to load libgnutls, secure connections will not be available.\n");
-        return STATUS_DLL_NOT_FOUND;
-    }
-
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym(libgnutls_handle, #f))) \
-    { \
-        ERR("Failed to load %s\n", #f); \
-        goto fail; \
-    }
+    p##f = f;
 
     LOAD_FUNCPTR(gnutls_alert_get)
     LOAD_FUNCPTR(gnutls_alert_get_name)
@@ -1471,46 +1464,62 @@ static NTSTATUS process_attach( void *args )
     LOAD_FUNCPTR(gnutls_alert_send)
 #undef LOAD_FUNCPTR
 
-    if (!(pgnutls_cipher_get_block_size = dlsym(libgnutls_handle, "gnutls_cipher_get_block_size")))
-    {
-        WARN("gnutls_cipher_get_block_size not found\n");
-        pgnutls_cipher_get_block_size = compat_cipher_get_block_size;
-    }
-    if (!(pgnutls_transport_set_pull_timeout_function = dlsym(libgnutls_handle, "gnutls_transport_set_pull_timeout_function")))
-    {
-        WARN("gnutls_transport_set_pull_timeout_function not found\n");
-        pgnutls_transport_set_pull_timeout_function = compat_gnutls_transport_set_pull_timeout_function;
-    }
-    if (!(pgnutls_alpn_set_protocols = dlsym(libgnutls_handle, "gnutls_alpn_set_protocols")))
-    {
-        WARN("gnutls_alpn_set_protocols not found\n");
-        pgnutls_alpn_set_protocols = compat_gnutls_alpn_set_protocols;
-    }
-    if (!(pgnutls_alpn_get_selected_protocol = dlsym(libgnutls_handle, "gnutls_alpn_get_selected_protocol")))
-    {
-        WARN("gnutls_alpn_get_selected_protocol not found\n");
-        pgnutls_alpn_get_selected_protocol = compat_gnutls_alpn_get_selected_protocol;
-    }
-    if (!(pgnutls_dtls_set_mtu = dlsym(libgnutls_handle, "gnutls_dtls_set_mtu")))
-    {
-        WARN("gnutls_dtls_set_mtu not found\n");
-        pgnutls_dtls_set_mtu = compat_gnutls_dtls_set_mtu;
-    }
-    if (!(pgnutls_dtls_set_timeouts = dlsym(libgnutls_handle, "gnutls_dtls_set_timeouts")))
-    {
-        WARN("gnutls_dtls_set_timeouts not found\n");
-        pgnutls_dtls_set_timeouts = compat_gnutls_dtls_set_timeouts;
-    }
-    if (!(pgnutls_privkey_export_x509 = dlsym(libgnutls_handle, "gnutls_privkey_export_x509")))
-    {
-        WARN("gnutls_privkey_export_x509 not found\n");
-        pgnutls_privkey_export_x509 = compat_gnutls_privkey_export_x509;
-    }
-    if (!(pgnutls_privkey_import_rsa_raw = dlsym(libgnutls_handle, "gnutls_privkey_import_rsa_raw")))
-    {
-        WARN("gnutls_privkey_import_rsa_raw not found\n");
-        pgnutls_privkey_import_rsa_raw = compat_gnutls_privkey_import_rsa_raw;
-    }
+#if GNUTLS_VERSION_NUMBER >= 0x020A00
+    pgnutls_cipher_get_block_size = gnutls_cipher_get_block_size;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_cipher_get_block_size not found\n");
+    pgnutls_cipher_get_block_size = compat_gnutls_cipher_get_block_size;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030000
+    pgnutls_transport_set_pull_timeout_function = gnutls_transport_set_pull_timeout_function;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_transport_set_pull_timeout_function not found\n");
+    pgnutls_transport_set_pull_timeout_function = compat_gnutls_transport_set_pull_timeout_function;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030200
+    pgnutls_alpn_set_protocols = gnutls_alpn_set_protocols;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_alpn_set_protocols not found\n");
+    pgnutls_alpn_set_protocols = compat_gnutls_alpn_set_protocols;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030200
+    pgnutls_alpn_get_selected_protocol = gnutls_alpn_get_selected_protocol;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_alpn_get_selected_protocol not found\n");
+    pgnutls_alpn_get_selected_protocol = compat_gnutls_alpn_get_selected_protocol;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030000
+    pgnutls_dtls_set_mtu = gnutls_dtls_set_mtu;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_dtls_set_mtu not found\n");
+    pgnutls_dtls_set_mtu = compat_gnutls_dtls_set_mtu;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030000
+    pgnutls_dtls_set_timeouts = gnutls_dtls_set_timeouts;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_dtls_set_timeouts not found\n");
+    pgnutls_dtls_set_timeouts = compat_gnutls_dtls_set_timeouts;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030400
+    pgnutls_privkey_export_x509 = gnutls_privkey_export_x509;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_privkey_export_x509 not found\n");
+    pgnutls_privkey_export_x509 = compat_gnutls_privkey_export_x509;
+#endif
+#if GNUTLS_VERSION_NUMBER >= 0x030300
+    pgnutls_privkey_import_rsa_raw = gnutls_privkey_import_rsa_raw;
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    WARN("gnutls_privkey_import_rsa_raw not found\n");
+    pgnutls_privkey_import_rsa_raw = compat_gnutls_privkey_import_rsa_raw;
+#endif
 
     ret = pgnutls_global_init();
     if (ret != GNUTLS_E_SUCCESS)
@@ -1530,16 +1539,12 @@ static NTSTATUS process_attach( void *args )
     return STATUS_SUCCESS;
 
 fail:
-    dlclose(libgnutls_handle);
-    libgnutls_handle = NULL;
     return STATUS_DLL_NOT_FOUND;
 }
 
 static NTSTATUS process_detach( void *args )
 {
     pgnutls_global_deinit();
-    dlclose(libgnutls_handle);
-    libgnutls_handle = NULL;
     return STATUS_SUCCESS;
 }
 
@@ -1900,4 +1905,4 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 
 #endif /* _WIN64 */
 
-#endif /* SONAME_LIBGNUTLS */
+#endif /* HAVE_LIBGNUTLS */

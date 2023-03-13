@@ -32,7 +32,7 @@
 #ifdef __APPLE__
 #include <Security/Security.h>
 #endif
-#ifdef SONAME_LIBGNUTLS
+#ifdef HAVE_LIBGNUTLS
 #include <gnutls/pkcs12.h>
 #endif
 
@@ -47,7 +47,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
-#ifdef SONAME_LIBGNUTLS
+#ifdef HAVE_LIBGNUTLS
 
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
@@ -59,7 +59,7 @@ int gnutls_pkcs12_simple_parse(gnutls_pkcs12_t p12, const char *password,
 
 int gnutls_x509_privkey_get_pk_algorithm2(gnutls_x509_privkey_t, unsigned int*);
 
-static void *libgnutls_handle;
+static int libgnutls_initialized;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_global_deinit);
 MAKE_FUNCPTR(gnutls_global_init);
@@ -95,19 +95,9 @@ static NTSTATUS process_attach( void *args )
         setenv("GNUTLS_SYSTEM_PRIORITY_FILE", "/dev/null", 0);
     }
 
-    if (!(libgnutls_handle = dlopen( SONAME_LIBGNUTLS, RTLD_NOW )))
-    {
-        ERR_(winediag)( "failed to load libgnutls, no support for pfx import/export\n" );
-        return STATUS_DLL_NOT_FOUND;
-    }
-
+#if GNUTLS_VERSION_NUMBER >= 0x030100
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( libgnutls_handle, #f ))) \
-    { \
-        ERR( "failed to load %s\n", #f ); \
-        goto fail; \
-    }
-
+    p##f = f;
     LOAD_FUNCPTR(gnutls_global_deinit)
     LOAD_FUNCPTR(gnutls_global_init)
     LOAD_FUNCPTR(gnutls_global_set_log_function)
@@ -121,6 +111,11 @@ static NTSTATUS process_attach( void *args )
     LOAD_FUNCPTR(gnutls_x509_privkey_export_rsa_raw2)
     LOAD_FUNCPTR(gnutls_x509_privkey_get_pk_algorithm2)
 #undef LOAD_FUNCPTR
+#else
+#error You appear to be using an old version of GnuTLS. Comment out this directive if this is intentional.
+    ERR( "failed to load %s\n", "gnutls_pkcs12_simple_parse" );
+    goto fail;
+#endif
 
     if ((ret = pgnutls_global_init()) != GNUTLS_E_SUCCESS)
     {
@@ -134,19 +129,18 @@ static NTSTATUS process_attach( void *args )
         pgnutls_global_set_log_function( gnutls_log );
     }
 
+    libgnutls_initialized = 1;
+
     return TRUE;
 
 fail:
-    dlclose( libgnutls_handle );
-    libgnutls_handle = NULL;
     return STATUS_DLL_INIT_FAILED;
 }
 
 static NTSTATUS process_detach( void *args )
 {
     pgnutls_global_deinit();
-    dlclose( libgnutls_handle );
-    libgnutls_handle = NULL;
+    libgnutls_initialized = 0;
     return STATUS_SUCCESS;
 }
 #define RSA_MAGIC_KEY  ('R' | ('S' << 8) | ('A' << 16) | ('2' << 24))
@@ -278,7 +272,7 @@ static NTSTATUS open_cert_store( void *args )
     int ret;
     struct cert_store_data *store_data;
 
-    if (!libgnutls_handle) return STATUS_DLL_NOT_FOUND;
+    if (!libgnutls_initialized) return STATUS_DLL_NOT_FOUND;
     if (params->password && !(pwd = password_to_ascii( params->password ))) return STATUS_NO_MEMORY;
 
     if ((ret = pgnutls_pkcs12_init( &p12 )) < 0) goto error;
@@ -354,7 +348,7 @@ static NTSTATUS close_cert_store( void *args )
     return STATUS_SUCCESS;
 }
 
-#else /* SONAME_LIBGNUTLS */
+#else /* HAVE_LIBGNUTLS */
 
 static NTSTATUS process_attach( void *args ) { return STATUS_SUCCESS; }
 static NTSTATUS process_detach( void *args ) { return STATUS_SUCCESS; }
@@ -363,7 +357,7 @@ static NTSTATUS import_store_key( void *args ) { return STATUS_DLL_NOT_FOUND; }
 static NTSTATUS import_store_cert( void *args ) { return STATUS_DLL_NOT_FOUND; }
 static NTSTATUS close_cert_store( void *args ) { return STATUS_DLL_NOT_FOUND; }
 
-#endif /* SONAME_LIBGNUTLS */
+#endif /* HAVE_LIBGNUTLS */
 
 struct root_cert
 {

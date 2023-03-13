@@ -3,6 +3,7 @@ IMPORTS   = advapi32
 IMPORTLIB = bcrypt
 UNIXLIB   = bcrypt.so
 UNIX_CFLAGS = $(GNUTLS_CFLAGS)
+UNIX_LIBS = $(GNUTLS_LIBS)
 
 C_SRCS = \
 	bcrypt_main.c \

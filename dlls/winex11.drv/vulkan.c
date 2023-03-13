@@ -44,7 +44,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#ifdef SONAME_LIBVULKAN
+#ifdef HAVE_LIBVULKAN
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
 static pthread_mutex_t vulkan_mutex;
@@ -74,26 +74,47 @@ typedef struct VkXlibSurfaceCreateInfoKHR
     Window window;
 } VkXlibSurfaceCreateInfoKHR;
 
-static VkResult (*pvkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
-static VkResult (*pvkCreateSwapchainKHR)(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
-static VkResult (*pvkCreateXlibSurfaceKHR)(VkInstance, const VkXlibSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
-static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
-static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
-static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
-static VkResult (*pvkEnumerateInstanceExtensionProperties)(const char *, uint32_t *, VkExtensionProperties *);
-static VkResult (*pvkGetDeviceGroupSurfacePresentModesKHR)(VkDevice, VkSurfaceKHR, VkDeviceGroupPresentModeFlagsKHR *);
-static void * (*pvkGetDeviceProcAddr)(VkDevice, const char *);
-static void * (*pvkGetInstanceProcAddr)(VkInstance, const char *);
-static VkResult (*pvkGetPhysicalDevicePresentRectanglesKHR)(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkRect2D *);
-static VkResult (*pvkGetPhysicalDeviceSurfaceCapabilities2KHR)(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *, VkSurfaceCapabilities2KHR *);
-static VkResult (*pvkGetPhysicalDeviceSurfaceCapabilitiesKHR)(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR *);
-static VkResult (*pvkGetPhysicalDeviceSurfaceFormats2KHR)(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *, uint32_t *, VkSurfaceFormat2KHR *);
-static VkResult (*pvkGetPhysicalDeviceSurfaceFormatsKHR)(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkSurfaceFormatKHR *);
-static VkResult (*pvkGetPhysicalDeviceSurfacePresentModesKHR)(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkPresentModeKHR *);
-static VkResult (*pvkGetPhysicalDeviceSurfaceSupportKHR)(VkPhysicalDevice, uint32_t, VkSurfaceKHR, VkBool32 *);
-static VkBool32 (*pvkGetPhysicalDeviceXlibPresentationSupportKHR)(VkPhysicalDevice, uint32_t, Display *, VisualID);
-static VkResult (*pvkGetSwapchainImagesKHR)(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
-static VkResult (*pvkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
+VkResult vkCreateInstance(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
+VkResult vkCreateSwapchainKHR(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
+VkResult vkCreateXlibSurfaceKHR(VkInstance, const VkXlibSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
+void vkDestroyInstance(VkInstance, const VkAllocationCallbacks *);
+void vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
+void vkDestroySwapchainKHR(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
+VkResult vkEnumerateInstanceExtensionProperties(const char *, uint32_t *, VkExtensionProperties *);
+VkResult vkGetDeviceGroupSurfacePresentModesKHR(VkDevice, VkSurfaceKHR, VkDeviceGroupPresentModeFlagsKHR *);
+void * vkGetDeviceProcAddr(VkDevice, const char *);
+void * vkGetInstanceProcAddr(VkInstance, const char *);
+VkResult vkGetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkRect2D *);
+VkResult vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *, VkSurfaceCapabilities2KHR *);
+VkResult vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR *);
+VkResult vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *, uint32_t *, VkSurfaceFormat2KHR *);
+VkResult vkGetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkSurfaceFormatKHR *);
+VkResult vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkPresentModeKHR *);
+VkResult vkGetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice, uint32_t, VkSurfaceKHR, VkBool32 *);
+VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice, uint32_t, Display *, VisualID);
+VkResult vkGetSwapchainImagesKHR(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
+VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
+
+#define pvkCreateInstance                              vkCreateInstance
+#define pvkCreateSwapchainKHR                          vkCreateSwapchainKHR
+#define pvkCreateXlibSurfaceKHR                        vkCreateXlibSurfaceKHR
+#define pvkDestroyInstance                             vkDestroyInstance
+#define pvkDestroySurfaceKHR                           vkDestroySurfaceKHR
+#define pvkDestroySwapchainKHR                         vkDestroySwapchainKHR
+#define pvkEnumerateInstanceExtensionProperties        vkEnumerateInstanceExtensionProperties
+#define pvkGetDeviceGroupSurfacePresentModesKHR        vkGetDeviceGroupSurfacePresentModesKHR
+#define pvkGetDeviceProcAddr                           vkGetDeviceProcAddr
+#define pvkGetInstanceProcAddr                         vkGetInstanceProcAddr
+#define pvkGetPhysicalDevicePresentRectanglesKHR       vkGetPhysicalDevicePresentRectanglesKHR
+#define pvkGetPhysicalDeviceSurfaceCapabilities2KHR    vkGetPhysicalDeviceSurfaceCapabilities2KHR
+#define pvkGetPhysicalDeviceSurfaceCapabilitiesKHR     vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+#define pvkGetPhysicalDeviceSurfaceFormats2KHR         vkGetPhysicalDeviceSurfaceFormats2KHR
+#define pvkGetPhysicalDeviceSurfaceFormatsKHR          vkGetPhysicalDeviceSurfaceFormatsKHR
+#define pvkGetPhysicalDeviceSurfacePresentModesKHR     vkGetPhysicalDeviceSurfacePresentModesKHR
+#define pvkGetPhysicalDeviceSurfaceSupportKHR          vkGetPhysicalDeviceSurfaceSupportKHR
+#define pvkGetPhysicalDeviceXlibPresentationSupportKHR vkGetPhysicalDeviceXlibPresentationSupportKHR
+#define pvkGetSwapchainImagesKHR                       vkGetSwapchainImagesKHR
+#define pvkQueuePresentKHR vkQueuePresentKHR
 
 static void *X11DRV_get_vk_device_proc_addr(const char *name);
 static void *X11DRV_get_vk_instance_proc_addr(VkInstance instance, const char *name);
@@ -103,49 +124,15 @@ static inline struct wine_vk_surface *surface_from_handle(VkSurfaceKHR handle)
     return (struct wine_vk_surface *)(uintptr_t)handle;
 }
 
-static void *vulkan_handle;
+static int vulkan_initialized;
 
 static void wine_vk_init(void)
 {
     init_recursive_mutex(&vulkan_mutex);
 
-    if (!(vulkan_handle = dlopen(SONAME_LIBVULKAN, RTLD_NOW)))
-    {
-        ERR("Failed to load %s.\n", SONAME_LIBVULKAN);
-        return;
-    }
-
-#define LOAD_FUNCPTR(f) if (!(p##f = dlsym(vulkan_handle, #f))) goto fail
-#define LOAD_OPTIONAL_FUNCPTR(f) p##f = dlsym(vulkan_handle, #f)
-    LOAD_FUNCPTR(vkCreateInstance);
-    LOAD_FUNCPTR(vkCreateSwapchainKHR);
-    LOAD_FUNCPTR(vkCreateXlibSurfaceKHR);
-    LOAD_FUNCPTR(vkDestroyInstance);
-    LOAD_FUNCPTR(vkDestroySurfaceKHR);
-    LOAD_FUNCPTR(vkDestroySwapchainKHR);
-    LOAD_FUNCPTR(vkEnumerateInstanceExtensionProperties);
-    LOAD_FUNCPTR(vkGetDeviceProcAddr);
-    LOAD_FUNCPTR(vkGetInstanceProcAddr);
-    LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
-    LOAD_FUNCPTR(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
-    LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDeviceSurfaceFormats2KHR);
-    LOAD_FUNCPTR(vkGetPhysicalDeviceSurfaceFormatsKHR);
-    LOAD_FUNCPTR(vkGetPhysicalDeviceSurfacePresentModesKHR);
-    LOAD_FUNCPTR(vkGetPhysicalDeviceSurfaceSupportKHR);
-    LOAD_FUNCPTR(vkGetPhysicalDeviceXlibPresentationSupportKHR);
-    LOAD_FUNCPTR(vkGetSwapchainImagesKHR);
-    LOAD_FUNCPTR(vkQueuePresentKHR);
-    LOAD_OPTIONAL_FUNCPTR(vkGetDeviceGroupSurfacePresentModesKHR);
-    LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDevicePresentRectanglesKHR);
-#undef LOAD_FUNCPTR
-#undef LOAD_OPTIONAL_FUNCPTR
-
+    vulkan_initialized = 1;
     vulkan_hwnd_context = XUniqueContext();
     return;
-
-fail:
-    dlclose(vulkan_handle);
-    vulkan_handle = NULL;
 }
 
 /* Helper function for converting between win32 and X11 compatible VkInstanceCreateInfo.
@@ -728,7 +715,7 @@ const struct vulkan_funcs *get_vulkan_driver(UINT version)
     }
 
     pthread_once(&init_once, wine_vk_init);
-    if (vulkan_handle)
+    if (vulkan_initialized)
         return &vulkan_funcs;
 
     return NULL;
@@ -750,4 +737,4 @@ void vulkan_thread_detach(void)
 {
 }
 
-#endif /* SONAME_LIBVULKAN */
+#endif /* HAVE_LIBVULKAN */

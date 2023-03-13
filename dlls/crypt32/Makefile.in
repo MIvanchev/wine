@@ -4,7 +4,7 @@ UNIXLIB   = crypt32.so
 IMPORTLIB = crypt32
 IMPORTS   = user32 advapi32 bcrypt
 DELAYIMPORTS = cryptnet
-UNIX_LIBS    = $(SECURITY_LIBS)
+UNIX_LIBS    = $(SECURITY_LIBS) $(GNUTLS_LIBS)
 UNIX_CFLAGS  = $(GNUTLS_CFLAGS)
 
 C_SRCS = \

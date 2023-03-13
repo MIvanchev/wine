@@ -1396,7 +1396,7 @@ then
 fi
 case $host_os in
   darwin*|macosx*) ;;
-  *) WINE_NOTICE_WITH(dbus,[test "x$ac_cv_lib_dbus_1_dbus_connection_close" = "xno"],
+  *) WINE_NOTICE_WITH(dbus,[test "x$ac_cv_lib_dbus_1_dbus_connection_close" != "xyes"],
                       [libdbus ${notice_platform}development files not found, no dynamic device support.]) ;;
 esac
 
@@ -1407,12 +1407,12 @@ then
         [AC_CHECK_HEADER(gnutls/gnutls.h,
             [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>]], [[static typeof(gnutls_mac_get_key_size) *func; if (func) return 0;]])],
-                [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS],[[libgnutls\\(-deb0\\)\\{0,1\\}]])
+                [WINE_CHECK_LIB(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""])
                  WINE_CHECK_LIB_FUNCS(gnutls_cipher_init,[$GNUTLS_LIBS],,
                                       [WINE_NOTICE([libgnutls ${notice_platform}development files too old, bcrypt encryption won't be supported.])])])],
             [GNUTLS_CFLAGS=""])])
 fi
-WINE_WARNING_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
+WINE_WARNING_WITH(gnutls,[test "x$ac_cv_lib_gnutls_gnutls_global_init" != "xyes"],
                  [libgnutls ${notice_platform}development files not found, no schannel support.])
 
 dnl **** Check for SANE ****
@@ -1431,7 +1431,7 @@ if test "x$with_usb" != "xno"
 then
     WINE_PACKAGE_FLAGS(USB,[libusb-1.0],[-lusb-1.0],,,
         [AC_CHECK_HEADER([libusb.h],
-            [AC_CHECK_LIB(usb-1.0,libusb_interrupt_event_handler,[USB_LIBS="$USB_LIBS -lrt"],[USB_LIBS=""],[$USB_LIBS -lrt])],
+            [WINE_CHECK_LIB(usb-1.0,libusb_interrupt_event_handler,,[USB_LIBS=""])],
             [USB_LIBS=""])])
 fi
 WINE_NOTICE_WITH(usb,[test "$ac_cv_lib_usb_1_0_libusb_interrupt_event_handler" != "yes"],
@@ -1560,10 +1560,7 @@ if test "x$with_pulse" != "xno";
 then
     WINE_PACKAGE_FLAGS(PULSE,[libpulse],,,,
         [AC_CHECK_HEADERS(pulse/pulseaudio.h,
-            [AC_CHECK_LIB(pulse, pa_stream_is_corked,
-                [PULSE_LIBS="$PULSE_LIBS $DBUS_LIBS -lm -ldl -lrt"],
-                [PULSE_LIBS=""],
-                [$PULSE_LIBS $DBUS_LIBS -lm -ldl -lrt])],
+            [WINE_CHECK_LIB(pulse, pa_stream_is_corked,,[PULSE_LIBS=""])],
             [PULSE_LIBS=""])])
 fi
 WINE_NOTICE_WITH(pulse, [test -z "$PULSE_LIBS"],
@@ -1596,10 +1593,10 @@ then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access_mask,
         [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]],
                                             [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
-                           [ALSA_LIBS="$(pkg-config --libs --static alsa) -lrt"],
+                           [ALSA_LIBS="$(pkg-config --libs --static alsa)"],
                            [ALSA_LIBS=""])],
         [ALSA_LIBS=""],
-        [$(pkg-config --libs --static alsa) -lrt])
+        [$(pkg-config --libs --static alsa)])
 fi
 test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
 WINE_NOTICE_WITH(alsa,[test "x$ALSA_LIBS" = "x"],
@@ -1693,7 +1690,7 @@ then
     [AC_CHECK_HEADERS([capi20.h linux/capi.h],,,[#define __user])
     if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
     then
-        AC_CHECK_LIB(capi20,capi20_register,[CAPI20_LIBS="$CAPI20_LIBS -ldl -lpthread -lrt"],[CAPI20_LIBS=""],[$CAPI20_LIBS -ldl -lpthread -lrt])
+        WINE_CHECK_LIB(capi20,capi20_register,,[CAPI20_LIBS=""])
     fi])
 fi
 WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_capi20_capi20_register" != xyes],
@@ -1745,7 +1742,7 @@ then
         [AC_CHECK_HEADERS([krb5/krb5.h])
          if test "$ac_cv_header_krb5_krb5_h" = "yes"
          then
-             WINE_CHECK_LIB(krb5,krb5_is_config_principal,,,[-ldl -lresolv])
+             WINE_CHECK_LIB(krb5, krb5_is_config_principal)
          else
              KRB5_CFLAGS=""
          fi])
@@ -1763,7 +1760,7 @@ then
         [AC_CHECK_HEADERS([gssapi/gssapi.h gssapi/gssapi_ext.h])
         if test "$ac_cv_header_gssapi_gssapi_h" = "yes" -a "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
         then
-            WINE_CHECK_LIB(gssapi_krb5, gss_init_sec_context,,,[$GSSAPI_LIBS -ldl -lresolv])
+            WINE_CHECK_LIB(gssapi_krb5, gss_init_sec_context)
         else
             GSSAPI_CFLAGS=""
         fi])
@@ -1803,13 +1800,13 @@ fi
 dnl *** Check for Vulkan ***
 if test "x$with_vulkan" != "xno"
 then
-    WINE_CHECK_SONAME(vulkan, vkGetInstanceProcAddr)
-    if test "x$ac_cv_lib_soname_vulkan" = "x"
+    WINE_CHECK_LIB(vulkan, vkGetInstanceProcAddr)
+    if test "x$ac_cv_lib_vulkan_vkGetInstasnceProcAddr" != "xyes"
     then
         WINE_CHECK_SONAME(MoltenVK, vkGetInstanceProcAddr)
     fi
 fi
-WINE_NOTICE_WITH(vulkan,[test "x$ac_cv_lib_soname_vulkan" = "x" -a "x$ac_cv_lib_soname_MoltenVK" = "x"],
+WINE_NOTICE_WITH(vulkan,[test "x$ac_cv_lib_vulkan_vkGetInstanceProcAddr" != "xyes" -a "x$ac_cv_lib_soname_MoltenVK" = "x"],
                  [libvulkan and libMoltenVK ${notice_platform}development files not found, Vulkan won't be supported.])
 
 dnl **** Check for gcc specific options ****
