@@ -1317,8 +1317,11 @@ then
     opengl_msg=""
     if test "x$with_opengl" != "xno"
     then
-	WINE_CHECK_LIB(GL,glXCreateContext,
-                     [OPENGL_LIBS="$GL_LIBS"],
+	WINE_CHECK_LIB(vulkan,glXCreateContext,
+                     [GL_CFLAGS="$VULKAN_CFLAGS"
+                      GL_LIBS="$VULKAN_LIBS"
+                      OPENGL_LIBS="$GL_LIBS"
+                      AC_DEFINE(HAVE_LIBGL, 1, [Define if we have the libGL development environment])],
                      [WINE_CHECK_SONAME(GL,glXCreateContext,
 			    [OPENGL_LIBS="-Xlinker -dylib_file -Xlinker /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib -lGL"],
 			    [if test -f /usr/X11R6/lib/libGL.a
@@ -1736,9 +1739,9 @@ WINE_NOTICE_WITH(fontconfig,[test "x$ac_cv_lib_fontconfig_FcInit" != "xyes"],
 dnl **** Check for krb5 ****
 if test "x$with_krb5" != "xno"
 then
-    WINE_PACKAGE_FLAGS(KRB5,[krb5],,
-                       [`${KRB5_CONFIG:-krb5-config} --cflags 2>/dev/null`],
-                       [`${KRB5_CONFIG:-krb5-config} --libs 2>/dev/null`],
+    WINE_PACKAGE_FLAGS(KRB5,[krb5],,,,
+#                       [`${KRB5_CONFIG:-krb5-config} --cflags 2>/dev/null`],
+#                       [`${KRB5_CONFIG:-krb5-config} --libs 2>/dev/null`],
         [AC_CHECK_HEADERS([krb5/krb5.h])
          if test "$ac_cv_header_krb5_krb5_h" = "yes"
          then
@@ -1754,13 +1757,13 @@ test "x$ac_cv_lib_krb5_krb5_is_config_principal" != "x" || with_gssapi=${with_gs
 dnl **** Check for gssapi ****
 if test "x$with_gssapi" != "xno"
 then
-    WINE_PACKAGE_FLAGS(GSSAPI,[krb5-gssapi],,
-                       [`${KRB5_CONFIG:-krb5-config} --cflags gssapi 2>/dev/null`],
-                       [`${KRB5_CONFIG:-krb5-config} --libs gssapi 2>/dev/null`],
+    WINE_PACKAGE_FLAGS(GSSAPI,[krb5-gssapi],,,,
+#                       [`${KRB5_CONFIG:-krb5-config} --cflags gssapi 2>/dev/null`],
+#                       [`${KRB5_CONFIG:-krb5-config} --libs gssapi 2>/dev/null`],
         [AC_CHECK_HEADERS([gssapi/gssapi.h gssapi/gssapi_ext.h])
         if test "$ac_cv_header_gssapi_gssapi_h" = "yes" -a "$ac_cv_header_gssapi_gssapi_ext_h" = "yes"
         then
-            WINE_CHECK_LIB(gssapi_krb5, gss_init_sec_context)
+            WINE_CHECK_LIB(gssapi_krb5, gss_init_sec_context,[GSSPI_KRB5_CFLAGS="$GSSAPI_CFLAGS"],,[$GSSAPI_LIBS])
         else
             GSSAPI_CFLAGS=""
         fi])
