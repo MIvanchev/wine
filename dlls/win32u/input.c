@@ -135,8 +135,8 @@ static const VK_TO_BIT vk_to_bit[] =
 static const MODIFIERS modifiers =
 {
     .pVkToBit = (VK_TO_BIT *)vk_to_bit,
-    .wMaxModBits = 3,
-    .ModNumber = {0, 1, 2, 3},
+    .wMaxModBits = 7,
+    .ModNumber = {0, 1, 2, 3, 0, 1, 0, 0},
 };
 
 static const VK_TO_WCHARS2 vk_to_wchars2[] =
@@ -535,6 +535,46 @@ static WCHAR kbd_tables_vkey_to_wchar( const KBDTABLES *tables, UINT vkey, const
 
 #undef NEXT_ENTRY
 
+/*******************************************************************
+ *           NtUserGetForegroundWindow  (win32u.@)
+ */
+HWND WINAPI NtUserGetForegroundWindow(void)
+{
+    HWND ret = 0;
+
+    SERVER_START_REQ( get_thread_input )
+    {
+        req->tid = 0;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/* see GetActiveWindow */
+HWND get_active_window(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
+}
+
+/* see GetCapture */
+HWND get_capture(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndCapture : 0;
+}
+
+/* see GetFocus */
+HWND get_focus(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
+}
+
 /**********************************************************************
  *	     NtUserAttachThreadInput    (win32u.@)
  */
@@ -750,8 +790,7 @@ BOOL WINAPI NtUserGetCursorInfo( CURSORINFO *info )
 
 static void check_for_events( UINT flags )
 {
-    LARGE_INTEGER zero = { .QuadPart = 0 };
-    if (user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, &zero, flags, 0 ) == WAIT_TIMEOUT)
+    if (!user_driver->pProcessEvents( flags ))
         flush_window_surfaces( TRUE );
 }
 
@@ -1154,6 +1193,8 @@ HKL WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags )
 {
     struct user_thread_info *info = get_user_thread_info();
     HKL old_layout;
+    LCID locale;
+    HWND focus;
 
     TRACE_(keyboard)( "layout %p, flags %x\n", layout, flags );
 
@@ -1166,12 +1207,34 @@ HKL WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags )
         return 0;
     }
 
+    if (NtQueryDefaultLocale( TRUE, &locale ) || LOWORD(layout) != locale)
+    {
+        RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
+        FIXME_(keyboard)( "Changing user locale is not supported\n" );
+        return 0;
+    }
+
     if (!user_driver->pActivateKeyboardLayout( layout, flags ))
         return 0;
 
     old_layout = info->kbd_layout;
     info->kbd_layout = layout;
-    if (old_layout != layout) info->kbd_layout_id = 0;
+    if (old_layout != layout)
+    {
+        const NLS_LOCALE_DATA *data;
+        CHARSETINFO cs = {0};
+
+        if (HIWORD(layout) & 0x8000)
+            FIXME( "Aliased keyboard layout not yet implemented\n" );
+        else if (!(data = get_locale_data( HIWORD(layout) )))
+            WARN( "Failed to find locale data for %04x\n", HIWORD(layout) );
+        else
+            translate_charset_info( ULongToPtr(data->idefaultansicodepage), &cs, TCI_SRCCODEPAGE );
+
+        info->kbd_layout_id = 0;
+        if ((focus = get_focus()) && get_window_thread( focus, NULL ) == GetCurrentThreadId())
+            send_message( focus, WM_INPUTLANGCHANGE, cs.ciCharset, (LPARAM)layout );
+    }
 
     if (!old_layout) return get_locale_kbd_layout();
     return old_layout;
@@ -1218,10 +1281,10 @@ UINT WINAPI NtUserGetKeyboardLayoutList( INT size, HKL *layouts )
             tmp = wcstoul( key_info->Name, NULL, 16 );
             if (query_reg_ascii_value( subkey, "Layout Id", value_info, sizeof(buffer) ) &&
                 value_info->Type == REG_SZ)
-                tmp = MAKELONG( LOWORD( tmp ),
-                                0xf000 | (wcstoul( (const WCHAR *)value_info->Data, NULL, 16 ) & 0xfff) );
+                tmp = 0xf000 | (wcstoul( (const WCHAR *)value_info->Data, NULL, 16 ) & 0xfff);
             NtClose( subkey );
 
+            tmp = MAKELONG( LOWORD( layout ), LOWORD( tmp ) );
             if (layout == UlongToHandle( tmp )) continue;
 
             count++;
@@ -1711,46 +1774,6 @@ BOOL WINAPI release_capture(void)
     }
 
     return ret;
-}
-
-/*******************************************************************
- *           NtUserGetForegroundWindow  (win32u.@)
- */
-HWND WINAPI NtUserGetForegroundWindow(void)
-{
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = 0;
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-/* see GetActiveWindow */
-HWND get_active_window(void)
-{
-    GUITHREADINFO info;
-    info.cbSize = sizeof(info);
-    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
-}
-
-/* see GetCapture */
-HWND get_capture(void)
-{
-    GUITHREADINFO info;
-    info.cbSize = sizeof(info);
-    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndCapture : 0;
-}
-
-/* see GetFocus */
-HWND get_focus(void)
-{
-    GUITHREADINFO info;
-    info.cbSize = sizeof(info);
-    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
 }
 
 /*****************************************************************

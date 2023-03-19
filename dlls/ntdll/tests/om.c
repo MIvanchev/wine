@@ -272,7 +272,8 @@ static void test_name_collisions(void)
     OBJECT_ATTRIBUTES attr;
     HANDLE dir, h, h1, h2;
     DWORD winerr;
-    LARGE_INTEGER size;
+    LARGE_INTEGER size, timeout;
+    IO_STATUS_BLOCK iosb;
 
     InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
     RtlInitUnicodeString(&str, L"\\");
@@ -332,7 +333,7 @@ static void test_name_collisions(void)
     pNtClose(h);
     pNtClose(h1);
     pNtClose(h2);
-    
+
     h = CreateWaitableTimerA(NULL, TRUE, "om.c-test");
     ok(h != 0, "CreateWaitableTimerA failed got ret=%p (%ld)\n", h, GetLastError());
     status = pNtCreateTimer(&h1, GENERIC_ALL, &attr, NotificationTimer);
@@ -362,6 +363,61 @@ static void test_name_collisions(void)
     pNtClose(h2);
 
     pNtClose(dir);
+
+    RtlInitUnicodeString(&str, L"\\??\\PIPE\\named_pipe");
+    attr.RootDirectory = 0;
+    timeout.QuadPart = -10000;
+    status = pNtCreateNamedPipeFile( &h, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
+                                     FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                     FILE_OPEN, FILE_PIPE_FULL_DUPLEX,
+                                     FALSE, FALSE, FALSE, 10, 256, 256, &timeout );
+    ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "failed to create pipe %08lx\n", status);
+
+    memset( &iosb, 0xcc, sizeof(iosb) );
+    status = pNtCreateNamedPipeFile( &h, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
+                                     FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                     FILE_OPEN_IF, FILE_PIPE_FULL_DUPLEX,
+                                     FALSE, FALSE, FALSE, 10, 256, 256, &timeout );
+    ok(status == STATUS_SUCCESS, "failed to create pipe %08lx\n", status);
+    ok( iosb.Status == STATUS_SUCCESS, "wrong status %08lx\n", status);
+    ok( iosb.Information == FILE_CREATED, "wrong info %Ix\n", iosb.Information );
+    pNtClose( h );
+
+    memset( &iosb, 0xcc, sizeof(iosb) );
+    status = pNtCreateNamedPipeFile( &h, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
+                                     FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                     FILE_CREATE, FILE_PIPE_FULL_DUPLEX,
+                                     FALSE, FALSE, FALSE, 10, 256, 256, &timeout );
+    ok(status == STATUS_SUCCESS, "failed to create pipe %08lx\n", status);
+    ok( iosb.Status == STATUS_SUCCESS, "wrong status %08lx\n", status);
+    ok( iosb.Information == FILE_CREATED, "wrong info %Ix\n", iosb.Information );
+
+    memset( &iosb, 0xcc, sizeof(iosb) );
+    status = pNtCreateNamedPipeFile( &h1, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
+                                     FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                     FILE_OPEN, FILE_PIPE_FULL_DUPLEX,
+                                     FALSE, FALSE, FALSE, 10, 256, 256, &timeout );
+    ok(status == STATUS_SUCCESS, "failed to create pipe %08lx\n", status);
+    ok( iosb.Status == STATUS_SUCCESS, "wrong status %08lx\n", status);
+    ok( iosb.Information == FILE_OPENED, "wrong info %Ix\n", iosb.Information );
+    pNtClose(h1);
+
+    memset( &iosb, 0xcc, sizeof(iosb) );
+    status = pNtCreateNamedPipeFile( &h1, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
+                                     FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                     FILE_OPEN_IF, FILE_PIPE_FULL_DUPLEX,
+                                     FALSE, FALSE, FALSE, 10, 256, 256, &timeout );
+    ok(status == STATUS_SUCCESS, "failed to create pipe %08lx\n", status);
+    ok( iosb.Status == STATUS_SUCCESS, "wrong status %08lx\n", status);
+    ok( iosb.Information == FILE_OPENED, "wrong info %Ix\n", iosb.Information );
+    pNtClose(h1);
+
+    h1 = CreateNamedPipeA( "\\\\.\\pipe\\named_pipe", PIPE_ACCESS_DUPLEX,
+                          PIPE_READMODE_BYTE, 10, 256, 256, 1000, NULL );
+    winerr = GetLastError();
+    ok(h1 != 0 && winerr == ERROR_ALREADY_EXISTS, "CreateNamedPipeA got ret=%p (%ld)\n", h1, winerr);
+    pNtClose(h1);
+    pNtClose(h);
 }
 
 static void test_all_kernel_objects( UINT line, OBJECT_ATTRIBUTES *attr,
@@ -2524,6 +2580,11 @@ static void test_query_directory(void)
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING string;
     NTSTATUS status;
+    BOOL is_wow64 = FALSE;
+
+#ifndef _WIN64
+    if (!IsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
+#endif
 
     RtlInitUnicodeString( &string, L"\\BaseNamedObjects\\winetest" );
     InitializeObjectAttributes( &attr, &string, 0, 0, NULL );
@@ -2535,14 +2596,14 @@ static void test_query_directory(void)
     status = NtQueryDirectoryObject( dir, info, 0, TRUE, TRUE, &context, &size );
     ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
     ok( context == 0xdeadbeef, "got context %#lx\n", context );
-    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    ok( size == sizeof(*info) || (is_wow64 && !size), "got size %lu\n", size );
 
     context = 0xdeadbeef;
     size = 0xdeadbeef;
     status = NtQueryDirectoryObject( dir, info, 0, FALSE, TRUE, &context, &size );
     todo_wine ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
     ok( context == 0xdeadbeef, "got context %#lx\n", context );
-    todo_wine ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    todo_wine ok( size == sizeof(*info) || (is_wow64 && !size), "got size %lu\n", size );
 
     context = 0xdeadbeef;
     size = 0xdeadbeef;
@@ -2550,7 +2611,7 @@ static void test_query_directory(void)
     status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, &size );
     ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
     ok( context == 0xdeadbeef, "got context %#lx\n", context );
-    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    ok( size == sizeof(*info) || (is_wow64 && !size), "got size %lu\n", size );
     if (size == sizeof(*info))
         ok( !memcmp( &info[0], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
 
@@ -2560,7 +2621,7 @@ static void test_query_directory(void)
     status = NtQueryDirectoryObject( dir, info, sizeof(buffer), FALSE, TRUE, &context, &size );
     todo_wine ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
     ok( context == 0xdeadbeef, "got context %#lx\n", context );
-    todo_wine ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    todo_wine ok( size == sizeof(*info) || (is_wow64 && !size), "got size %lu\n", size );
     if (size == sizeof(*info))
         ok( !memcmp( &info[0], &empty_info, sizeof(*info) ), "entry was not cleared\n" );
 
@@ -2617,7 +2678,7 @@ static void test_query_directory(void)
     status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, FALSE, &context, &size );
     ok( status == STATUS_NO_MORE_ENTRIES, "got %#lx\n", status );
     ok( context == 2, "got context %#lx\n", context );
-    ok( size == sizeof(*info) || broken(!size) /* WoW64 */, "got size %lu\n", size );
+    ok( size == sizeof(*info) || (is_wow64 && !size), "got size %lu\n", size );
 
     memset( buffer, 0xcc, sizeof(buffer) );
     status = NtQueryDirectoryObject( dir, info, sizeof(buffer), TRUE, TRUE, &context, &size );

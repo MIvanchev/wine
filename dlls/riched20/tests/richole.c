@@ -31,6 +31,8 @@
 #include <richedit.h>
 #include <richole.h>
 #include <tom.h>
+#include <imm.h>
+#include <textserv.h>
 #include <wine/test.h>
 
 #define EXPECT_TODO_WINE 0x80000000UL
@@ -605,6 +607,7 @@ static HRESULT testoleobj_Create( struct testoleobj **objptr )
 static HMODULE hmoduleRichEdit;
 
 DEFINE_GUID(GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+DEFINE_GUID(IID_ITextServices, 0x8d33f740, 0xcf58, 0x11ce, 0xa8, 0x9d, 0x00, 0xaa, 0x00, 0x6c, 0xad, 0xc5);
 
 static const WCHAR sysW[] = {'S','y','s','t','e','m',0};
 
@@ -3881,6 +3884,8 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   struct testoleobj *testobj;
   IOleClientSite *clientsite;
   REOBJECT reobj;
+  BOOL bad_getsel;
+  DWORD gle;
 
   create_interfaces(&hwnd, &reole, &doc, &selection);
   if (callback)
@@ -3888,6 +3893,19 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
     LRESULT sendres = SendMessageA(hwnd, EM_SETOLECALLBACK, 0, (LPARAM)&callback->IRichEditOleCallback_iface);
     ok( !!sendres, "EM_SETOLECALLBACK should succeed\n" );
   }
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"a");
+  SendMessageA(hwnd, EM_SETSEL, 0, -1);
+  *bufferA = '\0';
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok((result > 0 && gle == 0xdeadbeef) ||
+     broken(result == 0 && gle == ERROR_INVALID_PARAMETER /* Hindi */),
+     "EM_GETSELTEXT returned %ld gle=%lu\n", result, gle);
+  bad_getsel = (gle != 0xdeadbeef);
+  if (bad_getsel)
+      trace("EM_GETSELTEXT is broken, some tests will be ignored\n");
 
   SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
 
@@ -4068,9 +4086,13 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   expected_stringA = "abc d efg";
   memset(bufferA, 0, sizeof(bufferA));
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
-  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
-  ok(result == strlen(expected_stringA), "Got wrong length: %ld.\n", result);
-  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok(result == strlen(expected_stringA) || broken(bad_getsel && result == 0),
+     "Got wrong length: %ld (gle %lu)\n", result, gle);
+  ok(!strcmp(bufferA, expected_stringA) || broken(bad_getsel && !*bufferA),
+     "Got wrong content: %s (gle %lu)\n", bufferA, gle);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -4151,9 +4173,13 @@ static void subtest_InsertObject(struct reolecb_obj *callback)
   expected_stringA = "abc d efg";
   memset(bufferA, 0, sizeof(bufferA));
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
-  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
-  ok(result == strlen(expected_stringA), "Got wrong length: %ld.\n", result);
-  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  SetLastError(0xdeadbeef);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, 0, (LPARAM)bufferA);
+  gle = GetLastError();
+  ok(result == strlen(expected_stringA) || broken(bad_getsel && result == 0),
+     "Got wrong length: %ld (gle %lu)\n", result, gle);
+  ok(!strcmp(bufferA, expected_stringA) || broken(bad_getsel && !*bufferA),
+     "Got wrong content: %s (gle %lu)\n", bufferA, gle);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -5473,6 +5499,72 @@ static void test_undo_control(void)
   release_interfaces(&inst.hwnd, &reole, &inst.doc, &selection);
 }
 
+static void test_freeze(void)
+{
+  ITextSelection *selection = NULL;
+  DWORD lasterr, style1, style2;
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  HRESULT hr;
+  LONG count;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+
+  SetLastError(0xdeadbeef);
+  style1 = GetWindowLongW(hwnd, GWL_STYLE);
+  lasterr = GetLastError();
+  ok(lasterr == 0xdeadbeefUL, "GetLastError() returned %#lx\n", lasterr);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  style2 = GetWindowLongW(hwnd, GWL_STYLE);
+  ok(style2 == style1, "expected window style to not change from %#lx, got %#lx\n", style1, style2);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 2, "expected count to be %d, got %ld\n", 2, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_FALSE, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+  ok(count == 1, "expected count to be %d, got %ld\n", 1, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, &count);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+  ok(count == 0, "expected count to be %d, got %ld\n", 0, count);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Freeze(doc, NULL);
+  ok(hr == S_OK, "ITextDocument_Freeze returned %#lx\n", hr);
+
+  count = 0xdeadbeef;
+  hr = ITextDocument_Unfreeze(doc, NULL);
+  ok(hr == S_OK, "ITextDocument_Unfreeze returned %#lx\n", hr);
+
+  release_interfaces(&hwnd, &reole, &doc, &selection);
+}
+
 START_TEST(richole)
 {
   /* Must explicitly LoadLibrary(). The test has no references to functions in
@@ -5516,4 +5608,5 @@ START_TEST(richole)
   test_clipboard();
   test_undo();
   test_undo_control();
+  test_freeze();
 }

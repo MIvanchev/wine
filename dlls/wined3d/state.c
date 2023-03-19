@@ -1766,11 +1766,6 @@ static void state_pscale(struct wined3d_context *context, const struct wined3d_s
     checkGLcall("glPointSize(...);");
 }
 
-static void state_debug_monitor(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    WARN("token: %#x.\n", state->render_states[WINED3D_RS_DEBUGMONITORTOKEN]);
-}
-
 static void state_localviewer(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
@@ -1784,24 +1779,6 @@ static void state_localviewer(struct wined3d_context *context, const struct wine
     {
         gl_info->gl_ops.gl.p_glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, 0);
         checkGLcall("glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, 0)");
-    }
-}
-
-static void state_lastpixel(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_LASTPIXEL])
-    {
-        TRACE("Last Pixel Drawing Enabled\n");
-    }
-    else
-    {
-        static BOOL warned;
-        if (!warned) {
-            FIXME("Last Pixel Drawing Disabled, not handled yet\n");
-            warned = TRUE;
-        } else {
-            TRACE("Last Pixel Drawing Disabled, not handled yet\n");
-        }
     }
 }
 
@@ -1832,30 +1809,6 @@ void state_pointsprite(struct wined3d_context *context, const struct wined3d_sta
         gl_info->gl_ops.gl.p_glDisable(GL_POINT_SPRITE_ARB);
         checkGLcall("glDisable(GL_POINT_SPRITE_ARB)");
     }
-}
-
-static void state_wrap(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    static unsigned int once;
-
-    if ((state->render_states[WINED3D_RS_WRAP0]
-            || state->render_states[WINED3D_RS_WRAP1]
-            || state->render_states[WINED3D_RS_WRAP2]
-            || state->render_states[WINED3D_RS_WRAP3]
-            || state->render_states[WINED3D_RS_WRAP4]
-            || state->render_states[WINED3D_RS_WRAP5]
-            || state->render_states[WINED3D_RS_WRAP6]
-            || state->render_states[WINED3D_RS_WRAP7]
-            || state->render_states[WINED3D_RS_WRAP8]
-            || state->render_states[WINED3D_RS_WRAP9]
-            || state->render_states[WINED3D_RS_WRAP10]
-            || state->render_states[WINED3D_RS_WRAP11]
-            || state->render_states[WINED3D_RS_WRAP12]
-            || state->render_states[WINED3D_RS_WRAP13]
-            || state->render_states[WINED3D_RS_WRAP14]
-            || state->render_states[WINED3D_RS_WRAP15])
-            && !once++)
-        FIXME("(WINED3D_RS_WRAP0) Texture wrapping not yet supported.\n");
 }
 
 static void state_msaa_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -1987,18 +1940,6 @@ static void depthbias(struct wined3d_context *context, const struct wined3d_stat
     checkGLcall("depth bias");
 }
 
-static void state_zvisible(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_ZVISIBLE])
-        FIXME("WINED3D_RS_ZVISIBLE not implemented.\n");
-}
-
-static void state_stippledalpha(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_STIPPLEDALPHA])
-        FIXME("Stippled Alpha not supported yet.\n");
-}
-
 static void state_sample_mask(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
@@ -2024,33 +1965,6 @@ static void state_sample_mask_w(struct wined3d_context *context, const struct wi
     WARN("Unsupported in local OpenGL implementation: glSampleMaski.\n");
 }
 
-static void state_patchedgestyle(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_PATCHEDGESTYLE] != WINED3D_PATCH_EDGE_DISCRETE)
-        FIXME("WINED3D_RS_PATCHEDGESTYLE %#x not yet implemented.\n",
-                state->render_states[WINED3D_RS_PATCHEDGESTYLE]);
-}
-
-static void state_patchsegments(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    union {
-        DWORD d;
-        float f;
-    } tmpvalue;
-    tmpvalue.f = 1.0f;
-
-    if (state->render_states[WINED3D_RS_PATCHSEGMENTS] != tmpvalue.d)
-    {
-        static BOOL displayed = FALSE;
-
-        tmpvalue.d = state->render_states[WINED3D_RS_PATCHSEGMENTS];
-        if(!displayed)
-            FIXME("(WINED3D_RS_PATCHSEGMENTS,%f) not yet implemented\n", tmpvalue.f);
-
-        displayed = TRUE;
-    }
-}
-
 static void state_positiondegree(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     if (state->render_states[WINED3D_RS_POSITIONDEGREE] != WINED3D_DEGREE_CUBIC)
@@ -2070,82 +1984,6 @@ static void state_tessellation(struct wined3d_context *context, const struct win
     if (state->render_states[WINED3D_RS_ENABLEADAPTIVETESSELLATION])
         FIXME("WINED3D_RS_ENABLEADAPTIVETESSELLATION %#x not yet implemented.\n",
                 state->render_states[WINED3D_RS_ENABLEADAPTIVETESSELLATION]);
-}
-
-static void state_rop2(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_ROP2])
-        FIXME("Render state WINED3D_RS_ROP2 not implemented yet.\n");
-}
-
-static void state_planemask(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_PLANEMASK])
-        FIXME("Render state WINED3D_RS_PLANEMASK not implemented yet.\n");
-}
-
-static void state_subpixel(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_SUBPIXEL])
-        FIXME("Render state WINED3D_RS_SUBPIXEL not implemented yet.\n");
-}
-
-static void state_subpixelx(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_SUBPIXELX])
-        FIXME("Render state WINED3D_RS_SUBPIXELX not implemented yet.\n");
-}
-
-static void state_stippleenable(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_STIPPLEENABLE])
-        FIXME("Render state WINED3D_RS_STIPPLEENABLE not implemented yet.\n");
-}
-
-static void state_mipmaplodbias(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_MIPMAPLODBIAS])
-        FIXME("Render state WINED3D_RS_MIPMAPLODBIAS not implemented yet.\n");
-}
-
-static void state_anisotropy(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_ANISOTROPY])
-        FIXME("Render state WINED3D_RS_ANISOTROPY not implemented yet.\n");
-}
-
-static void state_flushbatch(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_FLUSHBATCH])
-        FIXME("Render state WINED3D_RS_FLUSHBATCH not implemented yet.\n");
-}
-
-static void state_translucentsi(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_TRANSLUCENTSORTINDEPENDENT])
-        FIXME("Render state WINED3D_RS_TRANSLUCENTSORTINDEPENDENT not implemented yet.\n");
-}
-
-static void state_extents(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_EXTENTS])
-        FIXME("Render state WINED3D_RS_EXTENTS not implemented yet.\n");
-}
-
-static void state_ckeyblend(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    if (state->render_states[WINED3D_RS_COLORKEYBLENDENABLE])
-        FIXME("Render state WINED3D_RS_COLORKEYBLENDENABLE not implemented yet.\n");
-}
-
-static void state_swvp(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    static int once;
-    if (state->render_states[WINED3D_RS_SOFTWAREVERTEXPROCESSING])
-    {
-        if (!once++)
-            FIXME("Software vertex processing not implemented.\n");
-    }
 }
 
 static void get_src_and_opr(uint32_t arg, BOOL is_alpha, GLenum* source, GLenum* operand) {
@@ -4764,39 +4602,7 @@ const struct wined3d_state_entry_template misc_state_template_gl[] =
     { STATE_INDEXBUFFER,                                  { STATE_INDEXBUFFER,                                  state_nop           }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_LINEPATTERN),               { STATE_RENDER(WINED3D_RS_LINEPATTERN),               state_linepattern   }, WINED3D_GL_LEGACY_CONTEXT       },
     { STATE_RENDER(WINED3D_RS_LINEPATTERN),               { STATE_RENDER(WINED3D_RS_LINEPATTERN),               state_linepattern_w }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_ROP2),                      { STATE_RENDER(WINED3D_RS_ROP2),                      state_rop2          }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_PLANEMASK),                 { STATE_RENDER(WINED3D_RS_PLANEMASK),                 state_planemask     }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_LASTPIXEL),                 { STATE_RENDER(WINED3D_RS_LASTPIXEL),                 state_lastpixel     }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_DITHERENABLE),              { STATE_RENDER(WINED3D_RS_DITHERENABLE),              state_ditherenable  }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_SUBPIXEL),                  { STATE_RENDER(WINED3D_RS_SUBPIXEL),                  state_subpixel      }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_SUBPIXELX),                 { STATE_RENDER(WINED3D_RS_SUBPIXELX),                 state_subpixelx     }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_STIPPLEDALPHA),             { STATE_RENDER(WINED3D_RS_STIPPLEDALPHA),             state_stippledalpha }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_STIPPLEENABLE),             { STATE_RENDER(WINED3D_RS_STIPPLEENABLE),             state_stippleenable }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_MIPMAPLODBIAS),             { STATE_RENDER(WINED3D_RS_MIPMAPLODBIAS),             state_mipmaplodbias }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_ANISOTROPY),                { STATE_RENDER(WINED3D_RS_ANISOTROPY),                state_anisotropy    }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_FLUSHBATCH),                { STATE_RENDER(WINED3D_RS_FLUSHBATCH),                state_flushbatch    }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT),{ STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT),state_translucentsi }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP0),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     state_wrap          }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP1),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP2),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP3),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP4),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP5),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP6),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP7),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP8),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP9),                     { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP10),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP11),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP12),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP13),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP14),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_WRAP15),                    { STATE_RENDER(WINED3D_RS_WRAP0),                     NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_EXTENTS),                   { STATE_RENDER(WINED3D_RS_EXTENTS),                   state_extents       }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_COLORKEYBLENDENABLE),       { STATE_RENDER(WINED3D_RS_COLORKEYBLENDENABLE),       state_ckeyblend     }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_SOFTWAREVERTEXPROCESSING),  { STATE_RENDER(WINED3D_RS_SOFTWAREVERTEXPROCESSING),  state_swvp          }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_PATCHEDGESTYLE),            { STATE_RENDER(WINED3D_RS_PATCHEDGESTYLE),            state_patchedgestyle}, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_PATCHSEGMENTS),             { STATE_RENDER(WINED3D_RS_PATCHSEGMENTS),             state_patchsegments }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_POSITIONDEGREE),            { STATE_RENDER(WINED3D_RS_POSITIONDEGREE),            state_positiondegree}, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_NORMALDEGREE),              { STATE_RENDER(WINED3D_RS_NORMALDEGREE),              state_normaldegree  }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_MINTESSELLATIONLEVEL),      { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),NULL                }, WINED3D_GL_EXT_NONE             },
@@ -4808,8 +4614,6 @@ const struct wined3d_state_entry_template misc_state_template_gl[] =
     { STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),{ STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION),state_tessellation  }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      state_msaa          }, ARB_MULTISAMPLE                 },
     { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      { STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),      state_msaa_w        }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_DEBUGMONITORTOKEN),         { STATE_RENDER(WINED3D_RS_DEBUGMONITORTOKEN),         state_debug_monitor }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_ZVISIBLE),                  { STATE_RENDER(WINED3D_RS_ZVISIBLE),                  state_zvisible      }, WINED3D_GL_EXT_NONE             },
     /* Samplers */
     { STATE_SAMPLER(0),                                   { STATE_SAMPLER(0),                                   sampler             }, WINED3D_GL_EXT_NONE             },
     { STATE_SAMPLER(1),                                   { STATE_SAMPLER(1),                                   sampler             }, WINED3D_GL_EXT_NONE             },
@@ -5183,7 +4987,6 @@ static const struct wined3d_state_entry_template vp_ffp_states[] =
     { STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),             { STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),             NULL                }, EXT_POINT_PARAMETERS            },
     { STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),             { STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),             NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_TWEENFACTOR),               { STATE_RENDER(WINED3D_RS_VERTEXBLEND),               NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE),  { STATE_RENDER(WINED3D_RS_VERTEXBLEND),               NULL                }, WINED3D_GL_EXT_NONE             },
 
     /* Samplers for NP2 texture matrix adjustions. They are not needed if GL_ARB_texture_non_power_of_two is supported,
      * so register a NULL state handler in that case to get the vertex part of sampler() skipped(VTF is handled in the misc states.
@@ -5565,23 +5368,24 @@ static void validate_state_table(struct wined3d_state_entry *state_table)
     rs_holes[] =
     {
         {  1,   8},
-        { 11,  11},
-        { 14,  14},
-        { 17,  23},
+        { 11,  14},
+        { 16,  23},
         { 27,  27},
-        { 40,  40},
-        { 42,  45},
-        { 47,  47},
-        { 52,  59},
-        { 61, 127},
+        { 30,  33},
+        { 39,  40},
+        { 42,  47},
+        { 49,  59},
+        { 61, 135},
+        {138, 138},
+        {144, 144},
         {149, 150},
-        {162, 162},
-        {168, 169},
+        {153, 153},
+        {162, 165},
+        {167, 169},
         {171, 171},
         {174, 177},
         {185, 193},
-        {195, 197},
-        {206, 209},
+        {195, 209},
         {  0,   0},
     };
     static const unsigned int simple_states[] =

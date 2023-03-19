@@ -1083,7 +1083,10 @@ typedef struct _TEB64
 #define WOW64_TLS_CPURESERVED      1
 #define WOW64_TLS_TEMPLIST         3
 #define WOW64_TLS_USERCALLBACKDATA 5
+#define WOW64_TLS_APCLIST          7
 #define WOW64_TLS_FILESYSREDIR     8
+#define WOW64_TLS_WOW64INFO        10
+#define WOW64_TLS_MAX_NUMBER       19
 
 
 /***********************************************************************
@@ -2385,6 +2388,12 @@ typedef struct _SYSTEM_CPU_INFORMATION {
 #define CPU_FEATURE_ARM_NEON      0x00000002
 #define CPU_FEATURE_ARM_V8_CRC32  0x00000004
 #define CPU_FEATURE_ARM_V8_CRYPTO 0x00000008
+
+typedef struct _SYSTEM_PROCESSOR_FEATURES_INFORMATION
+{
+    ULONGLONG ProcessorFeatureBits;
+    ULONGLONG Reserved[3];
+} SYSTEM_PROCESSOR_FEATURES_INFORMATION, *PSYSTEM_PROCESSOR_FEATURES_INFORMATION;
 
 /* System Information Class 0x02 */
 
@@ -3853,6 +3862,28 @@ typedef struct _WOW64_CPU_AREA_INFO
     USHORT             Machine;
 } WOW64_CPU_AREA_INFO, *PWOW64_CPU_AREA_INFO;
 
+typedef struct _WOW64INFO
+{
+    ULONG   NativeSystemPageSize;
+    ULONG   CpuFlags;
+    ULONG   Wow64ExecuteFlags;
+    ULONG   unknown[5];
+    USHORT  NativeMachineType;
+    USHORT  EmulatedMachineType;
+} WOW64INFO;
+
+#define WOW64_CPUFLAGS_MSFT64   0x01
+#define WOW64_CPUFLAGS_SOFTWARE 0x02
+
+/* wow64.dll functions */
+void *    WINAPI Wow64AllocateTemp(SIZE_T);
+void      WINAPI Wow64ApcRoutine(ULONG_PTR,ULONG_PTR,ULONG_PTR,CONTEXT*);
+NTSTATUS  WINAPI Wow64KiUserCallbackDispatcher(ULONG,void*,ULONG,void**,ULONG*);
+void      WINAPI Wow64PassExceptionToGuest(EXCEPTION_POINTERS*);
+void      WINAPI Wow64PrepareForException(EXCEPTION_RECORD*,CONTEXT*);
+NTSTATUS  WINAPI Wow64RaiseException(int,EXCEPTION_RECORD*);
+NTSTATUS  WINAPI Wow64SystemServiceEx(UINT,UINT*);
+
 #ifdef __WINESRC__
 /* undocumented layout of LdrSystemDllInitBlock */
 /* this varies across Windows version; we are using the win10-2004 layout */
@@ -4258,6 +4289,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlAddAuditAccessAce(PACL,DWORD,DWORD,PSID,BOOL,BOOL);
 NTSYSAPI NTSTATUS  WINAPI RtlAddAuditAccessAceEx(PACL,DWORD,DWORD,DWORD,PSID,BOOL,BOOL);
 NTSYSAPI NTSTATUS  WINAPI RtlAddAuditAccessObjectAce(PACL,DWORD,DWORD,DWORD,GUID*,GUID*,PSID,BOOL,BOOL);
 NTSYSAPI NTSTATUS  WINAPI RtlAddMandatoryAce(PACL,DWORD,DWORD,DWORD,DWORD,PSID);
+NTSYSAPI NTSTATUS  WINAPI RtlAddProcessTrustLabelAce(PACL,DWORD,DWORD,PSID,DWORD,DWORD);
 NTSYSAPI void      WINAPI RtlAddRefActivationContext(HANDLE);
 NTSYSAPI PVOID     WINAPI RtlAddVectoredExceptionHandler(ULONG,PVECTORED_EXCEPTION_HANDLER);
 NTSYSAPI PVOID     WINAPI RtlAddressInSectionTable(const IMAGE_NT_HEADERS*,HMODULE,DWORD);
@@ -4643,6 +4675,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlWow64SetThreadContext(HANDLE,const WOW64_CONTEXT*);
 #else
 NTSYSAPI NTSTATUS  WINAPI NtWow64AllocateVirtualMemory64(HANDLE,ULONG64*,ULONG64,ULONG64*,ULONG,ULONG);
 NTSYSAPI NTSTATUS  WINAPI NtWow64GetNativeSystemInformation(SYSTEM_INFORMATION_CLASS,void*,ULONG,ULONG*);
+NTSYSAPI NTSTATUS  WINAPI NtWow64IsProcessorFeaturePresent(UINT);
 NTSYSAPI NTSTATUS  WINAPI NtWow64ReadVirtualMemory64(HANDLE,ULONG64,void*,ULONG64,ULONG64*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64WriteVirtualMemory64(HANDLE,ULONG64,const void*,ULONG64,ULONG64*);
 NTSYSAPI LONGLONG  WINAPI RtlConvertLongToLargeInteger(LONG);

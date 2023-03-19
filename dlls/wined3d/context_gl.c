@@ -1210,7 +1210,8 @@ static BOOL wined3d_context_gl_set_pixel_format(struct wined3d_context_gl *conte
         return FALSE;
 
     current = gl_info->gl_ops.wgl.p_wglGetPixelFormat(dc);
-    if (current == format) goto success;
+    if ((current == format) || (!current && context_gl->internal_format_set))
+        goto success;
 
     /* By default WGL doesn't allow pixel format adjustments but we need it
      * here. For this reason there's a Wine specific wglSetPixelFormat()
@@ -1225,6 +1226,7 @@ static BOOL wined3d_context_gl_set_pixel_format(struct wined3d_context_gl *conte
                     format, dc);
             return FALSE;
         }
+        context_gl->internal_format_set = 1;
     }
     else if (current)
     {
@@ -1346,6 +1348,7 @@ static void wined3d_context_gl_update_window(struct wined3d_context_gl *context_
     context_gl->dc_has_format = FALSE;
     context_gl->needs_set = 1;
     context_gl->valid = 1;
+    context_gl->internal_format_set = 0;
 
     if (!(context_gl->dc = GetDCEx(context_gl->window, 0, DCX_USESTYLE | DCX_CACHE)))
     {
@@ -1673,9 +1676,13 @@ static void wined3d_context_gl_enter(struct wined3d_context_gl *context_gl)
             context_gl->restore_dc = wglGetCurrentDC();
             context_gl->needs_set = 1;
         }
-        else if (!context_gl->needs_set && !(context_gl->dc_is_private && context_gl->dc_has_format)
-                && context_gl->pixel_format != context_gl->gl_info->gl_ops.wgl.p_wglGetPixelFormat(context_gl->dc))
-            context_gl->needs_set = 1;
+        else if (!context_gl->needs_set && !(context_gl->dc_is_private && context_gl->dc_has_format))
+        {
+            int current = context_gl->gl_info->gl_ops.wgl.p_wglGetPixelFormat(context_gl->dc);
+
+            if ((current && current != context_gl->pixel_format) || (!current && !context_gl->internal_format_set))
+                context_gl->needs_set = 1;
+        }
     }
 }
 
@@ -5321,8 +5328,6 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
     else
     {
         unsigned int instance_count = parameters->u.direct.instance_count;
-        if (context->instance_count)
-            instance_count = context->instance_count;
 
         if (context->use_immediate_mode_draw || emulation)
             draw_primitive_immediate_mode(wined3d_context_gl(context), state, stream_info, idx_data,
@@ -5466,7 +5471,6 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
 
     /* This is used for the fixed-function pipeline only, and the
      * fixed-function pipeline doesn't do instancing. */
-    context_gl->c.instance_count = 0;
     current_bo = gl_info->supported[ARB_VERTEX_BUFFER_OBJECT] ? ~0u : 0;
 
     /* Blend data */
@@ -5680,7 +5684,6 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
     unsigned int i;
 
     /* Default to no instancing. */
-    context->instance_count = 0;
     current_bo = gl_info->supported[ARB_VERTEX_BUFFER_OBJECT] ? ~0u : 0;
 
     if (stream_info->use_map & ~wined3d_mask_from_size(gl_info->limits.vertex_attribs))
@@ -5726,8 +5729,6 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
         stream = &state->streams[element->stream_idx];
         stream->buffer->bo_user.valid = true;
 
-        if ((stream->flags & WINED3DSTREAMSOURCE_INSTANCEDATA) && !context->instance_count)
-            context->instance_count = state->streams[0].frequency;
 
         if (gl_info->supported[ARB_INSTANCED_ARRAYS])
         {

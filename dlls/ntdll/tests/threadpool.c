@@ -579,6 +579,7 @@ static void CALLBACK simple2_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
 
 static void test_tp_simple(void)
 {
+    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress );
     TP_POOL_STACK_INFORMATION stack_info;
     TP_CALLBACK_ENVIRON environment;
     TP_CALLBACK_ENVIRON_V3 environment3;
@@ -686,8 +687,8 @@ static void test_tp_simple(void)
     /* test querying and setting the stack size */
     status = pTpQueryPoolStackInformation(pool, &stack_info);
     ok(!status, "TpQueryPoolStackInformation failed: %lx\n", status);
-    ok(stack_info.StackReserve == 2 * 1024 * 1024, "expected default StackReserve, got %ld\n", (ULONG)stack_info.StackReserve);
-    ok(stack_info.StackCommit == 4 * 1024, "expected default StackCommit, got %ld\n", (ULONG)stack_info.StackCommit);
+    ok(stack_info.StackReserve == nt->OptionalHeader.SizeOfStackReserve, "expected default StackReserve, got %Ix\n", stack_info.StackReserve);
+    ok(stack_info.StackCommit == nt->OptionalHeader.SizeOfStackCommit, "expected default StackCommit, got %Ix\n", stack_info.StackCommit);
 
     /* threadpool does not validate the stack size values */
     stack_info.StackReserve = stack_info.StackCommit = 1;
@@ -1898,6 +1899,7 @@ static void CALLBACK multi_wait_cb(TP_CALLBACK_INSTANCE *instance, void *userdat
 
 static void test_tp_multi_wait(void)
 {
+    TP_POOL_STACK_INFORMATION stack_info;
     TP_CALLBACK_ENVIRON environment;
     HANDLE semaphores[512];
     TP_WAIT *waits[512];
@@ -1917,6 +1919,11 @@ static void test_tp_multi_wait(void)
     status = pTpAllocPool(&pool, NULL);
     ok(!status, "TpAllocPool failed with status %lx\n", status);
     ok(pool != NULL, "expected pool != NULL\n");
+    /* many threads -> use the smallest stack possible */
+    stack_info.StackReserve = 256 * 1024;
+    stack_info.StackCommit = 4 * 1024;
+    status = pTpSetPoolStackInformation(pool, &stack_info);
+    ok(!status, "TpQueryPoolStackInformation failed: %lx\n", status);
 
     memset(&environment, 0, sizeof(environment));
     environment.Version = 1;

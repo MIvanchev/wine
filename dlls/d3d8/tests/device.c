@@ -2973,7 +2973,20 @@ static void test_wndproc(void)
         {WM_SYSCOMMAND,         FOCUS_WINDOW,   TRUE,   SC_MAXIMIZE},
         {WM_WINDOWPOSCHANGING,  FOCUS_WINDOW,   FALSE,  0},
         {WM_WINDOWPOSCHANGED,   FOCUS_WINDOW,   FALSE,  0},
-        {WM_MOVE,               FOCUS_WINDOW,   FALSE,  0},
+        /* Windows always sends WM_MOVE here.
+         *
+         * In the first case, we are maximizing from a minimized state, and
+         * hence the client rect moves from the minimized position to (0, 0).
+         *
+         * In the second case, we are maximizing from an on-screen restored
+         * state. The window is at (0, 0), but it has a caption, so the client
+         * rect is offset, and the *client* will move to (0, 0) when maximized.
+         *
+         * Wine doesn't send WM_MOVE here because it messes with the window
+         * styles when switching to fullscreen, and hence the client rect is
+         * already at (0, 0). Obviously Wine shouldn't do this, but it's hard to
+         * fix, and the WM_MOVE is not particularly interesting, so just ignore
+         * it. */
         {WM_SIZE,               FOCUS_WINDOW,   TRUE,   SIZE_MAXIMIZED},
         {0,                     0,              FALSE,  0},
     };
@@ -3745,7 +3758,6 @@ static void test_fpu_setup(void)
 #if defined(D3D8_TEST_SET_FPU_CW) && defined(D3D8_TEST_GET_FPU_CW)
     struct device_desc device_desc;
     IDirect3DDevice8 *device;
-    D3DDISPLAYMODE d3ddm;
     IDirect3D8 *d3d8;
     HWND window;
     HRESULT hr;
@@ -3757,9 +3769,6 @@ static void test_fpu_setup(void)
     ok(!!window, "Failed to create a window.\n");
     d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d8, "Failed to create a D3D object.\n");
-
-    hr = IDirect3D8_GetAdapterDisplayMode(d3d8, D3DADAPTER_DEFAULT, &d3ddm);
-    ok(SUCCEEDED(hr), "GetAdapterDisplayMode failed, hr %#lx.\n", hr);
 
     device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
     device_desc.device_window = window;
@@ -7916,20 +7925,20 @@ static void test_pixel_format(void)
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);
     IDirect3D8_Release(d3d8);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     ret = SetPixelFormat(hdc3, format, &pfd);
     ok(ret, "Failed to set pixel format %d.\n", format);

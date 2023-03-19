@@ -269,7 +269,7 @@
 @ stdcall DisablePredefinedHandleTableInternal(long)
 @ stdcall DisableThreadLibraryCalls(long)
 @ stdcall DisassociateCurrentThreadFromCallback(ptr) ntdll.TpDisassociateCallback
-# @ stub DiscardVirtualMemory
+@ stdcall DiscardVirtualMemory(ptr long)
 @ stdcall DisconnectNamedPipe(long)
 @ stdcall DnsHostnameToComputerNameExW(wstr ptr ptr)
 # @ stub DsBindWithSpnExW
@@ -1734,7 +1734,7 @@
 @ stdcall WaitForMultipleObjectsEx(long ptr long long long)
 @ stdcall WaitForSingleObject(long long)
 @ stdcall WaitForSingleObjectEx(long long long)
-@ stdcall WaitForThreadpoolIoCallbacks(ptr) ntdll.TpWaitForIoCompletion
+@ stdcall WaitForThreadpoolIoCallbacks(ptr long) ntdll.TpWaitForIoCompletion
 @ stdcall WaitForThreadpoolTimerCallbacks(ptr long) ntdll.TpWaitForTimer
 @ stdcall WaitForThreadpoolWaitCallbacks(ptr long) ntdll.TpWaitForWait
 @ stdcall WaitForThreadpoolWorkCallbacks(ptr long) ntdll.TpWaitForWork

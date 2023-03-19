@@ -217,6 +217,7 @@ struct window_surface
     struct list                        entry; /* entry in global list managed by user32 */
     LONG                               ref;   /* reference count */
     RECT                               rect;  /* constant, no locking needed */
+    DWORD                              draw_start_ticks; /* start ticks of fresh draw */
     /* driver-specific fields here */
 };
 
@@ -307,7 +308,7 @@ struct user_driver_funcs
     void    (*pDestroyWindow)(HWND);
     void    (*pFlashWindowEx)(FLASHWINFO*);
     void    (*pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
-    NTSTATUS (*pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,const LARGE_INTEGER*,DWORD,DWORD);
+    BOOL    (*pProcessEvents)(DWORD);
     void    (*pReleaseDC)(HWND,HDC);
     BOOL    (*pScrollDC)(HDC,INT,INT,HRGN);
     void    (*pSetCapture)(HWND,UINT);
@@ -337,6 +338,9 @@ struct user_driver_funcs
 };
 
 extern void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version );
+
+extern BOOL win32u_set_window_pixel_format( HWND hwnd, int format, BOOL internal );
+extern int win32u_get_window_pixel_format( HWND hwnd );
 
 #endif /* WINE_UNIX_LIB */
 

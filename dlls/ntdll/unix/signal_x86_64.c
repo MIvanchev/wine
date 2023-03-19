@@ -97,7 +97,7 @@ __ASM_GLOBAL_FUNC( alloc_fs_sel,
                    "pushq %rdi\n\t"
                    "movq %rsp,%rdi\n\t"
                    "movl 0x4(%rdx),%esp\n\t"  /* Tib.StackBase */
-                   "subl $0x10,%esp\n\t"
+                   "subl $0x20,%esp\n\t"
                    /* setup modify_ldt struct on 32-bit stack */
                    "movl %ecx,(%rsp)\n\t"     /* entry_number */
                    "movl %edx,4(%rsp)\n\t"    /* base */
@@ -2009,6 +2009,15 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         {
             leave_handler( ucontext );
             return;
+        }
+        if (rec.ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+            rec.ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT)
+        {
+            ULONG flags;
+            NtQueryInformationProcess( GetCurrentProcess(), ProcessExecuteFlags,
+                                       &flags, sizeof(flags), NULL );
+            /* send EXCEPTION_EXECUTE_FAULT only if data execution prevention is enabled */
+            if (!(flags & MEM_EXECUTE_OPTION_DISABLE)) rec.ExceptionInformation[0] = EXCEPTION_READ_FAULT;
         }
         break;
     case TRAP_x86_ALIGNFLT:  /* Alignment check exception */

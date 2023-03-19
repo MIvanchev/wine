@@ -446,6 +446,7 @@
 # @ stub NtWaitLowEventPair
 @ stdcall -syscall -arch=win32 NtWow64AllocateVirtualMemory64(long ptr int64 ptr long long)
 @ stdcall -syscall -arch=win32 NtWow64GetNativeSystemInformation(long ptr long ptr)
+@ stdcall -syscall -arch=win32 NtWow64IsProcessorFeaturePresent(long)
 @ stdcall -syscall -arch=win32 NtWow64ReadVirtualMemory64(long int64 ptr int64 ptr)
 @ stdcall -syscall -arch=win32 NtWow64WriteVirtualMemory64(long int64 ptr int64 ptr)
 @ stdcall -syscall NtWriteFile(long long ptr ptr ptr ptr long ptr ptr)
@@ -482,10 +483,11 @@
 @ stdcall RtlAddAuditAccessAceEx(ptr long long long ptr long long)
 @ stdcall RtlAddAuditAccessObjectAce(ptr long long long ptr ptr ptr long long)
 # @ stub RtlAddCompoundAce
-@ stdcall RtlAddMandatoryAce(ptr long long long long ptr)
-# @ stub RtlAddRange
 @ cdecl -arch=arm,arm64,x86_64 RtlAddFunctionTable(ptr long long)
 @ stdcall -arch=arm,arm64,x86_64 RtlAddGrowableFunctionTable(ptr ptr long long long long)
+@ stdcall RtlAddMandatoryAce(ptr long long long long ptr)
+@ stdcall RtlAddProcessTrustLabelAce(ptr long long ptr long long)
+# @ stub RtlAddRange
 @ stdcall RtlAddRefActivationContext(ptr)
 # @ stub RtlAddRefMemoryStream
 @ stdcall RtlAddVectoredContinueHandler(long ptr)
@@ -1477,6 +1479,7 @@
 # @ stub ZwWaitLowEventPair
 @ stdcall -syscall -arch=win32 ZwWow64AllocateVirtualMemory64(long ptr int64 ptr long long) NtWow64AllocateVirtualMemory64
 @ stdcall -syscall -arch=win32 ZwWow64GetNativeSystemInformation(long ptr long ptr) NtWow64GetNativeSystemInformation
+@ stdcall -syscall -arch=win32 ZwWow64IsProcessorFeaturePresent(long) NtWow64IsProcessorFeaturePresent
 @ stdcall -syscall -arch=win32 ZwWow64ReadVirtualMemory64(long int64 ptr int64 ptr) NtWow64ReadVirtualMemory64
 @ stdcall -syscall -arch=win32 ZwWow64WriteVirtualMemory64(long int64 ptr int64 ptr) NtWow64WriteVirtualMemory64
 @ stdcall -private -syscall ZwWriteFile(long long ptr ptr ptr ptr long ptr ptr) NtWriteFile

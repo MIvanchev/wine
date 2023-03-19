@@ -2509,6 +2509,7 @@ static void dump_get_thread_context_request( const struct get_thread_context_req
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", context=%04x", req->context );
     fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", native_flags=%08x", req->native_flags );
     fprintf( stderr, ", machine=%04x", req->machine );
 }
 
@@ -2522,6 +2523,7 @@ static void dump_get_thread_context_reply( const struct get_thread_context_reply
 static void dump_set_thread_context_request( const struct set_thread_context_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", native_flags=%08x", req->native_flags );
     dump_varargs_contexts( ", contexts=", cur_size );
 }
 
@@ -2662,7 +2664,6 @@ static void dump_send_hardware_message_reply( const struct send_hardware_message
     fprintf( stderr, ", prev_y=%d", req->prev_y );
     fprintf( stderr, ", new_x=%d", req->new_x );
     fprintf( stderr, ", new_y=%d", req->new_y );
-    dump_varargs_bytes( ", keystate=", cur_size );
 }
 
 static void dump_get_message_request( const struct get_message_request *req )
@@ -2861,6 +2862,7 @@ static void dump_create_named_pipe_request( const struct create_named_pipe_reque
     fprintf( stderr, " access=%08x", req->access );
     fprintf( stderr, ", options=%08x", req->options );
     fprintf( stderr, ", sharing=%08x", req->sharing );
+    fprintf( stderr, ", disposition=%08x", req->disposition );
     fprintf( stderr, ", maxinstances=%08x", req->maxinstances );
     fprintf( stderr, ", outsize=%08x", req->outsize );
     fprintf( stderr, ", insize=%08x", req->insize );
@@ -2872,6 +2874,7 @@ static void dump_create_named_pipe_request( const struct create_named_pipe_reque
 static void dump_create_named_pipe_reply( const struct create_named_pipe_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", created=%d", req->created );
 }
 
 static void dump_set_named_pipe_info_request( const struct set_named_pipe_info_request *req )

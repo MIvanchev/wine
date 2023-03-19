@@ -1931,6 +1931,7 @@ struct process_info
     obj_handle_t handle;       /* thread handle */
     obj_handle_t context;      /* context handle */
     unsigned int flags;        /* context flags */
+    unsigned int native_flags; /* flags for native context if WoW present */
     unsigned short machine;    /* context architecture */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
@@ -1942,6 +1943,7 @@ struct process_info
 /* Set the current context of a thread */
 @REQ(set_thread_context)
     obj_handle_t handle;       /* thread handle */
+    unsigned int native_flags; /* flags for native context if WoW present */
     VARARG(contexts,contexts); /* thread context(s) */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
@@ -2078,7 +2080,6 @@ enum message_type
     int             prev_y;
     int             new_x;     /* new cursor position */
     int             new_y;
-    VARARG(keystate,bytes);    /* global state array for all the keys */
 @END
 #define SEND_HWMSG_INJECTED    0x01
 
@@ -2270,6 +2271,7 @@ enum message_type
     unsigned int   access;
     unsigned int   options;
     unsigned int   sharing;
+    unsigned int   disposition;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
@@ -2278,6 +2280,7 @@ enum message_type
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t   handle;       /* handle to the pipe */
+    int            created;
 @END
 
 /* flags in create_named_pipe and get_named_pipe_info */

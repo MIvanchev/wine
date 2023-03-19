@@ -6013,7 +6013,7 @@ static void test_pixel_format(void)
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
@@ -6039,7 +6039,7 @@ static void test_pixel_format(void)
     ok(SUCCEEDED(hr), "Failed to blit to primary surface, hr %#lx.\n", hr);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     IDirectDrawSurface_Release(offscreen);
     IDirectDrawSurface_Release(primary);
@@ -6047,7 +6047,7 @@ static void test_pixel_format(void)
     ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
 
     test_format = GetPixelFormat(hdc3);
-    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
 
     ret = SetPixelFormat(hdc3, format, &pfd);
     ok(ret, "Failed to set pixel format %d.\n", format);
@@ -6280,12 +6280,18 @@ static void test_mipmap(void)
     }
     tests[] =
     {
-        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 128, 32, 3, DD_OK,               3},
-        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 128, 32, 0, DDERR_INVALIDPARAMS, 0},
+        {0,                DDSCAPS_MIPMAP,                                     128, 32, 0, DDERR_INVALIDCAPS},
+        {0,                DDSCAPS_COMPLEX,                                    128, 32, 0, DDERR_INVALIDCAPS},
+        {0,                DDSCAPS_MIPMAP | DDSCAPS_COMPLEX,                   128, 32, 0, DDERR_INVALIDCAPS},
         {0,                DDSCAPS_TEXTURE | DDSCAPS_MIPMAP,                   128, 32, 0, DD_OK,               1},
-        {0,                DDSCAPS_MIPMAP,                                     128, 32, 0, DDERR_INVALIDCAPS,   0},
+        {0,                DDSCAPS_TEXTURE | DDSCAPS_COMPLEX,                  128, 32, 0, DDERR_INVALIDCAPS},
         {0,                DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 128, 32, 0, DD_OK,               6},
         {0,                DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 32,  64, 0, DD_OK,               6},
+
+        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_MIPMAP,                   128, 32, 1, DDERR_INVALIDCAPS},
+        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_MIPMAP,                   128, 32, 3, DDERR_INVALIDCAPS},
+        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 128, 32, 3, DD_OK,               3},
+        {DDSD_MIPMAPCOUNT, DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP, 128, 32, 0, DDERR_INVALIDPARAMS},
     };
 
     window = create_window();

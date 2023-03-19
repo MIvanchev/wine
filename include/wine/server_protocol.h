@@ -2531,8 +2531,9 @@ struct get_thread_context_request
     obj_handle_t handle;
     obj_handle_t context;
     unsigned int flags;
+    unsigned int native_flags;
     unsigned short machine;
-    char __pad_26[6];
+    char __pad_30[2];
 };
 struct get_thread_context_reply
 {
@@ -2548,7 +2549,9 @@ struct set_thread_context_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int native_flags;
     /* VARARG(contexts,contexts); */
+    char __pad_20[4];
 };
 struct set_thread_context_reply
 {
@@ -2768,7 +2771,6 @@ struct send_hardware_message_reply
     int             prev_y;
     int             new_x;
     int             new_y;
-    /* VARARG(keystate,bytes); */
     char __pad_28[4];
 };
 #define SEND_HWMSG_INJECTED    0x01
@@ -3073,10 +3075,10 @@ struct create_named_pipe_request
     unsigned int   access;
     unsigned int   options;
     unsigned int   sharing;
+    unsigned int   disposition;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
-    char __pad_36[4];
     timeout_t      timeout;
     unsigned int   flags;
     /* VARARG(objattr,object_attributes); */
@@ -3086,7 +3088,7 @@ struct create_named_pipe_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
-    char __pad_12[4];
+    int            created;
 };
 
 
@@ -6356,7 +6358,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 758
+#define SERVER_PROTOCOL_VERSION 762
 
 /* ### protocol_version end ### */
 
