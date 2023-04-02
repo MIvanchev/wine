@@ -1932,8 +1932,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     status = load_main_exe( NULL, main_argv[1], curdir, &image, module );
     if (!status)
     {
+        char *loader;
+
         if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
-        if (main_image_info.Machine != current_machine) status = STATUS_INVALID_IMAGE_FORMAT;
+        /* if we have to use a different loader, fall back to start.exe */
+        if ((loader = get_alternate_wineloader( main_image_info.Machine )))
+        {
+            free( loader );
+            status = STATUS_INVALID_IMAGE_FORMAT;
+        }
     }
 
     if (status)  /* try launching it through start.exe */
@@ -2410,11 +2417,8 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
 {
     TEB *teb = NtCurrentTeb();
 #ifdef _WIN64
-    if (teb->WowTebOffset)
-    {
-        TEB32 *teb32 = (TEB32 *)((char *)teb + teb->WowTebOffset);
-        teb32->LastErrorValue = err;
-    }
+    WOW_TEB *wow_teb = get_wow_teb( teb );
+    if (wow_teb) wow_teb->LastErrorValue = err;
 #endif
     teb->LastErrorValue = err;
 }

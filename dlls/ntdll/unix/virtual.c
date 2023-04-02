@@ -2974,7 +2974,6 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
     void *ptr = NULL;
     NTSTATUS status = STATUS_SUCCESS;
     SIZE_T block_size = signal_stack_mask + 1;
-    BOOL is_wow = !!NtCurrentTeb()->WowTebOffset;
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     if (next_free_teb)
@@ -2989,7 +2988,7 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
         {
             SIZE_T total = 32 * block_size;
 
-            if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, is_win64 && is_wow ? 0x7fffffff : 0,
+            if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, is_win64 && is_wow64() ? 0x7fffffff : 0,
                                                    &total, MEM_RESERVE, PAGE_READWRITE )))
             {
                 server_leave_uninterrupted_section( &virtual_mutex, &sigset );
@@ -3002,7 +3001,7 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
         NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&ptr, 0, &block_size,
                                  MEM_COMMIT, PAGE_READWRITE );
     }
-    *ret_teb = teb = init_teb( ptr, is_wow );
+    *ret_teb = teb = init_teb( ptr, is_wow64() );
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
 
     if ((status = signal_alloc_thread( teb )))
@@ -3848,7 +3847,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
     if (zero_bits > 32 && zero_bits < granularity_mask) return STATUS_INVALID_PARAMETER_3;
 #ifndef _WIN64
-    if (!is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
+    if (!is_old_wow64() && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
 #endif
 
     if (process != NtCurrentProcess())
@@ -4648,7 +4647,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
         return STATUS_INVALID_PARAMETER_4;
 
 #ifndef _WIN64
-    if (!is_wow64)
+    if (!is_old_wow64())
     {
         if (zero_bits >= 32) return STATUS_INVALID_PARAMETER_4;
         if (alloc_type & AT_ROUND_TO_PAGE)
@@ -5320,17 +5319,28 @@ NTSTATUS WINAPI NtWow64WriteVirtualMemory64( HANDLE process, ULONG64 addr, const
 NTSTATUS WINAPI NtWow64GetNativeSystemInformation( SYSTEM_INFORMATION_CLASS class, void *info,
                                                    ULONG len, ULONG *retlen )
 {
+    NTSTATUS status;
+
     switch (class)
     {
-    case SystemBasicInformation:
     case SystemCpuInformation:
+        status = NtQuerySystemInformation( class, info, len, retlen );
+        if (!status && is_old_wow64())
+        {
+            SYSTEM_CPU_INFORMATION *cpu = info;
+
+            if (cpu->ProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+                cpu->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
+        }
+        return status;
+    case SystemBasicInformation:
     case SystemEmulationBasicInformation:
     case SystemEmulationProcessorInformation:
         return NtQuerySystemInformation( class, info, len, retlen );
     case SystemNativeBasicInformation:
         return NtQuerySystemInformation( SystemBasicInformation, info, len, retlen );
     default:
-        if (is_wow64) return STATUS_INVALID_INFO_CLASS;
+        if (is_old_wow64()) return STATUS_INVALID_INFO_CLASS;
         return NtQuerySystemInformation( class, info, len, retlen );
     }
 }
