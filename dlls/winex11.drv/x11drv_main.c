@@ -664,7 +664,7 @@ static NTSTATUS x11drv_init( void *arg )
 
     XkbUseExtension( gdi_display, NULL, NULL );
     X11DRV_InitKeyboard( gdi_display );
-    if (use_xim) use_xim = X11DRV_InitXIM( input_style );
+    if (use_xim) use_xim = xim_init( input_style );
 
     init_user_driver();
     X11DRV_DisplayDevices_Init(FALSE);
@@ -748,7 +748,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     set_queue_display_fd( data->display );
     NtUserGetThreadInfo()->driver_data = (UINT_PTR)data;
 
-    if (use_xim) X11DRV_SetupXIM();
+    if (use_xim) xim_thread_attach( data );
 
     return data;
 }
