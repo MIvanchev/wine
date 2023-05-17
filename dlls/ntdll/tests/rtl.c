@@ -3608,6 +3608,46 @@ static void test_RtlFirstFreeAce(void)
     HeapFree(GetProcessHeap(), 0, acl);
 }
 
+static void test_RtlInitializeSid(void)
+{
+    SID_IDENTIFIER_AUTHORITY sid_ident = { SECURITY_NT_AUTHORITY };
+    char buffer[SECURITY_MAX_SID_SIZE];
+    PSID sid = (PSID)&buffer;
+    NTSTATUS status;
+
+    status = RtlInitializeSid(sid, &sid_ident, 1);
+    ok(!status, "Unexpected status %#lx.\n", status);
+
+    status = RtlInitializeSid(sid, &sid_ident, SID_MAX_SUB_AUTHORITIES);
+    ok(!status, "Unexpected status %#lx.\n", status);
+
+    status = RtlInitializeSid(sid, &sid_ident, SID_MAX_SUB_AUTHORITIES + 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#lx.\n", status);
+}
+
+static void test_RtlValidSecurityDescriptor(void)
+{
+    SECURITY_DESCRIPTOR *sd;
+    NTSTATUS status;
+    BOOLEAN ret;
+
+    ret = RtlValidSecurityDescriptor(NULL);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+
+    sd = calloc(1, SECURITY_DESCRIPTOR_MIN_LENGTH);
+
+    ret = RtlValidSecurityDescriptor(sd);
+    ok(!ret, "Unexpected return value %d.\n", ret);
+
+    status = RtlCreateSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION);
+    ok(!status, "Unexpected return value %#lx.\n", status);
+
+    ret = RtlValidSecurityDescriptor(sd);
+    ok(ret, "Unexpected return value %d.\n", ret);
+
+    free(sd);
+}
+
 START_TEST(rtl)
 {
     InitFunctionPtrs();
@@ -3652,4 +3692,6 @@ START_TEST(rtl)
     test_DbgPrint();
     test_RtlDestroyHeap();
     test_RtlFirstFreeAce();
+    test_RtlInitializeSid();
+    test_RtlValidSecurityDescriptor();
 }
