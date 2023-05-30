@@ -16,7 +16,6 @@ C_SRCS = \
 	dllmain.c \
 	event.c \
 	graphics.c \
-	ime.c \
 	init.c \
 	keyboard.c \
 	mouse.c \

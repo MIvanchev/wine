@@ -123,7 +123,7 @@ static void test_MapViewOfFile3(void)
     ok( mapping != 0, "CreateFileMapping error %lu\n", GetLastError() );
 
     SetLastError(0xdeadbeef);
-    ptr = pMapViewOfFile3( mapping, GetCurrentProcess(), NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
+    ptr = pMapViewOfFile3( mapping, NULL, NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
     ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %lu\n", GetLastError() );
     UnmapViewOfFile( ptr );
 
@@ -168,9 +168,7 @@ static void test_VirtualAlloc2(void)
 
     /* Placeholder splitting functionality */
     placeholder1 = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
-    todo_wine
     ok(!!placeholder1, "Failed to create a placeholder range.\n");
-    if (!placeholder1) return;
 
     memset(&info, 0, sizeof(info));
     VirtualQuery(placeholder1, &info, sizeof(info));
@@ -205,6 +203,20 @@ static void test_VirtualAlloc2(void)
 
     view2 = pMapViewOfFile3(section, NULL, placeholder2, 0, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
     ok(!!view2, "Failed to map a section.\n");
+
+    memset(&info, 0, sizeof(info));
+    VirtualQuery(placeholder1, &info, sizeof(info));
+    ok(info.AllocationProtect == PAGE_READWRITE, "Unexpected protection %#lx.\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "Unexpected state %#lx.\n", info.State);
+    ok(info.Type == MEM_MAPPED, "Unexpected type %#lx.\n", info.Type);
+    ok(info.RegionSize == size, "Unexpected size.\n");
+
+    memset(&info, 0, sizeof(info));
+    VirtualQuery(placeholder2, &info, sizeof(info));
+    ok(info.AllocationProtect == PAGE_READWRITE, "Unexpected protection %#lx.\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "Unexpected state %#lx.\n", info.State);
+    ok(info.Type == MEM_MAPPED, "Unexpected type %#lx.\n", info.Type);
+    ok(info.RegionSize == size, "Unexpected size.\n");
 
     CloseHandle(section);
     UnmapViewOfFile(view1);
