@@ -141,9 +141,10 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
                                     DEVMODEW *devmode, DWORD flags, ACCESS_MASK access,
                                     ULONG heap_size )
 {
+    WCHAR buffer[MAX_PATH];
     HANDLE ret;
 
-    if ((device && device->Length) || devmode)
+    if ((device && device->Length) || (devmode && !(flags & DF_WINE_CREATE_DESKTOP)))
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
@@ -163,6 +164,15 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
         ret = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
+    if (!devmode) return ret;
+
+    lstrcpynW( buffer, attr->ObjectName->Buffer, attr->ObjectName->Length / sizeof(WCHAR) + 1 );
+    if (!user_driver->pCreateDesktop( buffer, devmode->dmPelsWidth, devmode->dmPelsHeight ))
+    {
+        NtUserCloseDesktop( ret );
+        return 0;
+    }
+
     return ret;
 }
 
@@ -496,9 +506,8 @@ HWND get_desktop_window(void)
         SERVER_END_REQ;
     }
 
-    if (!thread_info->top_window ||
-        !user_driver->pCreateDesktopWindow( UlongToHandle( thread_info->top_window )))
-        ERR_(win)( "failed to create desktop window\n" );
+    if (!thread_info->top_window) ERR_(win)( "failed to create desktop window\n" );
+    else user_driver->pSetDesktopWindow( UlongToHandle( thread_info->top_window ));
 
     register_builtin_classes();
     return UlongToHandle( thread_info->top_window );

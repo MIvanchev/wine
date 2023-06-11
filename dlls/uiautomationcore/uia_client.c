@@ -58,93 +58,6 @@ static HRESULT add_node_to_node_array(struct uia_node_array *out_nodes, HUIANODE
     return S_OK;
 }
 
-static HRESULT get_safearray_dim_bounds(SAFEARRAY *sa, UINT dim, LONG *lbound, LONG *elems)
-{
-    LONG ubound;
-    HRESULT hr;
-
-    *lbound = *elems = 0;
-    hr = SafeArrayGetLBound(sa, dim, lbound);
-    if (FAILED(hr))
-        return hr;
-
-    hr = SafeArrayGetUBound(sa, dim, &ubound);
-    if (FAILED(hr))
-        return hr;
-
-    *elems = (ubound - (*lbound)) + 1;
-    return S_OK;
-}
-
-HRESULT get_safearray_bounds(SAFEARRAY *sa, LONG *lbound, LONG *elems)
-{
-    UINT dims;
-
-    *lbound = *elems = 0;
-    dims = SafeArrayGetDim(sa);
-    if (dims != 1)
-    {
-        WARN("Invalid dimensions %d for safearray.\n", dims);
-        return E_FAIL;
-    }
-
-    return get_safearray_dim_bounds(sa, 1, lbound, elems);
-}
-
-int uia_compare_safearrays(SAFEARRAY *sa1, SAFEARRAY *sa2, int prop_type)
-{
-    LONG i, idx, lbound[2], elems[2];
-    int val[2];
-    HRESULT hr;
-
-    hr = get_safearray_bounds(sa1, &lbound[0], &elems[0]);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get safearray bounds from sa1 with hr %#lx\n", hr);
-        return -1;
-    }
-
-    hr = get_safearray_bounds(sa2, &lbound[1], &elems[1]);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get safearray bounds from sa2 with hr %#lx\n", hr);
-        return -1;
-    }
-
-    if (elems[0] != elems[1])
-        return (elems[0] > elems[1]) - (elems[0] < elems[1]);
-
-    if (prop_type != UIAutomationType_IntArray)
-    {
-        FIXME("Array type %#x value comparison currently unimplemented.\n", prop_type);
-        return -1;
-    }
-
-    for (i = 0; i < elems[0]; i++)
-    {
-        idx = lbound[0] + i;
-        hr = SafeArrayGetElement(sa1, &idx, &val[0]);
-        if (FAILED(hr))
-        {
-            ERR("Failed to get element from sa1 with hr %#lx\n", hr);
-            return -1;
-        }
-
-        idx = lbound[1] + i;
-        hr = SafeArrayGetElement(sa2, &idx, &val[1]);
-        if (FAILED(hr))
-        {
-            ERR("Failed to get element from sa2 with hr %#lx\n", hr);
-            return -1;
-        }
-
-        if (val[0] != val[1])
-            return (val[0] > val[1]) - (val[0] < val[1]);
-    }
-
-    return 0;
-}
-
 static void clear_uia_node_ptr_safearray(SAFEARRAY *sa, LONG elems)
 {
     HUIANODE node;
@@ -254,18 +167,6 @@ exit:
         V_VT(in) = VT_UNKNOWN | VT_ARRAY;
         V_ARRAY(in) = sa;
     }
-}
-
-static HRESULT get_global_interface_table(IGlobalInterfaceTable **git)
-{
-    HRESULT hr;
-
-    hr = CoCreateInstance(&CLSID_StdGlobalInterfaceTable, NULL,
-            CLSCTX_INPROC_SERVER, &IID_IGlobalInterfaceTable, (void **)git);
-    if (FAILED(hr))
-        WARN("Failed to get GlobalInterfaceTable, hr %#lx\n", hr);
-
-    return hr;
 }
 
 static HWND get_hwnd_from_provider(IRawElementProviderSimple *elprov)
@@ -515,16 +416,8 @@ static ULONG WINAPI uia_node_Release(IWineUiaNode *iface)
         {
             if (node->git_cookie[i])
             {
-                IGlobalInterfaceTable *git;
-                HRESULT hr;
-
-                hr = get_global_interface_table(&git);
-                if (SUCCEEDED(hr))
-                {
-                    hr = IGlobalInterfaceTable_RevokeInterfaceFromGlobal(git, node->git_cookie[i]);
-                    if (FAILED(hr))
-                        WARN("Failed to get revoke provider interface from Global Interface Table, hr %#lx\n", hr);
-                }
+                if (FAILED(unregister_interface_in_git(node->git_cookie[i])))
+                    WARN("Failed to get revoke provider interface from GIT\n");
             }
 
             if (node->prov[i])
@@ -559,21 +452,13 @@ static HRESULT WINAPI uia_node_get_provider(IWineUiaNode *iface, int idx, IWineU
     prov_type = get_node_provider_type_at_idx(node, idx);
     if (node->git_cookie[prov_type])
     {
-        IGlobalInterfaceTable *git;
         IWineUiaProvider *prov;
         HRESULT hr;
 
-        hr = get_global_interface_table(&git);
+        hr = get_interface_in_git(&IID_IWineUiaProvider, node->git_cookie[prov_type], (IUnknown **)&prov);
         if (FAILED(hr))
             return hr;
 
-        hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(git, node->git_cookie[prov_type],
-                &IID_IWineUiaProvider, (void **)&prov);
-        if (FAILED(hr))
-        {
-            ERR("Failed to get provider interface from GlobalInterfaceTable, hr %#lx\n", hr);
-            return hr;
-        }
         *out_prov = prov;
     }
     else
@@ -629,16 +514,8 @@ static HRESULT WINAPI uia_node_disconnect(IWineUiaNode *iface)
     prov_type = get_node_provider_type_at_idx(node, 0);
     if (node->git_cookie[prov_type])
     {
-        IGlobalInterfaceTable *git;
-        HRESULT hr;
-
-        hr = get_global_interface_table(&git);
-        if (SUCCEEDED(hr))
-        {
-            hr = IGlobalInterfaceTable_RevokeInterfaceFromGlobal(git, node->git_cookie[prov_type]);
-            if (FAILED(hr))
-                WARN("Failed to get revoke provider interface from Global Interface Table, hr %#lx\n", hr);
-        }
+        if (FAILED(unregister_interface_in_git(node->git_cookie[prov_type])))
+            WARN("Failed to get revoke provider interface from GIT\n");
         node->git_cookie[prov_type] = 0;
     }
 
@@ -726,7 +603,6 @@ static HRESULT prepare_uia_node(struct uia_node *node)
     for (i = 0; i < PROV_TYPE_COUNT; i++)
     {
         enum ProviderOptions prov_opts;
-        IGlobalInterfaceTable *git;
         struct uia_provider *prov;
         HRESULT hr;
 
@@ -747,12 +623,8 @@ static HRESULT prepare_uia_node(struct uia_node *node)
         */
         if (prov_opts & ProviderOptions_UseComThreading)
         {
-            hr = get_global_interface_table(&git);
-            if (FAILED(hr))
-                return hr;
-
-            hr = IGlobalInterfaceTable_RegisterInterfaceInGlobal(git, (IUnknown *)&prov->IWineUiaProvider_iface,
-                    &IID_IWineUiaProvider, &node->git_cookie[i]);
+            hr = register_interface_in_git((IUnknown *)&prov->IWineUiaProvider_iface, &IID_IWineUiaProvider,
+                    &node->git_cookie[i]);
             if (FAILED(hr))
                 return hr;
         }
@@ -1850,6 +1722,7 @@ static HRESULT WINAPI uia_provider_attach_event(IWineUiaProvider *iface, LONG_PT
     struct uia_event *event = (struct uia_event *)huiaevent;
     IRawElementProviderFragmentRoot *elroot;
     IRawElementProviderFragment *elfrag;
+    SAFEARRAY *embedded_roots = NULL;
     HRESULT hr;
 
     TRACE("%p, %#Ix\n", iface, huiaevent);
@@ -1859,9 +1732,19 @@ static HRESULT WINAPI uia_provider_attach_event(IWineUiaProvider *iface, LONG_PT
         return S_OK;
 
     hr = IRawElementProviderFragment_get_FragmentRoot(elfrag, &elroot);
-    IRawElementProviderFragment_Release(elfrag);
     if (FAILED(hr))
-        return hr;
+        goto exit;
+
+    /*
+     * For now, we only support embedded fragment roots on providers that
+     * don't represent a nested node.
+     */
+    if (event->scope & (TreeScope_Descendants | TreeScope_Children) && !prov->return_nested_node)
+    {
+        hr = IRawElementProviderFragment_GetEmbeddedFragmentRoots(elfrag, &embedded_roots);
+        if (FAILED(hr))
+            WARN("GetEmbeddedFragmentRoots failed with hr %#lx\n", hr);
+    }
 
     if (elroot)
     {
@@ -1875,11 +1758,55 @@ static HRESULT WINAPI uia_provider_attach_event(IWineUiaProvider *iface, LONG_PT
             hr = uia_event_add_provider_event_adviser(advise_events, event);
             IRawElementProviderAdviseEvents_Release(advise_events);
             if (FAILED(hr))
-                return hr;
+                goto exit;
         }
     }
 
-    return S_OK;
+    if (embedded_roots)
+    {
+        LONG lbound, elems, i;
+        HUIANODE node;
+
+        hr = get_safearray_bounds(embedded_roots, &lbound, &elems);
+        if (FAILED(hr))
+            goto exit;
+
+        for (i = 0; i < elems; i++)
+        {
+            IRawElementProviderSimple *elprov;
+            IUnknown *unk;
+            LONG idx;
+
+            idx = lbound + i;
+            hr = SafeArrayGetElement(embedded_roots, &idx, &unk);
+            if (FAILED(hr))
+                goto exit;
+
+            hr = IUnknown_QueryInterface(unk, &IID_IRawElementProviderSimple, (void **)&elprov);
+            IUnknown_Release(unk);
+            if (FAILED(hr))
+                goto exit;
+
+            hr = create_uia_node_from_elprov(elprov, &node, !prov->return_nested_node);
+            IRawElementProviderSimple_Release(elprov);
+            if (SUCCEEDED(hr))
+            {
+                hr = attach_event_to_uia_node(node, event);
+                UiaNodeRelease(node);
+                if (FAILED(hr))
+                {
+                    WARN("attach_event_to_uia_node failed with hr %#lx\n", hr);
+                    goto exit;
+                }
+            }
+        }
+    }
+
+exit:
+    IRawElementProviderFragment_Release(elfrag);
+    SafeArrayDestroy(embedded_roots);
+
+    return hr;
 }
 
 static const IWineUiaProviderVtbl uia_provider_vtbl = {
@@ -2347,7 +2274,6 @@ static HRESULT create_wine_uia_nested_node_provider(struct uia_node *node, LRESU
 {
     IWineUiaProvider *provider_iface = NULL;
     struct uia_nested_node_provider *prov;
-    IGlobalInterfaceTable *git;
     IWineUiaNode *nested_node;
     int prov_opts, prov_type;
     DWORD git_cookie;
@@ -2426,14 +2352,7 @@ static HRESULT create_wine_uia_nested_node_provider(struct uia_node *node, LRESU
          * We need to use the GIT on all nested node providers so that our
          * IWineUiaNode proxy is used in the correct apartment.
          */
-        hr = get_global_interface_table(&git);
-        if (FAILED(hr))
-        {
-            IWineUiaProvider_Release(&prov->IWineUiaProvider_iface);
-            return hr;
-        }
-
-        hr = IGlobalInterfaceTable_RegisterInterfaceInGlobal(git, (IUnknown *)&prov->IWineUiaProvider_iface,
+        hr = register_interface_in_git((IUnknown *)(IUnknown *)&prov->IWineUiaProvider_iface,
                 &IID_IWineUiaProvider, &git_cookie);
         if (FAILED(hr))
         {

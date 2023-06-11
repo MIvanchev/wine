@@ -286,6 +286,9 @@ struct unpack_dde_message_params
 #define SPY_RESULT_OK      0x0001
 #define SPY_RESULT_DEFWND  0x0002
 
+/* CreateDesktop wine specific flag */
+#define DF_WINE_CREATE_DESKTOP   0x80000000
+
 /* NtUserMessageCall codes */
 enum
 {
@@ -1526,5 +1529,8 @@ static inline BOOL NtUserShowOwnedPopups( HWND hwnd, BOOL show )
 {
     return NtUserCallHwndParam( hwnd, show, NtUserCallHwndParam_ShowOwnedPopups );
 }
+
+/* Wine extensions */
+BOOL WINAPI __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
 
 #endif /* _NTUSER_ */

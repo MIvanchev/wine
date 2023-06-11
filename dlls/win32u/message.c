@@ -1272,13 +1272,7 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         return call_current_hook( h_extra->handle, HC_ACTION, wparam, h_extra->lparam );
     }
     case WM_WINE_CLIPCURSOR:
-        if (wparam)
-        {
-            RECT rect;
-            get_clip_cursor( &rect );
-            return user_driver->pClipCursor( &rect );
-        }
-        return user_driver->pClipCursor( NULL );
+        return process_wine_clipcursor( wparam, lparam );
     case WM_WINE_UPDATEWINDOWSTATE:
         update_window_state( hwnd );
         return 0;
@@ -1772,6 +1766,8 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
     else if (is_mouse_message( msg->message ))
         ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
+    else if (msg->message == WM_WINE_CLIPCURSOR)
+        process_wine_clipcursor( msg->wParam, msg->lParam );
     else
         ERR( "unknown message type %x\n", msg->message );
     SetThreadDpiAwarenessContext( context );

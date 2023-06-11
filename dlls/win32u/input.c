@@ -598,7 +598,7 @@ BOOL WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
  *
  * Internal SendInput function to allow the graphics driver to inject real events.
  */
-BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput )
+BOOL WINAPI __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput )
 {
     return set_ntstatus( send_hardware_message( hwnd, input, rawinput, 0 ));
 }
@@ -1768,7 +1768,7 @@ HWND WINAPI NtUserSetCapture( HWND hwnd )
 /**********************************************************************
  *           release_capture
  */
-BOOL WINAPI release_capture(void)
+BOOL release_capture(void)
 {
     BOOL ret = set_capture_window( 0, 0, NULL );
 
@@ -2469,114 +2469,89 @@ BOOL WINAPI NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_P
     return FALSE;
 }
 
-HWND get_shell_window(void)
+BOOL get_clip_cursor( RECT *rect )
 {
-    HWND hwnd = 0;
+    UINT dpi;
+    BOOL ret;
 
-    SERVER_START_REQ(set_global_windows)
+    if (!rect) return FALSE;
+
+    SERVER_START_REQ( set_cursor )
     {
         req->flags = 0;
-        if (!wine_server_call_err(req))
-            hwnd = wine_server_ptr_handle( reply->old_shell_window );
+        if ((ret = !wine_server_call( req )))
+        {
+            rect->left   = reply->new_clip.left;
+            rect->top    = reply->new_clip.top;
+            rect->right  = reply->new_clip.right;
+            rect->bottom = reply->new_clip.bottom;
+        }
     }
     SERVER_END_REQ;
 
-    return hwnd;
+    if (ret && (dpi = get_thread_dpi()))
+    {
+        HMONITOR monitor = monitor_from_rect( rect, MONITOR_DEFAULTTOPRIMARY, 0 );
+        *rect = map_dpi_rect( *rect, get_monitor_dpi( monitor ), dpi );
+    }
+    return ret;
+}
+
+BOOL process_wine_clipcursor( BOOL empty, BOOL reset )
+{
+    RECT rect;
+
+    TRACE( "empty %u, reset %u\n", empty, reset );
+
+    if (empty || reset) return user_driver->pClipCursor( NULL, reset );
+
+    get_clip_cursor( &rect );
+    return user_driver->pClipCursor( &rect, FALSE );
 }
 
 /***********************************************************************
-*            NtUserSetShellWindowEx (win32u.@)
-*/
-BOOL WINAPI NtUserSetShellWindowEx( HWND shell, HWND list_view )
+ *       NtUserClipCursor (win32u.@)
+ */
+BOOL WINAPI NtUserClipCursor( const RECT *rect )
 {
+    UINT dpi;
     BOOL ret;
+    RECT new_rect;
 
-    /* shell =     Progman[Program Manager]
-     *             |-> SHELLDLL_DefView
-     * list_view = |   |-> SysListView32
-     *             |   |   |-> tooltips_class32
-     *             |   |
-     *             |   |-> SysHeader32
-     *             |
-     *             |-> ProxyTarget
-     */
+    TRACE( "Clipping to %s\n", wine_dbgstr_rect(rect) );
 
-    if (get_shell_window())
-        return FALSE;
-
-    if (get_window_long( shell, GWL_EXSTYLE ) & WS_EX_TOPMOST)
-        return FALSE;
-
-    if (list_view != shell && (get_window_long( list_view, GWL_EXSTYLE ) & WS_EX_TOPMOST))
-        return FALSE;
-
-    if (list_view && list_view != shell)
-        NtUserSetWindowPos( list_view, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
-
-    NtUserSetWindowPos( shell, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE );
-
-    SERVER_START_REQ(set_global_windows)
+    if (rect)
     {
-        req->flags          = SET_GLOBAL_SHELL_WINDOWS;
-        req->shell_window   = wine_server_user_handle( shell );
-        req->shell_listview = wine_server_user_handle( list_view );
-        ret = !wine_server_call_err(req);
+        if (rect->left > rect->right || rect->top > rect->bottom) return FALSE;
+        if ((dpi = get_thread_dpi()))
+        {
+            HMONITOR monitor = monitor_from_rect( rect, MONITOR_DEFAULTTOPRIMARY, dpi );
+            new_rect = map_dpi_rect( *rect, dpi, get_monitor_dpi( monitor ));
+            rect = &new_rect;
+        }
+    }
+
+    SERVER_START_REQ( set_cursor )
+    {
+        if (rect)
+        {
+            req->flags       = SET_CURSOR_CLIP;
+            req->clip.left   = rect->left;
+            req->clip.top    = rect->top;
+            req->clip.right  = rect->right;
+            req->clip.bottom = rect->bottom;
+        }
+        else req->flags = SET_CURSOR_NOCLIP;
+
+        if ((ret = !wine_server_call( req )))
+        {
+            new_rect.left   = reply->new_clip.left;
+            new_rect.top    = reply->new_clip.top;
+            new_rect.right  = reply->new_clip.right;
+            new_rect.bottom = reply->new_clip.bottom;
+        }
     }
     SERVER_END_REQ;
+
     return ret;
-}
-
-HWND get_progman_window(void)
-{
-    HWND ret = 0;
-
-    SERVER_START_REQ(set_global_windows)
-    {
-        req->flags = 0;
-        if (!wine_server_call_err(req))
-            ret = wine_server_ptr_handle( reply->old_progman_window );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-HWND set_progman_window( HWND hwnd )
-{
-    SERVER_START_REQ(set_global_windows)
-    {
-        req->flags          = SET_GLOBAL_PROGMAN_WINDOW;
-        req->progman_window = wine_server_user_handle( hwnd );
-        if (wine_server_call_err( req )) hwnd = 0;
-    }
-    SERVER_END_REQ;
-    return hwnd;
-}
-
-HWND get_taskman_window(void)
-{
-    HWND ret = 0;
-
-    SERVER_START_REQ(set_global_windows)
-    {
-        req->flags = 0;
-        if (!wine_server_call_err(req))
-            ret = wine_server_ptr_handle( reply->old_taskman_window );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-HWND set_taskman_window( HWND hwnd )
-{
-    /* hwnd = MSTaskSwWClass
-     *        |-> SysTabControl32
-     */
-    SERVER_START_REQ(set_global_windows)
-    {
-        req->flags          = SET_GLOBAL_TASKMAN_WINDOW;
-        req->taskman_window = wine_server_user_handle( hwnd );
-        if (wine_server_call_err( req )) hwnd = 0;
-    }
-    SERVER_END_REQ;
-    return hwnd;
 }

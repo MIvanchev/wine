@@ -80,8 +80,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winnt.h"
 #include "winbase.h"
@@ -106,14 +104,14 @@ static const char so_dir[] = "/aarch64-unix";
 static const char so_dir[] = "";
 #endif
 
-void     (WINAPI *pDbgUiRemoteBreakin)( void *arg ) = NULL;
-NTSTATUS (WINAPI *pKiRaiseUserExceptionDispatcher)(void) = NULL;
-NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) = NULL;
-void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) = NULL;
-void     (WINAPI *pKiUserCallbackDispatcher)(ULONG,void*,ULONG) = NULL;
-void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) = NULL;
-void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) = NULL;
-void     (WINAPI *p__wine_ctrl_routine)(void*);
+void *pDbgUiRemoteBreakin = NULL;
+void *pKiRaiseUserExceptionDispatcher = NULL;
+void *pKiUserExceptionDispatcher = NULL;
+void *pKiUserApcDispatcher = NULL;
+void *pKiUserCallbackDispatcher = NULL;
+void *pLdrInitializeThunk = NULL;
+void *pRtlUserThreadStart = NULL;
+void *p__wine_ctrl_routine = NULL;
 SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock = NULL;
 
 static void *p__wine_syscall_dispatcher;
@@ -423,8 +421,8 @@ static void fixup_so_resources( IMAGE_RESOURCE_DIRECTORY *dir, BYTE *root, int d
 
     for (i = 0; i < dir->NumberOfNamedEntries + dir->NumberOfIdEntries; i++, entry++)
     {
-        void *ptr = root + entry->u2.s2.OffsetToDirectory;
-        if (entry->u2.s2.DataIsDirectory) fixup_so_resources( ptr, root, delta );
+        void *ptr = root + entry->OffsetToDirectory;
+        if (entry->DataIsDirectory) fixup_so_resources( ptr, root, delta );
         else fixup_rva_dwords( &((IMAGE_RESOURCE_DATA_ENTRY *)ptr)->OffsetToData, delta, 1 );
     }
 }
@@ -931,11 +929,11 @@ static NTSTATUS map_so_dll( const IMAGE_NT_HEADERS *nt_descr, HMODULE module )
 
         while (imports->Name)
         {
-            fixup_rva_dwords( &imports->u.OriginalFirstThunk, delta, 1 );
+            fixup_rva_dwords( &imports->OriginalFirstThunk, delta, 1 );
             fixup_rva_dwords( &imports->Name, delta, 1 );
             fixup_rva_dwords( &imports->FirstThunk, delta, 1 );
-            if (imports->u.OriginalFirstThunk)
-                fixup_rva_names( (UINT_PTR *)(addr + imports->u.OriginalFirstThunk), delta );
+            if (imports->OriginalFirstThunk)
+                fixup_rva_names( (UINT_PTR *)(addr + imports->OriginalFirstThunk), delta );
             if (imports->FirstThunk)
                 fixup_rva_names( (UINT_PTR *)(addr + imports->FirstThunk), delta );
             imports++;
@@ -1694,7 +1692,7 @@ static NTSTATUS open_main_image( WCHAR *image, void **module, SECTION_IMAGE_INFO
     if (!status)
     {
         status = virtual_map_module( mapping, module, &size, info, 0, machine );
-        if (status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH && info->u.s.ComPlusNativeReady)
+        if (status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH && info->ComPlusNativeReady)
         {
             info->Machine = native_machine;
             status = STATUS_SUCCESS;
@@ -1834,13 +1832,6 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( __wine_unixlib_handle );
     *p__wine_unix_call_dispatcher = __wine_unix_call_dispatcher;
     *p__wine_unixlib_handle = (UINT_PTR)unix_call_funcs;
-#ifdef __aarch64__
-    {
-        void **p__wine_current_teb;
-        GET_FUNC( __wine_current_teb );
-        *p__wine_current_teb = NtCurrentTeb;
-    }
-#endif
 #undef GET_FUNC
 }
 
