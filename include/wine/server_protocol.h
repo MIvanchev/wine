@@ -456,6 +456,7 @@ typedef union
     {
         enum select_op  op;
         obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
+        int             __pad;
     } wait;
     struct
     {
@@ -526,7 +527,8 @@ typedef union
         unsigned int     op_type;
         client_ptr_t     addr;
         mem_size_t       size;
-        mem_size_t       limit;
+        mem_size_t       limit_low;
+        mem_size_t       limit_high;
         mem_size_t       align;
         unsigned int     prot;
         unsigned int     attributes;
@@ -590,10 +592,12 @@ typedef union
         client_ptr_t     addr;
         mem_size_t       size;
         file_pos_t       offset;
-        mem_size_t       limit;
+        mem_size_t       limit_low;
+        mem_size_t       limit_high;
         unsigned int     alloc_type;
-        unsigned short   prot;
+        unsigned int     prot;
         unsigned short   machine;
+        unsigned short   __pad[3];
     } map_view_ex;
     struct
     {
@@ -5353,6 +5357,7 @@ struct set_cursor_reply
 #define SET_CURSOR_POS    0x04
 #define SET_CURSOR_CLIP   0x08
 #define SET_CURSOR_NOCLIP 0x10
+#define SET_CURSOR_FSCLIP 0x20
 
 
 struct get_cursor_history_request
@@ -6413,7 +6418,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 774
+#define SERVER_PROTOCOL_VERSION 777
 
 /* ### protocol_version end ### */
 
