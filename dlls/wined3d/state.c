@@ -4264,7 +4264,7 @@ static void indexbuffer(struct wined3d_context *context, const struct wined3d_st
     if (buffer->buffer_object)
     {
         GL_EXTCALL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, wined3d_bo_gl(buffer->buffer_object)->id));
-        buffer->bo_user.valid = true;
+        wined3d_buffer_validate_user(buffer);
     }
     else
     {
@@ -4394,7 +4394,7 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
                 bo_gl->id, bo_gl->b.buffer_offset + buffer_state->offset,
                 min(buffer_state->size, buffer->resource.size - buffer_state->offset)));
 
-        buffer->bo_user.valid = true;
+        wined3d_buffer_validate_user(buffer);
     }
     checkGLcall("bind constant buffers");
 }
@@ -4471,7 +4471,7 @@ static void state_so(struct wined3d_context *context, const struct wined3d_state
         size = buffer->resource.size - offset;
         GL_EXTCALL(glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, i,
                 bo_gl->id, bo_gl->b.buffer_offset + offset, size));
-        buffer->bo_user.valid = true;
+        wined3d_buffer_validate_user(buffer);
     }
     checkGLcall("bind transform feedback buffers");
 }
@@ -5109,7 +5109,7 @@ static void ffp_free(struct wined3d_device *device, struct wined3d_context *cont
 
 static void vp_ffp_get_caps(const struct wined3d_adapter *adapter, struct wined3d_vertex_caps *caps)
 {
-    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
 
     caps->xyzrhw = FALSE;
     caps->ffp_generic_attributes = FALSE;
@@ -5130,7 +5130,7 @@ static void vp_ffp_get_caps(const struct wined3d_adapter *adapter, struct wined3
         caps->raster_caps |= WINED3DPRASTERCAPS_FOGRANGE;
 }
 
-static unsigned int vp_ffp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int vp_ffp_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return GL_EXT_EMUL_ARB_MULTITEXTURE | GL_EXT_EMUL_EXT_FOG_COORD;
 }
@@ -5147,7 +5147,7 @@ const struct wined3d_vertex_pipe_ops ffp_vertex_pipe =
 
 static void ffp_fragment_get_caps(const struct wined3d_adapter *adapter, struct fragment_caps *caps)
 {
-    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
 
     caps->wined3d_caps = 0;
     caps->PrimitiveMiscCaps = 0;
@@ -5188,7 +5188,7 @@ static void ffp_fragment_get_caps(const struct wined3d_adapter *adapter, struct 
     caps->MaxSimultaneousTextures = gl_info->limits.textures;
 }
 
-static unsigned int ffp_fragment_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int ffp_fragment_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return GL_EXT_EMUL_ARB_MULTITEXTURE | GL_EXT_EMUL_EXT_FOG_COORD;
 }
@@ -5235,7 +5235,7 @@ static void vp_none_get_caps(const struct wined3d_adapter *adapter, struct wined
     memset(caps, 0, sizeof(*caps));
 }
 
-static unsigned int vp_none_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int vp_none_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return 0;
 }
@@ -5255,7 +5255,7 @@ static void fp_none_get_caps(const struct wined3d_adapter *adapter, struct fragm
     memset(caps, 0, sizeof(*caps));
 }
 
-static unsigned int fp_none_get_emul_mask(const struct wined3d_gl_info *gl_info)
+static unsigned int fp_none_get_emul_mask(const struct wined3d_adapter *adapter)
 {
     return 0;
 }
