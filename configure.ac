@@ -1435,7 +1435,7 @@ if test "x$with_sane" != "xno"
 then
     WINE_PACKAGE_FLAGS(SANE,[sane-backends],,[`${SANE_CONFIG:-sane-config} --cflags 2>/dev/null`],[`${SANE_CONFIG:-sane-config} --ldflags 2>/dev/null`],
         [AC_CHECK_HEADER(sane/sane.h,
-            [AC_CHECK_LIB(sane,sane_init,[SANE_LIBS="$SANE_LIBS -lstdc++"],,[$SANE_LIBS -lstdc++])])])
+            [WINE_CHECK_LIB(sane,sane_init)])])
 fi
 WINE_NOTICE_WITH(sane,[test "$ac_cv_lib_sane_sane_init" != "yes"],
                  [libsane ${notice_platform}development files not found, scanners won't be supported.],
@@ -1465,24 +1465,25 @@ WINE_NOTICE_WITH(v4l2,[test "x$ac_cv_lib_v4l2_v4l2_open" != "xyes"],
 dnl **** Check for libgphoto2 ****
 if test "x$with_gphoto" != "xno"
 then
-    WINE_PACKAGE_FLAGS(GPHOTO2,[libgphoto2],[-lgphoto2],
-                       [`${GPHOTO2_CONFIG:-gphoto2-config} --cflags 2>/dev/null`],[`${GPHOTO2_CONFIG:-gphoto2-config} --libs 2>/dev/null`],
+    WINE_PACKAGE_FLAGS(GPHOTO2,[libgphoto2],[-lgphoto2],,,
+                       # [`${GPHOTO2_CONFIG:-gphoto2-config} --cflags 2>/dev/null`],
+                       # [`${GPHOTO2_CONFIG:-gphoto2-config} --libs 2>/dev/null`],
         [AC_CHECK_HEADER(gphoto2-camera.h,
-                        [AC_CHECK_LIB(gphoto2,gp_camera_new,[:],,[$GPHOTO2_LIBS])])])
-    WINE_PACKAGE_FLAGS(GPHOTO2_PORT,[libgphoto2_port],[-lgphoto2_port],
-                       [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --cflags 2>/dev/null`],
-                       [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --libs 2>/dev/null`],
+                        [WINE_CHECK_LIB(gphoto2,gp_camera_new)])])
+    WINE_PACKAGE_FLAGS(GPHOTO2_PORT,[libgphoto2_port],[-lgphoto2_port],,,
+                       # [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --cflags 2>/dev/null`],
+                       # [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --libs 2>/dev/null`],
         [AC_CHECK_HEADER(gphoto2-port.h,
-                        [AC_CHECK_LIB(gphoto2_port,gp_port_info_list_new,
+                        [WINE_CHECK_LIB(gphoto2_port,gp_port_info_list_new,
                                       [AC_DEFINE(HAVE_GPHOTO2_PORT, 1, [Define if we have the libgphoto2_port development environment])],
                                       [GPHOTO2_PORT_LIBS=""; GPHOTO2_PORT_CFLAGS=""],
                                       [$GPHOTO2_PORT_LIBS])],
                         [GPHOTO2_PORT_LIBS=""; GPHOTO2_PORT_CFLAGS=""])])
 fi
-WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_gp_camera_new" != "yes"],
+WINE_NOTICE_WITH(gphoto,[test "x$ac_cv_lib_gphoto2_gp_camera_new" != "xyes"],
                  [libgphoto2 ${notice_platform}development files not found, digital cameras won't be supported.],
                  [enable_gphoto2_ds])
-WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_port_gp_port_info_list_new" != "yes"],
+WINE_NOTICE_WITH(gphoto,[test "x$ac_cv_lib_gphoto2_port_gp_port_info_list_new" != "xyes"],
                  [libgphoto2_port ${notice_platform}development files not found, digital cameras won't be auto-detected.])
 
 
