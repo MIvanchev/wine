@@ -43,7 +43,7 @@ extern "C" {
 #endif
 
 #if defined(_NTSYSTEM_) || defined(WINE_UNIX_LIB)
-#define NTSYSAPI
+#define NTSYSAPI DECLSPEC_EXPORT
 #else
 #define NTSYSAPI DECLSPEC_IMPORT
 #endif
@@ -2386,9 +2386,9 @@ struct _TEB;
 
 #ifdef WINE_UNIX_LIB
 # ifdef __GNUC__
-struct _TEB * WINAPI NtCurrentTeb(void) __attribute__((pure));
+NTSYSAPI struct _TEB * WINAPI NtCurrentTeb(void) __attribute__((pure));
 # else
-struct _TEB * WINAPI NtCurrentTeb(void);
+NTSYSAPI struct _TEB * WINAPI NtCurrentTeb(void);
 # endif
 #elif defined(__i386__) && defined(__GNUC__)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
@@ -6756,6 +6756,7 @@ typedef enum _FIRMWARE_TYPE
 #define InterlockedDecrement64 _InterlockedDecrement64
 #define InterlockedExchange _InterlockedExchange
 #define InterlockedExchangeAdd _InterlockedExchangeAdd
+#define InterlockedExchangeAdd16 _InterlockedExchangeAdd16
 #define InterlockedExchangeAdd64 _InterlockedExchangeAdd64
 #define InterlockedExchangePointer _InterlockedExchangePointer
 #define InterlockedIncrement _InterlockedIncrement
@@ -6776,6 +6777,7 @@ typedef enum _FIRMWARE_TYPE
 #pragma intrinsic(_InterlockedCompareExchangePointer)
 #pragma intrinsic(_InterlockedExchange)
 #pragma intrinsic(_InterlockedExchangeAdd)
+#pragma intrinsic(_InterlockedExchangeAdd16)
 #pragma intrinsic(_InterlockedExchangePointer)
 #pragma intrinsic(_InterlockedIncrement)
 #pragma intrinsic(_InterlockedIncrement16)
@@ -6795,6 +6797,7 @@ long      _InterlockedDecrement(long volatile*);
 short     _InterlockedDecrement16(short volatile*);
 long      _InterlockedExchange(long volatile*,long);
 long      _InterlockedExchangeAdd(long volatile*,long);
+short     _InterlockedExchangeAdd16(short volatile*,short);
 void *    _InterlockedExchangePointer(void *volatile*,void*);
 long      _InterlockedIncrement(long volatile*);
 short     _InterlockedIncrement16(short volatile*);
@@ -7023,6 +7026,11 @@ static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG va
 }
 
 static FORCEINLINE LONG WINAPI InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+{
+    return __sync_fetch_and_add( dest, incr );
+}
+
+static FORCEINLINE short WINAPI InterlockedExchangeAdd16( short volatile *dest, short incr )
 {
     return __sync_fetch_and_add( dest, incr );
 }

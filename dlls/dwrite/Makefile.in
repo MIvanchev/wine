@@ -5,7 +5,7 @@ IMPORTS   = user32 gdi32 advapi32
 UNIX_CFLAGS = $(FREETYPE_CFLAGS)
 UNIX_LIBS = $(FREETYPE_LIBS)
 
-C_SRCS = \
+SOURCES = \
 	analyzer.c \
 	bidi.c \
 	bracket.c \

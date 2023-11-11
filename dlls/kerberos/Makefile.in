@@ -3,6 +3,6 @@ UNIXLIB   = kerberos.so
 UNIX_CFLAGS = $(KRB5_CFLAGS) $(GSSAPI_CFLAGS)
 UNIX_LIBS = $(KRB5_LIBS) $(GSSAPI_KRB5_LIBS)
 
-C_SRCS = \
+SOURCES = \
 	krb5_ap.c \
 	unixlib.c

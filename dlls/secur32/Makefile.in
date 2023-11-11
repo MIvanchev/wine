@@ -6,7 +6,7 @@ DELAYIMPORTS = crypt32
 UNIX_CFLAGS  = $(GNUTLS_CFLAGS)
 UNIX_LIBS = $(GNUTLS_LIBS)
 
-C_SRCS = \
+SOURCES = \
 	lsa.c \
 	negotiate.c \
 	schannel.c \
