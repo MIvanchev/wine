@@ -132,6 +132,7 @@ enum alg_id
     ALG_ID_RSA,
 
     /* secret agreement */
+    ALG_ID_DH,
     ALG_ID_ECDH_P256,
     ALG_ID_ECDH_P384,
 
@@ -197,6 +198,8 @@ struct key
 struct secret
 {
     struct object hdr;
+    struct key *privkey;
+    struct key *pubkey;
 };
 
 struct key_symmetric_set_auth_data_params
@@ -253,8 +256,8 @@ struct key_asymmetric_encrypt_params
 
 struct key_asymmetric_duplicate_params
 {
-    struct key  *key_orig;
-    struct key  *key_copy;
+    struct key *key_orig;
+    struct key *key_copy;
 };
 
 struct key_asymmetric_sign_params
@@ -300,6 +303,15 @@ struct key_asymmetric_import_params
     ULONG        len;
 };
 
+struct key_asymmetric_derive_key_params
+{
+    struct key *privkey;
+    struct key *pubkey;
+    UCHAR      *output;
+    ULONG       output_len;
+    ULONG      *ret_len;
+};
+
 enum key_funcs
 {
     unix_process_attach,
@@ -319,6 +331,7 @@ enum key_funcs
     unix_key_asymmetric_destroy,
     unix_key_asymmetric_export,
     unix_key_asymmetric_import,
+    unix_key_asymmetric_derive_key,
     unix_funcs_count,
 };
 

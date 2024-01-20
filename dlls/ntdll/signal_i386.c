@@ -73,6 +73,30 @@ extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_R
                               PEXCEPTION_HANDLER handler, PEXCEPTION_HANDLER nested_handler );
 
 
+#ifdef __WINE_PE_BUILD
+
+enum syscall_ids
+{
+#define SYSCALL_ENTRY(id,name,args) __id_##name = id,
+ALL_SYSCALLS32
+#undef SYSCALL_ENTRY
+};
+
+/*******************************************************************
+ *         NtQueryInformationProcess
+ */
+void NtQueryInformationProcess_wrapper(void)
+{
+    asm( ".globl " __ASM_STDCALL("NtQueryInformationProcess", 20) "\n"
+         __ASM_STDCALL("NtQueryInformationProcess", 20) ":\n\t"
+         "movl %0,%%eax\n\t"
+         "call *%%fs:0xc0\n\t"
+         "ret $20"  :: "i" (__id_NtQueryInformationProcess) );
+}
+#define NtQueryInformationProcess syscall_NtQueryInformationProcess
+
+#endif /* __WINE_PE_BUILD */
+
 /*******************************************************************
  *         syscalls
  */
@@ -255,12 +279,14 @@ __ASM_STDCALL_FUNC( KiUserExceptionDispatcher, 8,
 /*******************************************************************
  *		KiUserApcDispatcher (NTDLL.@)
  */
-void WINAPI KiUserApcDispatcher( CONTEXT *context, ULONG_PTR ctx, ULONG_PTR arg1, ULONG_PTR arg2,
-                                 PNTAPCFUNC func )
-{
-    func( ctx, arg1, arg2 );
-    NtContinue( context, TRUE );
-}
+__ASM_STDCALL_FUNC( KiUserApcDispatcher, 20,
+                    "leal 0x14(%esp),%ebx\n\t"  /* context */
+                    "pop %eax\n\t"              /* func */
+                    "call *%eax\n\t"
+                    "pushl -4(%ebx)\n\t"        /* alertable */
+                    "pushl %ebx\n\t"            /* context */
+                    "call " __ASM_STDCALL("NtContinue", 8) "\n\t"
+                    "int3" )
 
 
 /*******************************************************************

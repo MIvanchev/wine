@@ -747,9 +747,13 @@ static void set_mwm_hints( struct x11drv_win_data *data, UINT style, UINT ex_sty
 
     if (data->hwnd == NtUserGetDesktopWindow())
     {
-        if (is_desktop_fullscreen()) mwm_hints.decorations = 0;
-        else mwm_hints.decorations = MWM_DECOR_TITLE | MWM_DECOR_BORDER | MWM_DECOR_MENU | MWM_DECOR_MINIMIZE;
         mwm_hints.functions        = MWM_FUNC_MOVE | MWM_FUNC_MINIMIZE | MWM_FUNC_CLOSE;
+        if (is_desktop_fullscreen())
+        {
+            mwm_hints.decorations = 0;
+            mwm_hints.functions |= MWM_FUNC_RESIZE;  /* some WMs need this to make it fullscreen */
+        }
+        else mwm_hints.decorations = MWM_DECOR_TITLE | MWM_DECOR_BORDER | MWM_DECOR_MENU | MWM_DECOR_MINIMIZE;
     }
     else
     {
@@ -974,6 +978,35 @@ void update_user_time( Time time )
     XUnlockDisplay( gdi_display );
 }
 
+static void update_desktop_fullscreen( Display *display )
+{
+    XEvent xev;
+
+    if (!is_virtual_desktop()) return;
+
+    xev.xclient.type = ClientMessage;
+    xev.xclient.window = root_window;
+    xev.xclient.message_type = x11drv_atom(_NET_WM_STATE);
+    xev.xclient.serial = 0;
+    xev.xclient.display = display;
+    xev.xclient.send_event = True;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = is_desktop_fullscreen() ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
+    xev.xclient.data.l[1] = x11drv_atom(_NET_WM_STATE_FULLSCREEN);
+    xev.xclient.data.l[2] = 0;
+    xev.xclient.data.l[3] = 1;
+
+    TRACE("action=%li\n", xev.xclient.data.l[0]);
+
+    XSendEvent( display, DefaultRootWindow(display), False,
+                SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+
+    xev.xclient.data.l[1] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_VERT);
+    xev.xclient.data.l[2] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ);
+    XSendEvent( display, DefaultRootWindow(display), False,
+                SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+}
+
 /* Update _NET_WM_FULLSCREEN_MONITORS when _NET_WM_STATE_FULLSCREEN is set to support fullscreen
  * windows spanning multiple monitors */
 static void update_net_wm_fullscreen_monitors( struct x11drv_win_data *data )
@@ -1037,7 +1070,11 @@ void update_net_wm_states( struct x11drv_win_data *data )
     UINT i, style, ex_style, new_state = 0;
 
     if (!data->managed) return;
-    if (data->whole_window == root_window) return;
+    if (data->whole_window == root_window)
+    {
+        update_desktop_fullscreen(data->display);
+        return;
+    }
 
     style = NtUserGetWindowLongW( data->hwnd, GWL_STYLE );
     if (style & WS_MINIMIZE)
@@ -2189,12 +2226,16 @@ HWND create_foreign_window( Display *display, Window xwin )
 }
 
 
-NTSTATUS x11drv_systray_init( void *arg )
+/***********************************************************************
+ *              SystrayDockInit   (X11DRV.@)
+ */
+void X11DRV_SystrayDockInit( HWND hwnd )
 {
     Display *display;
 
-    if (is_virtual_desktop()) return FALSE;
+    if (is_virtual_desktop()) return;
 
+    systray_hwnd = hwnd;
     display = thread_init_display();
     if (DefaultScreen( display ) == 0)
         systray_atom = x11drv_atom(_NET_SYSTEM_TRAY_S0);
@@ -2205,33 +2246,36 @@ NTSTATUS x11drv_systray_init( void *arg )
         systray_atom = XInternAtom( display, systray_buffer, False );
     }
     XSelectInput( display, root_window, StructureNotifyMask );
-
-    return TRUE;
 }
 
 
-NTSTATUS x11drv_systray_clear( void *arg )
+/***********************************************************************
+ *              SystrayDockClear   (X11DRV.@)
+ */
+void X11DRV_SystrayDockClear( HWND hwnd )
 {
-    HWND hwnd = *(HWND*)arg;
     Window win = X11DRV_get_whole_window( hwnd );
     if (win) XClearArea( gdi_display, win, 0, 0, 0, 0, True );
-    return 0;
 }
 
 
-NTSTATUS x11drv_systray_hide( void *arg )
+/***********************************************************************
+ *              SystrayDockRemove   (X11DRV.@)
+ */
+BOOL X11DRV_SystrayDockRemove( HWND hwnd )
 {
-    HWND hwnd = *(HWND*)arg;
     struct x11drv_win_data *data;
+    BOOL ret;
 
     /* make sure we don't try to unmap it, it confuses some systray docks */
     if ((data = get_win_data( hwnd )))
     {
-        if (data->embedded) data->mapped = FALSE;
+        if ((ret = data->embedded)) data->mapped = FALSE;
         release_win_data( data );
+        return ret;
     }
 
-    return 0;
+    return FALSE;
 }
 
 
@@ -2270,46 +2314,23 @@ static void get_systray_visual_info( Display *display, Window systray_window, XV
 }
 
 
-NTSTATUS x11drv_systray_dock( void *arg )
+/***********************************************************************
+ *              SystrayDockInsert   (X11DRV.@)
+ */
+BOOL X11DRV_SystrayDockInsert( HWND hwnd, UINT cx, UINT cy, void *icon )
 {
-    struct systray_dock_params *params = arg;
+    Display *display = thread_init_display();
     Window systray_window, window;
-    Display *display;
     XEvent ev;
-    XSetWindowAttributes attr;
     XVisualInfo visual;
     struct x11drv_win_data *data;
-    UNICODE_STRING class_name;
-    BOOL layered;
-    HWND hwnd;
 
-    static const WCHAR icon_classname[] =
-        {'_','_','w','i','n','e','x','1','1','_','t','r','a','y','_','i','c','o','n',0};
-
-    if (params->event_handle)
-    {
-        XClientMessageEvent *event = (XClientMessageEvent *)(UINT_PTR)params->event_handle;
-        display = event->display;
-        systray_window = event->data.l[2];
-    }
-    else
-    {
-        display = thread_init_display();
-        if (!(systray_window = get_systray_selection_owner( display ))) return STATUS_UNSUCCESSFUL;
-    }
+    if (!(systray_window = get_systray_selection_owner( display ))) return FALSE;
 
     get_systray_visual_info( display, systray_window, &visual );
 
-    *params->layered = layered = (visual.depth == 32);
-
-    RtlInitUnicodeString( &class_name, icon_classname );
-    hwnd = NtUserCreateWindowEx( layered ? WS_EX_LAYERED : 0, &class_name, &class_name, NULL,
-                                 WS_CLIPSIBLINGS | WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
-                                 params->cx, params->cy, NULL, 0, NULL, params->icon, 0,
-                                 NULL, 0, FALSE );
-
-    if (!(data = get_win_data( hwnd ))) return STATUS_UNSUCCESSFUL;
-    if (layered) set_window_visual( data, &visual, TRUE );
+    if (!(data = get_win_data( hwnd ))) return FALSE;
+    set_window_visual( data, &visual, TRUE );
     make_window_embedded( data );
     window = data->whole_window;
     release_win_data( data );
@@ -2330,19 +2351,7 @@ NTSTATUS x11drv_systray_dock( void *arg )
     ev.xclient.data.l[4] = 0;
     XSendEvent( display, systray_window, False, NoEventMask, &ev );
 
-    if (!layered)
-    {
-        attr.background_pixmap = ParentRelative;
-        attr.bit_gravity = ForgetGravity;
-        XChangeWindowAttributes( display, window, CWBackPixmap | CWBitGravity, &attr );
-    }
-    else
-    {
-        /* force repainig */
-        send_message( hwnd, WM_SIZE, SIZE_RESTORED, MAKELONG( params->cx, params->cy ));
-    }
-
-    return STATUS_SUCCESS;
+    return TRUE;
 }
 
 

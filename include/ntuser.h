@@ -23,6 +23,7 @@
 #include <wingdi.h>
 #include <imm.h>
 #include <immdev.h>
+#include <shellapi.h>
 #include <winternl.h>
 
 #ifndef W32KAPI
@@ -314,6 +315,7 @@ enum
     NtUserSpyEnter            = 0x0303,
     NtUserSpyExit             = 0x0304,
     NtUserImeDriverCall       = 0x0305,
+    NtUserSystemTrayCall      = 0x0306,
 };
 
 /* NtUserThunkedMenuItemInfo codes */
@@ -486,10 +488,10 @@ enum wine_internal_message
     WM_WINE_SETACTIVEWINDOW,
     WM_WINE_KEYBOARD_LL_HOOK,
     WM_WINE_MOUSE_LL_HOOK,
-    WM_WINE_CLIPCURSOR,
-    WM_WINE_SETCURSOR,
     WM_WINE_UPDATEWINDOWSTATE,
     WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
+    WM_WINE_CLIPCURSOR = 0x80001ff0, /* internal driver notification messages */
+    WM_WINE_SETCURSOR,
     WM_WINE_LAST_DRIVER_MSG = 0x80001fff
 };
 
@@ -517,6 +519,17 @@ struct ime_driver_call_params
     HIMC himc;
     const BYTE *state;
     COMPOSITIONSTRING *compstr;
+};
+
+/* NtUserSystemTrayCall calls */
+enum wine_systray_call
+{
+    WINE_SYSTRAY_NOTIFY_ICON,
+    WINE_SYSTRAY_CLEANUP_ICONS,
+    WINE_SYSTRAY_DOCK_INIT,
+    WINE_SYSTRAY_DOCK_INSERT,
+    WINE_SYSTRAY_DOCK_CLEAR,
+    WINE_SYSTRAY_DOCK_REMOVE,
 };
 
 #define WM_SYSTIMER  0x0118

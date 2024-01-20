@@ -125,7 +125,7 @@ static int env_get_index(const char *name)
     len = strlen(name);
     for (i = 0; MSVCRT__environ[i]; i++)
     {
-        if (!strncmp(name, MSVCRT__environ[i], len) && MSVCRT__environ[i][len] == '=')
+        if (!strnicmp(name, MSVCRT__environ[i], len) && MSVCRT__environ[i][len] == '=')
             return i;
     }
     return i;
@@ -138,7 +138,7 @@ static int wenv_get_index(const wchar_t *name)
     len = wcslen(name);
     for (i = 0; MSVCRT__wenviron[i]; i++)
     {
-        if (!wcsncmp(name, MSVCRT__wenviron[i], len) && MSVCRT__wenviron[i][len] == '=')
+        if (!wcsnicmp(name, MSVCRT__wenviron[i], len) && MSVCRT__wenviron[i][len] == '=')
             return i;
     }
     return i;
@@ -155,6 +155,7 @@ static int env_set(char **env, wchar_t **wenv)
             GetLastError() != ERROR_ENVVAR_NOT_FOUND)
         return -1;
 
+    if (env_init(FALSE, TRUE)) return -1;
     *eq = 0;
     idx = env_get_index(*env);
     *eq = '=';
@@ -180,6 +181,8 @@ static int env_set(char **env, wchar_t **wenv)
     }
 
     if (!MSVCRT__wenviron) return 0;
+    if (MSVCRT__wenviron == MSVCRT___winitenv)
+        if (env_init(TRUE, TRUE)) return -1;
     idx = wenv_get_index(*wenv);
     *weq = '=';
     if (!weq[1])
@@ -263,11 +266,6 @@ static int putenv_helper(const char *name, const char *val, const char *eq)
     wchar_t *wenv;
     char *env;
     int r;
-
-    _lock(_ENV_LOCK);
-    r = env_init(FALSE, TRUE);
-    _unlock(_ENV_LOCK);
-    if (r) return -1;
 
     if (eq)
     {
