@@ -51,10 +51,6 @@
 #ifdef HAVE_SYS_UCONTEXT_H
 # include <sys/ucontext.h>
 #endif
-#ifdef HAVE_LIBUNWIND
-# define UNW_LOCAL_ONLY
-# include <libunwind.h>
-#endif
 #ifdef HAVE_LINK_H
 # include <link.h>
 #endif
@@ -259,8 +255,6 @@ static BOOL is_inside_syscall( ucontext_t *sigcontext )
     return ((char *)SP_sig(sigcontext) >= (char *)ntdll_get_thread_data()->kernel_stack &&
             (char *)SP_sig(sigcontext) <= (char *)arm_thread_data()->syscall_frame);
 }
-
-extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, void *dispatcher );
 
 struct exidx_entry
 {
@@ -555,14 +549,12 @@ static NTSTATUS ehabi_virtual_unwind( UINT ip, DWORD *frame, CONTEXT *context,
     *handler      = NULL; /* personality */
     *handler_data = NULL; /* lsda */
 
-    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
     if (!set_pc)
+    {
         context->Pc = context->Lr;
-
-    /* There's no need to check for raise_func_trampoline and manually restore
-     * Lr separately from Pc like with libunwind; the EHABI unwind info
-     * describes how both of them are restored separately, and as long as
-     * the unwind info restored Pc, it doesn't have to be set from Lr. */
+        context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
+    }
+    else context->ContextFlags &= ~CONTEXT_UNWOUND_TO_CALL;
 
     TRACE( "next function pc=%08lx\n", context->Pc );
     TRACE("  r0=%08lx  r1=%08lx  r2=%08lx  r3=%08lx\n",
@@ -672,94 +664,6 @@ static const struct exidx_entry *find_exidx_entry( void *ip )
 }
 #endif
 
-#ifdef HAVE_LIBUNWIND
-static NTSTATUS libunwind_virtual_unwind( DWORD ip, DWORD *frame, CONTEXT *context,
-                                          PEXCEPTION_ROUTINE *handler, void **handler_data )
-{
-    unw_context_t unw_context;
-    unw_cursor_t cursor;
-    unw_proc_info_t info;
-    int rc, i;
-
-    for (i = 0; i <= 12; i++)
-        unw_context.regs[i] = (&context->R0)[i];
-    unw_context.regs[13] = context->Sp;
-    unw_context.regs[14] = context->Lr;
-    unw_context.regs[15] = context->Pc;
-    rc = unw_init_local( &cursor, &unw_context );
-
-    if (rc != UNW_ESUCCESS)
-    {
-        WARN( "setup failed: %d\n", rc );
-        return STATUS_INVALID_DISPOSITION;
-    }
-    rc = unw_get_proc_info( &cursor, &info );
-    if (UNW_ENOINFO < 0) rc = -rc;  /* LLVM libunwind has negative error codes */
-    if (rc != UNW_ESUCCESS && rc != -UNW_ENOINFO)
-    {
-        WARN( "failed to get info: %d\n", rc );
-        return STATUS_INVALID_DISPOSITION;
-    }
-    if (rc == -UNW_ENOINFO || ip < info.start_ip || ip > info.end_ip)
-    {
-        NTSTATUS status = context->Pc != context->Lr ?
-                          STATUS_SUCCESS : STATUS_INVALID_DISPOSITION;
-        TRACE( "no info found for %x ip %x-%x, %s\n",
-               ip, info.start_ip, info.end_ip, status == STATUS_SUCCESS ?
-               "assuming leaf function" : "error, stuck" );
-        *handler = NULL;
-        *frame = context->Sp;
-        context->Pc = context->Lr;
-        context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
-        return status;
-    }
-
-    TRACE( "ip %#x function %#lx-%#lx personality %#lx lsda %#lx fde %#lx\n",
-           ip, (unsigned long)info.start_ip, (unsigned long)info.end_ip, (unsigned long)info.handler,
-           (unsigned long)info.lsda, (unsigned long)info.unwind_info );
-
-    rc = unw_step( &cursor );
-    if (rc < 0)
-    {
-        WARN( "failed to unwind: %d %d\n", rc, UNW_ENOINFO );
-        return STATUS_INVALID_DISPOSITION;
-    }
-
-    *handler      = (void *)info.handler;
-    *handler_data = (void *)info.lsda;
-    *frame        = context->Sp;
-
-    for (i = 0; i <= 12; i++)
-        unw_get_reg( &cursor, UNW_ARM_R0 + i, (unw_word_t *)&(&context->R0)[i] );
-    unw_get_reg( &cursor, UNW_ARM_R13, (unw_word_t *)&context->Sp );
-    unw_get_reg( &cursor, UNW_ARM_R14, (unw_word_t *)&context->Lr );
-    unw_get_reg( &cursor, UNW_REG_IP,  (unw_word_t *)&context->Pc );
-    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
-
-    if ((info.start_ip & ~(unw_word_t)1) ==
-        ((unw_word_t)raise_func_trampoline & ~(unw_word_t)1)) {
-        /* raise_func_trampoline stores the original Lr at the bottom of the
-         * stack. The unwinder normally can't restore both Pc and Lr to
-         * individual values, thus do that manually here.
-         * (The function we unwind to might be a leaf function that hasn't
-         * backed up its own original Lr value on the stack.) */
-        const DWORD *orig_lr = (const DWORD *) *frame;
-        context->Lr = *orig_lr;
-    }
-
-    TRACE( "next function pc=%08lx%s\n", context->Pc, rc ? "" : " (last frame)" );
-    TRACE("  r0=%08lx  r1=%08lx  r2=%08lx  r3=%08lx\n",
-          context->R0, context->R1, context->R2, context->R3 );
-    TRACE("  r4=%08lx  r5=%08lx  r6=%08lx  r7=%08lx\n",
-          context->R4, context->R5, context->R6, context->R7 );
-    TRACE("  r8=%08lx  r9=%08lx r10=%08lx r11=%08lx\n",
-          context->R8, context->R9, context->R10, context->R11 );
-    TRACE(" r12=%08lx  sp=%08lx  lr=%08lx  pc=%08lx\n",
-          context->R12, context->Sp, context->Lr, context->Pc );
-    return STATUS_SUCCESS;
-}
-#endif
-
 /***********************************************************************
  *           unwind_builtin_dll
  */
@@ -771,16 +675,23 @@ NTSTATUS unwind_builtin_dll( void *args )
     DWORD ip = context->Pc - (dispatch->ControlPcIsUnwound ? 2 : 0);
 #ifdef linux
     const struct exidx_entry *entry = find_exidx_entry( (void *)ip );
+    NTSTATUS status;
 
     if (entry)
         return ehabi_virtual_unwind( ip, &dispatch->EstablisherFrame, context, entry,
                                      &dispatch->LanguageHandler, &dispatch->HandlerData );
-#endif
-#ifdef HAVE_LIBUNWIND
-    return libunwind_virtual_unwind( ip, &dispatch->EstablisherFrame, context,
-                                     &dispatch->LanguageHandler, &dispatch->HandlerData );
+
+    status = context->Pc != context->Lr ?
+             STATUS_SUCCESS : STATUS_INVALID_DISPOSITION;
+    TRACE( "no info found for %lx, %s\n", ip, status == STATUS_SUCCESS ?
+           "assuming leaf function" : "error, stuck" );
+    dispatch->LanguageHandler = NULL;
+    dispatch->EstablisherFrame = context->Sp;
+    context->Pc = context->Lr;
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
+    return status;
 #else
-    ERR("libunwind not available, unable to unwind\n");
+    ERR("ARM EHABI unwinding available, unable to unwind\n");
     return STATUS_INVALID_DISPOSITION;
 #endif
 }
@@ -1056,39 +967,48 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
 
 
 /***********************************************************************
- *           setup_exception
- *
- * Modify the signal context to call the exception raise function.
+ *           setup_raise_exception
  */
-static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
+static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     struct exc_stack_layout *stack;
     void *stack_ptr = (void *)(SP_sig(sigcontext) & ~7);
-    CONTEXT context;
     NTSTATUS status;
 
-    rec->ExceptionAddress = (void *)PC_sig(sigcontext);
-    save_context( &context, sigcontext );
-
-    status = send_debug_event( rec, &context, TRUE );
+    status = send_debug_event( rec, context, TRUE );
     if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
     {
-        restore_context( &context, sigcontext );
+        restore_context( context, sigcontext );
         return;
     }
 
     /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
-    if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context.Pc -= 2;
+    if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context->Pc -= 2;
 
     stack = virtual_setup_exception( stack_ptr, sizeof(*stack), rec );
     stack->rec = *rec;
-    stack->context = context;
+    stack->context = *context;
 
     /* now modify the sigcontext to return to the raise function */
     SP_sig(sigcontext) = (DWORD)stack;
     PC_sig(sigcontext) = (DWORD)pKiUserExceptionDispatcher;
     if (PC_sig(sigcontext) & 1) CPSR_sig(sigcontext) |= 0x20;
     else CPSR_sig(sigcontext) &= ~0x20;
+}
+
+
+/***********************************************************************
+ *           setup_exception
+ *
+ * Modify the signal context to call the exception raise function.
+ */
+static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
+{
+    CONTEXT context;
+
+    rec->ExceptionAddress = (void *)PC_sig(sigcontext);
+    save_context( &context, sigcontext );
+    setup_raise_exception( sigcontext, rec, &context );
 }
 
 
@@ -1132,7 +1052,10 @@ NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR a
  */
 void call_raise_user_exception_dispatcher(void)
 {
-    arm_thread_data()->syscall_frame->pc = (DWORD)pKiRaiseUserExceptionDispatcher;
+    struct syscall_frame *frame = arm_thread_data()->syscall_frame;
+
+    frame->sp += 16;
+    frame->pc = (DWORD)pKiRaiseUserExceptionDispatcher;
 }
 
 
@@ -1309,7 +1232,7 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
         TRACE( "returning to handler\n" );
         REGn_sig(0, context) = (DWORD)ntdll_get_thread_data()->jmp_buf;
         REGn_sig(1, context) = 1;
-        PC_sig(context)      = (DWORD)__wine_longjmp;
+        PC_sig(context)      = (DWORD)longjmp;
         ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
@@ -1332,6 +1255,10 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     EXCEPTION_RECORD rec = { 0 };
     ucontext_t *context = sigcontext;
+    CONTEXT ctx;
+
+    rec.ExceptionAddress = (void *)PC_sig(context);
+    save_context( &ctx, sigcontext );
 
     switch (get_trap_code(signal, context))
     {
@@ -1340,10 +1267,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         {
         case 0xfb:  /* __fastfail */
         {
-            CONTEXT ctx;
-            save_context( &ctx, sigcontext );
             rec.ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
-            rec.ExceptionAddress = (void *)ctx.Pc;
             rec.ExceptionFlags = EH_NONCONTINUABLE;
             rec.NumberParameters = 1;
             rec.ExceptionInformation[0] = ctx.R0;
@@ -1351,7 +1275,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             return;
         }
         case 0xfe:  /* breakpoint */
-            PC_sig(context) += 2;  /* skip the instruction */
+            ctx.Pc += 2;  /* skip the breakpoint instruction */
             rec.ExceptionCode = EXCEPTION_BREAKPOINT;
             rec.NumberParameters = 1;
             break;
@@ -1383,7 +1307,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         break;
     }
     if (handle_syscall_fault( context, &rec )) return;
-    setup_exception( context, &rec );
+    setup_raise_exception( context, &rec, &ctx );
 }
 
 
@@ -1395,6 +1319,11 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     EXCEPTION_RECORD rec = { 0 };
+    ucontext_t *context = sigcontext;
+    CONTEXT ctx;
+
+    rec.ExceptionAddress = (void *)PC_sig(context);
+    save_context( &ctx, sigcontext );
 
     switch (siginfo->si_code)
     {
@@ -1403,11 +1332,12 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         break;
     case TRAP_BRKPT:
     default:
+        ctx.Pc += 2;  /* skip the breakpoint instruction */
         rec.ExceptionCode = EXCEPTION_BREAKPOINT;
         rec.NumberParameters = 1;
         break;
     }
-    setup_exception( sigcontext, &rec );
+    setup_raise_exception( sigcontext, &rec, &ctx );
 }
 
 
@@ -1681,8 +1611,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "ldr r1, [r2, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
                    "add r0, r1, #0x10\n\t"
                    "stm r0, {r4-r12,lr}\n\t"
-                   "add r0, sp, #0x10\n\t"
-                   "str r0, [r1, #0x38]\n\t"
+                   "str sp, [r1, #0x38]\n\t"
                    "str r3, [r1, #0x3c]\n\t"
                    "mrs r0, CPSR\n\t"
                    "bfi r0, lr, #5, #1\n\t"         /* set thumb bit */
@@ -1755,7 +1684,6 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
 
                    "5:\tmovw r0, #0x000d\n\t" /* STATUS_INVALID_PARAMETER */
                    "movt r0, #0xc000\n\t"
-                   "add sp, sp, #0x10\n\t"
                    "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
                    ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
@@ -1810,41 +1738,5 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    "add r8, r8, #0x10\n\t"
                    "ldm r8, {r4-r12,pc}\n\t"
                    "1:\tb " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
-
-
-/***********************************************************************
- *           __wine_setjmpex
- */
-__ASM_GLOBAL_FUNC( __wine_setjmpex,
-                   __ASM_EHABI(".cantunwind\n\t")
-                   "stm r0, {r1,r4-r11}\n"         /* jmp_buf->Frame,R4..R11 */
-                   "str sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
-                   "str lr, [r0, #0x28]\n\t"       /* jmp_buf->Pc */
-#ifndef __SOFTFP__
-                   "vmrs r2, fpscr\n\t"
-                   "str r2, [r0, #0x2c]\n\t"       /* jmp_buf->Fpscr */
-                   "add r0, r0, #0x30\n\t"
-                   "vstm r0, {d8-d15}\n\t"         /* jmp_buf->D[0..7] */
-#endif
-                   "mov r0, #0\n\t"
-                   "bx lr" )
-
-
-/***********************************************************************
- *           __wine_longjmp
- */
-__ASM_GLOBAL_FUNC( __wine_longjmp,
-                   __ASM_EHABI(".cantunwind\n\t")
-                   "ldm r0, {r3-r11}\n\t"          /* jmp_buf->Frame,R4..R11 */
-                   "ldr sp, [r0, #0x24]\n\t"       /* jmp_buf->Sp */
-                   "ldr r2, [r0, #0x28]\n\t"       /* jmp_buf->Pc */
-#ifndef __SOFTFP__
-                   "ldr r3, [r0, #0x2c]\n\t"       /* jmp_buf->Fpscr */
-                   "vmsr fpscr, r3\n\t"
-                   "add r0, r0, #0x30\n\t"
-                   "vldm r0, {d8-d15}\n\t"         /* jmp_buf->D[0..7] */
-#endif
-                   "mov r0, r1\n\t"                /* retval */
-                   "bx r2" )
 
 #endif  /* __arm__ */

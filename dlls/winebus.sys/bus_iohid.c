@@ -271,11 +271,21 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 {
     struct device_desc desc =
     {
-        .input = -1,
+        .input = -1, .is_hidraw = TRUE,
         .serialnumber = {'0','0','0','0',0},
     };
     struct iohid_device *impl;
     CFStringRef str;
+    UINT usage_page, usage;
+
+    usage_page = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDPrimaryUsagePageKey)));
+    usage = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDPrimaryUsageKey)));
+
+    if (usage_page == HID_USAGE_PAGE_GENERIC && (usage == HID_USAGE_GENERIC_MOUSE || usage == HID_USAGE_GENERIC_KEYBOARD))
+    {
+        TRACE("Ignoring mouse / keyboard device\n");
+        return;
+    }
 
     desc.vid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVendorIDKey)));
     desc.pid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductIDKey)));

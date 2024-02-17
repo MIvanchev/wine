@@ -31,7 +31,7 @@
 #define WIN32_NO_STATUS
 #include "ntgdi_private.h"
 #include "ntuser_private.h"
-#include "devpropdef.h"
+#include "winreg.h"
 #include "cfgmgr32.h"
 #include "d3dkmdt.h"
 #include "wine/wingdi16.h"
@@ -1251,8 +1251,8 @@ static void add_gpu( const struct gdi_gpu *gpu, void *param )
 
     if (!ctx->mutex)
     {
-        ctx->mutex = get_display_device_init_mutex();
         pthread_mutex_lock( &display_lock );
+        ctx->mutex = get_display_device_init_mutex();
         prepare_devices();
     }
 
@@ -1717,8 +1717,8 @@ static BOOL update_display_cache_from_registry(void)
 
     if (key.LastWriteTime.QuadPart <= last_query_display_time) return TRUE;
 
-    mutex = get_display_device_init_mutex();
     pthread_mutex_lock( &display_lock );
+    mutex = get_display_device_init_mutex();
 
     clear_display_devices();
 
@@ -3435,18 +3435,17 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
     params.proc = proc;
     params.hdc = hdc;
     params.lparam = lparam;
-    for (i = 0; i < count; i++)
+    for (i = 0; i < count && ret; i++)
     {
         void *ret_ptr;
         ULONG ret_len;
+        NTSTATUS status;
         params.monitor = enum_info[i].handle;
         params.rect = enum_info[i].rect;
-        if (!KeUserModeCallback( NtUserCallEnumDisplayMonitor, &params, sizeof(params),
-                                 &ret_ptr, &ret_len ))
-        {
-            ret = FALSE;
-            break;
-        }
+        status = KeUserModeCallback( NtUserCallEnumDisplayMonitor, &params, sizeof(params),
+                                     &ret_ptr, &ret_len );
+        if (!status && ret_len == sizeof(ret)) ret = *(BOOL *)ret_ptr;
+        else ret = FALSE;
     }
     if (enum_info != enum_buf) free( enum_info );
     return ret;
@@ -6121,7 +6120,7 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
     if (IS_INTRESOURCE(colors)) return FALSE; /* stupid app passes a color instead of an array */
 
     for (i = 0; i < count; i++)
-        if (colors[i] >= 0 && colors[i] <= ARRAY_SIZE( system_colors ))
+        if (colors[i] >= 0 && colors[i] < ARRAY_SIZE( system_colors ))
             set_entry( &system_colors[colors[i]], values[i], 0, 0 );
 
     /* Send WM_SYSCOLORCHANGE message to all windows */

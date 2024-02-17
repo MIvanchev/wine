@@ -931,11 +931,7 @@ static NTSTATUS create_logical_proc_info(void)
             unsigned int phys_core = 0;
             ULONG_PTR thread_mask = 0;
 
-            if (i > 8 * sizeof(ULONG_PTR))
-            {
-                FIXME("skipping logical processor %d\n", i);
-                continue;
-            }
+            if (i > 8 * sizeof(ULONG_PTR)) break;
 
             snprintf(name, sizeof(name), core_info, i, "physical_package_id");
             f = fopen(name, "r");
@@ -3389,24 +3385,24 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
             ret = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        for (i = 0; i < supported_machines_count; i++)
+        memset( machines, 0, len );
+
+        /* native machine */
+        machines[0].Machine = supported_machines[0];
+        machines[0].UserMode = 1;
+        machines[0].KernelMode = 1;
+        machines[0].Native = 1;
+        machines[0].Process = (supported_machines[0] == machine || is_machine_64bit( machine ));
+        machines[0].WoW64Container = 0;
+        machines[0].ReservedZero0 = 0;
+        /* wow64 machines */
+        for (i = 1; i < supported_machines_count; i++)
         {
             machines[i].Machine = supported_machines[i];
             machines[i].UserMode = 1;
-            machines[i].KernelMode = machines[i].Native = i == 0;
             machines[i].Process = supported_machines[i] == machine;
-            machines[i].WoW64Container = 0;
-            machines[i].ReservedZero0 = 0;
+            machines[i].WoW64Container = 1;
         }
-
-        machines[i].Machine = 0;
-        machines[i].KernelMode = 0;
-        machines[i].UserMode = 0;
-        machines[i].Native = 0;
-        machines[i].Process = 0;
-        machines[i].WoW64Container = 0;
-        machines[i].ReservedZero0 = 0;
-
         ret = STATUS_SUCCESS;
         break;
     }
@@ -3461,7 +3457,8 @@ NTSTATUS WINAPI NtSystemDebugControl( SYSDBG_COMMAND command, void *in_buff, ULO
 {
     FIXME( "(%d, %p, %d, %p, %d, %p), stub\n",
            command, in_buff, (int)in_len, out_buff, (int)out_len, retlen );
-    return STATUS_NOT_IMPLEMENTED;
+
+    return STATUS_DEBUGGER_INACTIVE;
 }
 
 

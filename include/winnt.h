@@ -2060,6 +2060,7 @@ typedef void (CALLBACK *PTERMINATION_HANDLER)(BOOLEAN,DWORD64);
 #endif /* __aarch64__ */
 
 NTSYSAPI void    NTAPI RtlRaiseException(struct _EXCEPTION_RECORD*);
+NTSYSAPI void    CDECL RtlRestoreContext(CONTEXT*,struct _EXCEPTION_RECORD*);
 NTSYSAPI void    NTAPI RtlUnwind(void*,void*,struct _EXCEPTION_RECORD*,void*);
 
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
@@ -5366,6 +5367,7 @@ typedef struct _QUOTA_LIMITS_EX {
 
 #define DUPLICATE_CLOSE_SOURCE     0x00000001
 #define DUPLICATE_SAME_ACCESS      0x00000002
+#define DUPLICATE_SAME_ATTRIBUTES  0x00000004
 #ifdef __WINESRC__
 #define DUPLICATE_MAKE_GLOBAL      0x80000000  /* Not a Windows flag */
 #endif
@@ -5915,6 +5917,63 @@ typedef struct _TAPE_GET_MEDIA_PARAMETERS {
 			      )
 /* ------------------------------ end registry ------------------------------ */
 
+#define DEVICEFAMILYINFOENUM_UAP                    0x00
+#define DEVICEFAMILYINFOENUM_WINDOWS_8X             0x01
+#define DEVICEFAMILYINFOENUM_WINDOWS_PHONE_8X       0x02
+#define DEVICEFAMILYINFOENUM_DESKTOP                0x03
+#define DEVICEFAMILYINFOENUM_MOBILE                 0x04
+#define DEVICEFAMILYINFOENUM_XBOX                   0x05
+#define DEVICEFAMILYINFOENUM_TEAM                   0x06
+#define DEVICEFAMILYINFOENUM_IOT                    0x07
+#define DEVICEFAMILYINFOENUM_IOT_HEADLESS           0x08
+#define DEVICEFAMILYINFOENUM_SERVER                 0x09
+#define DEVICEFAMILYINFOENUM_HOLOGRAPHIC            0x0A
+#define DEVICEFAMILYINFOENUM_XBOXSRA                0x0B
+#define DEVICEFAMILYINFOENUM_XBOXERA                0x0C
+#define DEVICEFAMILYINFOENUM_SERVER_NANO            0x0D
+#define DEVICEFAMILYINFOENUM_8828080                0x0E
+#define DEVICEFAMILYINFOENUM_7067329                0x0F
+#define DEVICEFAMILYINFOENUM_WINDOWS_CORE           0x10
+#define DEVICEFAMILYINFOENUM_WINDOWS_CORE_HEADLESS  0x11
+#define DEVICEFAMILYINFOENUM_MAX                    0x11
+
+#define DEVICEFAMILYDEVICEFORM_UNKNOWN                0x00
+#define DEVICEFAMILYDEVICEFORM_PHONE                  0x01
+#define DEVICEFAMILYDEVICEFORM_TABLET                 0x02
+#define DEVICEFAMILYDEVICEFORM_DESKTOP                0x03
+#define DEVICEFAMILYDEVICEFORM_NOTEBOOK               0x04
+#define DEVICEFAMILYDEVICEFORM_CONVERTIBLE            0x05
+#define DEVICEFAMILYDEVICEFORM_DETACHABLE             0x06
+#define DEVICEFAMILYDEVICEFORM_ALLINONE               0x07
+#define DEVICEFAMILYDEVICEFORM_STICKPC                0x08
+#define DEVICEFAMILYDEVICEFORM_PUCK                   0x09
+#define DEVICEFAMILYDEVICEFORM_LARGESCREEN            0x0A
+#define DEVICEFAMILYDEVICEFORM_HMD                    0x0B
+#define DEVICEFAMILYDEVICEFORM_INDUSTRY_HANDHELD      0x0C
+#define DEVICEFAMILYDEVICEFORM_INDUSTRY_TABLET        0x0D
+#define DEVICEFAMILYDEVICEFORM_BANKING                0x0E
+#define DEVICEFAMILYDEVICEFORM_BUILDING_AUTOMATION    0x0F
+#define DEVICEFAMILYDEVICEFORM_DIGITAL_SIGNAGE        0x10
+#define DEVICEFAMILYDEVICEFORM_GAMING                 0x11
+#define DEVICEFAMILYDEVICEFORM_HOME_AUTOMATION        0x12
+#define DEVICEFAMILYDEVICEFORM_INDUSTRIAL_AUTOMATION  0x13
+#define DEVICEFAMILYDEVICEFORM_KIOSK                  0x14
+#define DEVICEFAMILYDEVICEFORM_MAKER_BOARD            0x15
+#define DEVICEFAMILYDEVICEFORM_MEDICAL                0x16
+#define DEVICEFAMILYDEVICEFORM_NETWORKING             0x17
+#define DEVICEFAMILYDEVICEFORM_POINT_OF_SERVICE       0x18
+#define DEVICEFAMILYDEVICEFORM_PRINTING               0x19
+#define DEVICEFAMILYDEVICEFORM_THIN_CLIENT            0x1A
+#define DEVICEFAMILYDEVICEFORM_TOY                    0x1B
+#define DEVICEFAMILYDEVICEFORM_VENDING                0x1C
+#define DEVICEFAMILYDEVICEFORM_INDUSTRY_OTHER         0x1D
+#define DEVICEFAMILYDEVICEFORM_XBOX_ONE               0x1E
+#define DEVICEFAMILYDEVICEFORM_XBOX_ONE_S             0x1F
+#define DEVICEFAMILYDEVICEFORM_XBOX_ONE_X             0x20
+#define DEVICEFAMILYDEVICEFORM_XBOX_ONE_X_DEVKIT      0x21
+#define DEVICEFAMILYDEVICEFORM_MAX                    0x21
+
+NTSYSAPI void WINAPI RtlGetDeviceFamilyInfoEnum(ULONGLONG*,DWORD*,DWORD*);
 
 #define EVENTLOG_SUCCESS                0x0000
 #define EVENTLOG_ERROR_TYPE             0x0001
@@ -6745,6 +6804,10 @@ typedef enum _FIRMWARE_TYPE
     FirmwareTypeMax
 } FIRMWARE_TYPE, *PFIRMWARE_TYPE;
 
+#ifndef __has_builtin
+# define __has_builtin(x) 0
+#endif
+
 /* Intrinsic functions */
 
 #define BitScanForward _BitScanForward
@@ -6809,63 +6872,73 @@ long      _InterlockedOr(long volatile *,long);
 long      _InterlockedXor(long volatile *,long);
 DECLSPEC_NORETURN void __fastfail(unsigned int);
 
-#ifndef __i386__
-
+#if !defined(__i386__) || __has_builtin(_InterlockedAnd64)
 #pragma intrinsic(_InterlockedAnd64)
-#pragma intrinsic(_InterlockedDecrement64)
-#pragma intrinsic(_InterlockedExchangeAdd64)
-#pragma intrinsic(_InterlockedIncrement64)
-#pragma intrinsic(_InterlockedOr64)
-#pragma intrinsic(_InterlockedXor64)
-
 __int64   _InterlockedAnd64(__int64 volatile *, __int64);
-__int64   _InterlockedDecrement64(__int64 volatile *);
-__int64   _InterlockedExchangeAdd64(__int64 volatile *, __int64);
-__int64   _InterlockedIncrement64(__int64 volatile *);
-__int64   _InterlockedOr64(__int64 volatile *, __int64);
-__int64   _InterlockedXor64(__int64 volatile *, __int64);
-
 #else
-
 static FORCEINLINE __int64 InterlockedAnd64( __int64 volatile *dest, __int64 val )
 {
     __int64 prev;
     do prev = *dest; while (InterlockedCompareExchange64( dest, prev & val, prev ) != prev);
     return prev;
 }
+#endif
 
+#if !defined(__i386__) || __has_builtin(_InterlockedDecrement64)
+#pragma intrinsic(_InterlockedDecrement64)
+__int64   _InterlockedDecrement64(__int64 volatile *);
+#else
+static FORCEINLINE __int64 InterlockedDecrement64( __int64 volatile *dest )
+{
+    return InterlockedExchangeAdd64( dest, -1 ) - 1;
+}
+#endif
+
+#if !defined(__i386__) || __has_builtin(_InterlockedExchangeAdd64)
+#pragma intrinsic(_InterlockedExchangeAdd64)
+__int64   _InterlockedExchangeAdd64(__int64 volatile *, __int64);
+#else
 static FORCEINLINE __int64 InterlockedExchangeAdd64( __int64 volatile *dest, __int64 val )
 {
     __int64 prev;
     do prev = *dest; while (InterlockedCompareExchange64( dest, prev + val, prev ) != prev);
     return prev;
 }
+#endif
 
+#if !defined(__i386__) || __has_builtin(_InterlockedIncrement64)
+#pragma intrinsic(_InterlockedIncrement64)
+__int64   _InterlockedIncrement64(__int64 volatile *);
+#else
 static FORCEINLINE __int64 InterlockedIncrement64( __int64 volatile *dest )
 {
     return InterlockedExchangeAdd64( dest, 1 ) + 1;
 }
+#endif
 
-static FORCEINLINE __int64 InterlockedDecrement64( __int64 volatile *dest )
-{
-    return InterlockedExchangeAdd64( dest, -1 ) - 1;
-}
-
+#if !defined(__i386__) || __has_builtin(_InterlockedOr64)
+#pragma intrinsic(_InterlockedOr64)
+__int64   _InterlockedOr64(__int64 volatile *, __int64);
+#else
 static FORCEINLINE __int64 InterlockedOr64( __int64 volatile *dest, __int64 val )
 {
     __int64 prev;
     do prev = *dest; while (InterlockedCompareExchange64( dest, prev | val, prev ) != prev);
     return prev;
 }
+#endif
 
+#if !defined(__i386__) || __has_builtin(_InterlockedXor64)
+#pragma intrinsic(_InterlockedXor64)
+__int64   _InterlockedXor64(__int64 volatile *, __int64);
+#else
 static FORCEINLINE __int64 InterlockedXor64( __int64 volatile *dest, __int64 val )
 {
     __int64 prev;
     do prev = *dest; while (InterlockedCompareExchange64( dest, prev ^ val, prev ) != prev);
     return prev;
 }
-
-#endif /* __i386__ */
+#endif
 
 static FORCEINLINE long InterlockedAdd( long volatile *dest, long val )
 {
@@ -7170,7 +7243,7 @@ static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
 
 #define InterlockedCompareExchange128 _InterlockedCompareExchange128
 
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(_MSC_VER) && (!defined(__clang__) || !defined(__aarch64__) || __has_builtin(_InterlockedCompareExchange128))
 
 #pragma intrinsic(_InterlockedCompareExchange128)
 unsigned char _InterlockedCompareExchange128(volatile __int64 *, __int64, __int64, __int64 *);
