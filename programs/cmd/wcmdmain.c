@@ -2326,6 +2326,7 @@ WCHAR *WCMD_ReadAndParseLine(const WCHAR *optionalcmd, CMD_LIST **output, HANDLE
             } else break;
           }
 
+          extraData = WCMD_skip_leading_spaces(extraData);
         } while (*extraData == 0x00);
         curPos = extraSpace;
 
@@ -2344,6 +2345,13 @@ WCHAR *WCMD_ReadAndParseLine(const WCHAR *optionalcmd, CMD_LIST **output, HANDLE
         /* Skip repeated 'no echo' characters and whitespace */
         while (*curPos == '@' || *curPos == ' ' || *curPos == '\t') curPos++;
       }
+    }
+
+    if (curDepth > lineCurDepth) {
+        WINE_TRACE("Brackets do not match, error out without executing.\n");
+        WCMD_free_commands(*output);
+        *output = NULL;
+        errorlevel = 255;
     }
 
     /* Dump out the parsed output */
