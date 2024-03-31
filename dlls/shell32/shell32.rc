@@ -95,6 +95,7 @@ BEGIN
 	BEGIN
 	  MENUITEM "C&ut",		FCIDM_SHVIEW_CUT
 	  MENUITEM "&Copy",		FCIDM_SHVIEW_COPY
+	  MENUITEM "&Paste",		FCIDM_SHVIEW_INSERT
 	  MENUITEM SEPARATOR
 	  MENUITEM "Create &Link",	FCIDM_SHVIEW_CREATELINK
 	  MENUITEM "&Delete",		FCIDM_SHVIEW_DELETE
@@ -156,6 +157,8 @@ STRINGTABLE
 	IDS_VIEW_SMALL		"S&mall Icons"
 	IDS_VIEW_LIST		"&List"
 	IDS_VIEW_DETAILS	"&Details"
+
+        IDS_NEW_MENU            "Ne&w"
 
         IDS_VERB_EXPLORE        "E&xplore"
         IDS_VERB_OPEN           "&Open"
@@ -232,6 +235,8 @@ the folder?"
 	IDS_DOWNLOADS               "Downloads"
 
 	IDS_NEWFOLDER		"New Folder"
+
+        IDS_NEW_MENU_FOLDER         "New &Folder"
 
 	IDS_CPANEL_TITLE            "Wine Control Panel"
 	IDS_CPANEL_NAME             "Name"

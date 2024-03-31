@@ -253,7 +253,7 @@
 # @ stub NtLockProductActivationKeys
 # @ stub NtLockRegistryKey
 @ stdcall -syscall NtLockVirtualMemory(long ptr ptr long)
-# @ stub NtMakePermanentObject
+@ stdcall -syscall NtMakePermanentObject(long)
 @ stdcall -syscall NtMakeTemporaryObject(long)
 # @ stub NtMapUserPhysicalPages
 # @ stub NtMapUserPhysicalPagesScatter
@@ -716,7 +716,7 @@
 @ stub RtlGenerate8dot3Name
 @ stdcall RtlGetAce(ptr long ptr)
 @ stdcall RtlGetActiveActivationContext(ptr)
-@ stub RtlGetCallersAddress
+@ stdcall RtlGetCallersAddress(ptr ptr)
 @ stdcall RtlGetCompressionWorkSpaceSize(long ptr ptr)
 @ stdcall RtlGetControlSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetCurrentDirectory_U(long ptr)
@@ -1095,12 +1095,13 @@
 # @ stub RtlValidateUnicodeString
 @ stdcall RtlVerifyVersionInfo(ptr long int64)
 @ stdcall -arch=!i386 RtlVirtualUnwind(long long long ptr ptr ptr ptr ptr)
+@ stdcall -arch=!i386 RtlVirtualUnwind2(long long long ptr ptr ptr ptr ptr ptr ptr ptr ptr long)
 @ stdcall RtlWaitOnAddress(ptr ptr long ptr)
 @ stdcall RtlWakeAddressAll(ptr)
 @ stdcall RtlWakeAddressSingle(ptr)
 @ stdcall RtlWakeAllConditionVariable(ptr)
 @ stdcall RtlWakeConditionVariable(ptr)
-@ stub RtlWalkFrameChain
+@ stdcall RtlWalkFrameChain(ptr long long)
 @ stdcall RtlWalkHeap(long ptr)
 @ stdcall RtlWow64EnableFsRedirection(long)
 @ stdcall RtlWow64EnableFsRedirectionEx(long ptr)
@@ -1301,7 +1302,7 @@
 # @ stub ZwLockProductActivationKeys
 # @ stub ZwLockRegistryKey
 @ stdcall -private -syscall ZwLockVirtualMemory(long ptr ptr long) NtLockVirtualMemory
-# @ stub ZwMakePermanentObject
+@ stdcall -private -syscall ZwMakePermanentObject(long) NtMakePermanentObject
 @ stdcall -private -syscall ZwMakeTemporaryObject(long) NtMakeTemporaryObject
 # @ stub ZwMapUserPhysicalPages
 # @ stub ZwMapUserPhysicalPagesScatter
@@ -1550,6 +1551,8 @@
 @ cdecl _makepath_s(ptr long str str str str)
 @ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)
+@ cdecl -norelay -arch=arm,x86_64 _setjmp(ptr ptr) NTDLL__setjmpex
+@ cdecl -norelay -arch=!i386 _setjmpex(ptr ptr) NTDLL__setjmpex
 @ varargs _snprintf(ptr long str) NTDLL__snprintf
 @ varargs _snprintf_s(ptr long long str)
 @ varargs _snwprintf(ptr long wstr)
@@ -1628,6 +1631,7 @@
 @ cdecl isxdigit(long)
 @ cdecl labs(long) abs
 @ cdecl log(double)
+@ cdecl -arch=!i386 longjmp(ptr long) NTDLL_longjmp
 @ cdecl mbstowcs(ptr str long)
 @ cdecl memchr(ptr long long)
 @ cdecl memcmp(ptr ptr long)

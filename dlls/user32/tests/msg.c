@@ -2175,7 +2175,11 @@ static const struct message WmTrackPopupMenuMinimizeWindow[] = {
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* Win7 seems to send this twice. */
     { EVENT_SYSTEM_MINIMIZESTART, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
-    { WM_CANCELMODE, sent },
+    { HCBT_ACTIVATE, hook|optional }, /* win11 */
+    { WM_NCACTIVATE, sent|optional }, /* win11 */
+    { WM_ACTIVATE, sent|optional }, /* win11 */
+    { EVENT_SYSTEM_FOREGROUND, winevent_hook|wparam|lparam|optional, 0, 0 }, /* win11 */
+    { WM_CANCELMODE, sent|optional }, /* not always sent on win11 */
     { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
     { WM_CAPTURECHANGED, sent|defwinproc },
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
@@ -9806,7 +9810,6 @@ static DWORD WINAPI run_in_temp_desktop_thread_func(LPVOID param)
                                         curr_desktop_name, sizeof(curr_desktop_name), &length );
     ok_(file, line)( result, "GetUserObjectInformationA(post_inp_desktop=%p) error %lu [rl = %lu]\n",
                      post_inp_desktop, GetLastError(), length );
-    todo_wine
     ok_(file, line)( strcmp( curr_desktop_name, temp_desktop_name ) == 0,
                      "different desktop name: %s != %s (no switch or concurrent WineTest run?)\n",
                      debugstr_a( curr_desktop_name ), debugstr_a( temp_desktop_name ) );

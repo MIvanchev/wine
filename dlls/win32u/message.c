@@ -2319,6 +2319,16 @@ static void handle_keyboard_repeat_message( HWND hwnd )
     NtUserPostMessage( hwnd, msg->message, msg->wParam, msg->lParam );
 }
 
+/***********************************************************************
+ *          process_pointer_message
+ *
+ * returns TRUE if the contents of 'msg' should be passed to the application
+ */
+static BOOL process_pointer_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data )
+{
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+    return TRUE;
+}
 
 /***********************************************************************
  *          process_keyboard_message
@@ -2415,6 +2425,8 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
 
             if (msg->wParam == VK_PROCESSKEY) break;
 
+            if (thread_info->key_repeat_msg.hwnd != msg->hwnd)
+                kill_system_timer( thread_info->key_repeat_msg.hwnd, SYSTEM_TIMER_KEY_REPEAT );
             thread_info->key_repeat_msg = *msg;
             if (NtUserSystemParametersInfo( SPI_GETKEYBOARDDELAY, 0, &delay, 0 ))
                 NtUserSetSystemTimer( msg->hwnd, SYSTEM_TIMER_KEY_REPEAT, (delay + 1) * 250 );
@@ -2423,7 +2435,9 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
 
         case WM_KEYUP:
         case WM_SYSKEYUP:
-            kill_system_timer( thread_info->key_repeat_msg.hwnd, SYSTEM_TIMER_KEY_REPEAT );
+            /* Only stop repeat if the scan codes match. */
+            if ((thread_info->key_repeat_msg.lParam & 0x01ff0000) == (msg->lParam & 0x01ff0000))
+                kill_system_timer( thread_info->key_repeat_msg.hwnd, SYSTEM_TIMER_KEY_REPEAT );
             break;
         }
     }
@@ -2669,6 +2683,8 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
     else if (is_mouse_message( msg->message ))
         ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
+    else if (msg->message >= WM_POINTERUPDATE && msg->message <= WM_POINTERLEAVE)
+        ret = process_pointer_message( msg, hw_id, msg_data );
     else if (msg->message == WM_WINE_CLIPCURSOR)
         process_wine_clipcursor( msg->hwnd, msg->wParam, msg->lParam );
     else if (msg->message == WM_WINE_SETCURSOR)
@@ -2686,9 +2702,11 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
  * available; -1 on error.
  * All pending sent messages are processed before returning.
  */
-static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, UINT changed_mask )
+int peek_message( MSG *msg, const struct peek_message_filter *filter )
 {
     LRESULT result;
+    HWND hwnd = filter->hwnd;
+    UINT first = filter->first, last = filter->last, flags = filter->flags;
     struct user_thread_info *thread_info = get_user_thread_info();
     INPUT_MESSAGE_SOURCE prev_source = thread_info->client_info.msg_source;
     struct received_message_info info;
@@ -2711,13 +2729,14 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
 
         SERVER_START_REQ( get_message )
         {
+            req->internal  = filter->internal;
             req->flags     = flags;
             req->get_win   = wine_server_user_handle( hwnd );
             req->get_first = first;
             req->get_last  = last;
             req->hw_id     = hw_id;
-            req->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
-            req->changed_mask = changed_mask;
+            req->wake_mask = filter->mask & (QS_SENDMESSAGE | QS_SMRESULT);
+            req->changed_mask = filter->mask;
             wine_server_set_reply( req, buffer, buffer_size );
             if (!(res = wine_server_call( req )))
             {
@@ -2742,8 +2761,8 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             free( buffer );
             if (res == STATUS_PENDING)
             {
-                thread_info->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
-                thread_info->changed_mask = changed_mask;
+                thread_info->wake_mask = filter->mask & (QS_SENDMESSAGE | QS_SMRESULT);
+                thread_info->changed_mask = filter->mask;
                 return 0;
             }
             if (res != STATUS_BUFFER_OVERFLOW)
@@ -2888,8 +2907,18 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                     }
                 }
                 else
-                    peek_message( msg, info.msg.hwnd, info.msg.message,
-                                  info.msg.message, flags | PM_REMOVE, changed_mask );
+                {
+                    struct peek_message_filter new_filter =
+                    {
+                        .hwnd = info.msg.hwnd,
+                        .flags = flags | PM_REMOVE,
+                        .first = info.msg.message,
+                        .last = info.msg.message,
+                        .mask = filter->mask,
+                        .internal = filter->internal,
+                    };
+                    peek_message( msg, &new_filter );
+                }
                 continue;
             }
             if (info.msg.message >= WM_DDE_FIRST && info.msg.message <= WM_DDE_LAST)
@@ -2940,7 +2969,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                                   info.msg.wParam, info.msg.lParam );
 
         /* if some PM_QS* flags were specified, only handle sent messages from now on */
-        if (HIWORD(flags) && !changed_mask) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
+        if (HIWORD(flags) && !filter->mask) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
     }
 }
 
@@ -2951,8 +2980,9 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
  */
 static void process_sent_messages(void)
 {
+    struct peek_message_filter filter = {.flags = PM_REMOVE | PM_QS_SENDMESSAGE};
     MSG msg;
-    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0 );
+    peek_message( &msg, &filter );
 }
 
 /***********************************************************************
@@ -3175,13 +3205,14 @@ BOOL WINAPI NtUserWaitMessage(void)
  */
 BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
+    struct peek_message_filter filter = {.hwnd = hwnd, .first = first, .last = last, .flags = flags};
     MSG msg;
     int ret;
 
     user_check_not_lock();
     check_for_driver_events( 0 );
 
-    ret = peek_message( &msg, hwnd, first, last, flags, 0 );
+    ret = peek_message( &msg, &filter );
     if (ret < 0) return FALSE;
 
     if (!ret)
@@ -3189,7 +3220,7 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
         flush_window_surfaces( TRUE );
         ret = wait_message( 0, NULL, 0, QS_ALLINPUT, 0 );
         /* if we received driver events, check again for a pending message */
-        if (ret == WAIT_TIMEOUT || peek_message( &msg, hwnd, first, last, flags, 0 ) <= 0) return FALSE;
+        if (ret == WAIT_TIMEOUT || peek_message( &msg, &filter ) <= 0) return FALSE;
     }
 
     check_for_driver_events( msg.message );
@@ -3212,6 +3243,7 @@ BOOL WINAPI NtUserPeekMessage( MSG *msg_out, HWND hwnd, UINT first, UINT last, U
  */
 BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
+    struct peek_message_filter filter = {.hwnd = hwnd, .first = first, .last = last};
     HANDLE server_queue = get_server_queue_handle();
     unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
     int ret;
@@ -3230,7 +3262,9 @@ BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
     }
     else mask = QS_ALLINPUT;
 
-    while (!(ret = peek_message( msg, hwnd, first, last, PM_REMOVE | (mask << 16), mask )))
+    filter.mask = mask;
+    filter.flags = PM_REMOVE | (mask << 16);
+    while (!(ret = peek_message( msg, &filter )))
     {
         wait_objects( 1, &server_queue, INFINITE, mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
     }
@@ -3482,11 +3516,10 @@ LRESULT send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid,
 /***********************************************************************
  *		send_hardware_message
  */
-NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput, UINT flags )
+NTSTATUS send_hardware_message( HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam )
 {
     struct send_message_info info;
     int prev_x, prev_y, new_x, new_y;
-    USAGE hid_usage_page, hid_usage;
     NTSTATUS ret;
     BOOL wait, affects_key_state = FALSE;
 
@@ -3499,21 +3532,6 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
 
     if (input->type == INPUT_MOUSE && (input->mi.dwFlags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN)))
         clip_fullscreen_window( hwnd, FALSE );
-
-    if (input->type == INPUT_HARDWARE && rawinput->header.dwType == RIM_TYPEHID)
-    {
-        if (input->hi.uMsg == WM_INPUT_DEVICE_CHANGE)
-        {
-            hid_usage_page = ((USAGE *)rawinput->data.hid.bRawData)[0];
-            hid_usage = ((USAGE *)rawinput->data.hid.bRawData)[1];
-        }
-        if (input->hi.uMsg == WM_INPUT &&
-            !rawinput_device_get_usages( rawinput->header.hDevice, &hid_usage_page, &hid_usage ))
-        {
-            WARN( "unable to get HID usages for device %p\n", rawinput->header.hDevice );
-            return STATUS_INVALID_HANDLE;
-        }
-    }
 
     SERVER_START_REQ( send_hardware_message )
     {
@@ -3544,26 +3562,20 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
             break;
         case INPUT_HARDWARE:
             req->input.hw.msg    = input->hi.uMsg;
-            req->input.hw.lparam = MAKELONG( input->hi.wParamL, input->hi.wParamH );
+            req->input.hw.wparam = MAKELONG( input->hi.wParamL, input->hi.wParamH );
             switch (input->hi.uMsg)
             {
             case WM_INPUT:
             case WM_INPUT_DEVICE_CHANGE:
-                switch (rawinput->header.dwType)
-                {
-                case RIM_TYPEHID:
-                    req->input.hw.wparam = rawinput->header.wParam;
-                    req->input.hw.hid.device = HandleToUlong( rawinput->header.hDevice );
-                    req->input.hw.hid.usage = MAKELONG(hid_usage, hid_usage_page);
-                    req->input.hw.hid.count = rawinput->data.hid.dwCount;
-                    req->input.hw.hid.length = rawinput->data.hid.dwSizeHid;
-                    wine_server_add_data( req, rawinput->data.hid.bRawData,
-                                          rawinput->data.hid.dwCount * rawinput->data.hid.dwSizeHid );
-                    break;
-                default:
-                    assert( 0 );
-                    break;
-                }
+            {
+                struct hid_packet *hid = (struct hid_packet *)lparam;
+                req->input.hw.hid = hid->head;
+                wine_server_add_data( req, hid->data, hid->head.count * hid->head.length );
+                break;
+            }
+            default:
+                req->input.hw.lparam = lparam;
+                break;
             }
             break;
         }

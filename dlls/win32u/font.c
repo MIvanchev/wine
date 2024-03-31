@@ -516,6 +516,12 @@ HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
     return ret;
 }
 
+HKEY reg_open_ascii_key( HKEY root, const char *name )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_open_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+}
+
 /* wrapper for NtCreateKey that creates the key recursively if necessary */
 HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
                      DWORD options, DWORD *disposition )
@@ -565,10 +571,17 @@ HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
     return ret;
 }
 
+HKEY reg_create_ascii_key( HKEY root, const char *name, DWORD options,
+                           DWORD *disposition )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_create_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR),
+                           options, disposition );
+}
+
 HKEY reg_open_hkcu_key( const char *name )
 {
-    WCHAR nameW[128];
-    return reg_open_key( hkcu_key, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+    return reg_open_ascii_key( hkcu_key, name );
 }
 
 BOOL set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value, DWORD count )
@@ -4772,11 +4785,9 @@ const struct gdi_dc_funcs font_driver =
     NULL,                           /* pStrokeAndFillPath */
     NULL,                           /* pStrokePath */
     NULL,                           /* pUnrealizePalette */
-    NULL,                           /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                           /* pD3DKMTCloseAdapter */
     NULL,                           /* pD3DKMTOpenAdapterFromLuid */
     NULL,                           /* pD3DKMTQueryVideoMemoryInfo */
-    NULL,                           /* pD3DKMTSetVidPnSourceOwner */
     GDI_PRIORITY_FONT_DRV           /* priority */
 };
 

@@ -56,6 +56,18 @@ static inline size_t align(size_t addr, size_t alignment)
     return (addr + (alignment - 1)) & ~(alignment - 1);
 }
 
+static inline uint32_t float_to_int(float f)
+{
+    union
+    {
+        uint32_t u;
+        float f;
+    } u;
+
+    u.f = f;
+    return u.u;
+}
+
 static inline float int_to_float(uint32_t i)
 {
     union
@@ -1543,7 +1555,7 @@ struct wined3d_shader_backend_ops
     void (*shader_precompile)(void *shader_priv, struct wined3d_shader *shader);
     void (*shader_apply_draw_state)(void *shader_priv, struct wined3d_context *context,
             const struct wined3d_state *state);
-    void (*shader_select_compute)(void *shader_priv, struct wined3d_context *context,
+    void (*shader_apply_compute_state)(void *shader_priv, struct wined3d_context *context,
             const struct wined3d_state *state);
     void (*shader_disable)(void *shader_priv, struct wined3d_context *context);
     void (*shader_update_float_vertex_constants)(struct wined3d_device *device, UINT start, UINT count);
@@ -4145,7 +4157,7 @@ struct wined3d_shader_limits
 #define wined3d_lock_init(lock, name) wined3d_lock_init_(lock, __FILE__ ": " name)
 static inline void wined3d_lock_init_(CRITICAL_SECTION *lock, const char *name)
 {
-    InitializeCriticalSection(lock);
+    InitializeCriticalSectionEx(lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     if (lock->DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
         lock->DebugInfo->Spare[0] = (DWORD_PTR)name;
 }

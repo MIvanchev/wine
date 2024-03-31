@@ -595,7 +595,7 @@ static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProvid
         "VK_KHR_display",
         VK_KHR_SURFACE_EXTENSION_NAME,
     };
-    const struct vulkan_funcs *vulkan_funcs = get_vulkan_driver( WINE_VULKAN_DRIVER_VERSION );
+    const struct vulkan_funcs *vulkan_funcs = __wine_get_vulkan_driver( WINE_VULKAN_DRIVER_VERSION );
     VkResult (*pvkGetRandROutputDisplayEXT)( VkPhysicalDevice, Display *, RROutput, VkDisplayKHR * );
     PFN_vkGetPhysicalDeviceProperties2KHR pvkGetPhysicalDeviceProperties2KHR;
     PFN_vkEnumeratePhysicalDevices pvkEnumeratePhysicalDevices;
@@ -663,11 +663,9 @@ static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProvid
     {
         for (output_idx = 0; output_idx < provider_info->noutputs; ++output_idx)
         {
-            X11DRV_expect_error( gdi_display, XRandRErrorHandler, NULL );
             vr = pvkGetRandROutputDisplayEXT( vk_physical_devices[device_idx], gdi_display,
                                               provider_info->outputs[output_idx], &vk_display );
-            XSync( gdi_display, FALSE );
-            if (X11DRV_check_error() || vr != VK_SUCCESS || vk_display == VK_NULL_HANDLE)
+            if (vr != VK_SUCCESS || vk_display == VK_NULL_HANDLE)
                 continue;
 
             memset( &id, 0, sizeof(id) );

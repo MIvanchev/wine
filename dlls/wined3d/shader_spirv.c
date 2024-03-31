@@ -169,16 +169,15 @@ static void shader_spirv_compile_arguments_init(struct shader_spirv_compile_argu
         {
             struct wined3d_shader *ps = state->shader[WINED3D_SHADER_TYPE_PIXEL];
 
-            if (ps)
+            if (shader->reg_maps.shader_version.major < 4 && ps)
             {
                 struct shader_spirv_graphics_program_vk *vs_program = shader->backend_data;
                 struct shader_spirv_graphics_program_vk *ps_program = ps->backend_data;
 
                 if (ps_program->signature_info.input.element_count > ARRAY_SIZE(args->u.vs.varying_map))
                     ERR("Unexpected inter-stage varying count %u.\n", ps_program->signature_info.input.element_count);
-                if (shader->reg_maps.shader_version.major < 4)
-                    vkd3d_shader_build_varying_map(&vs_program->signature_info.output,
-                            &ps_program->signature_info.input, &args->u.vs.varying_count, args->u.vs.varying_map);
+                vkd3d_shader_build_varying_map(&vs_program->signature_info.output,
+                        &ps_program->signature_info.input, &args->u.vs.varying_count, args->u.vs.varying_map);
             }
             break;
         }
@@ -325,7 +324,7 @@ static VkShaderModule shader_spirv_compile_shader(struct wined3d_context_vk *con
 
     if (ret < 0)
     {
-        ERR("Failed to compile DXBC, ret %d.\n", ret);
+        ERR("Failed to compile shader, ret %d.\n", ret);
         return VK_NULL_HANDLE;
     }
 
@@ -751,8 +750,16 @@ static void shader_spirv_scan_shader(struct wined3d_shader *shader,
 
     info.type = VKD3D_SHADER_STRUCTURE_TYPE_COMPILE_INFO;
     info.next = descriptor_info;
-    info.source.code = shader->byte_code;
-    info.source.size = shader->byte_code_size;
+    if (shader->source_type == VKD3D_SHADER_SOURCE_D3D_BYTECODE)
+    {
+        info.source.code = shader->function;
+        info.source.size = shader->functionLength;
+    }
+    else
+    {
+        info.source.code = shader->byte_code;
+        info.source.size = shader->byte_code_size;
+    }
     info.source_type = shader->source_type;
     info.target_type = VKD3D_SHADER_TARGET_SPIRV_BINARY;
     info.options = spirv_compile_options;
@@ -868,7 +875,7 @@ fail:
     context_vk->graphics.vk_pipeline_layout = VK_NULL_HANDLE;
 }
 
-static void shader_spirv_select_compute(void *shader_priv,
+static void shader_spirv_apply_compute_state(void *shader_priv,
         struct wined3d_context *context, const struct wined3d_state *state)
 {
     struct wined3d_context_vk *context_vk = wined3d_context_vk(context);
@@ -1114,7 +1121,7 @@ static const struct wined3d_shader_backend_ops spirv_shader_backend_vk =
     .shader_handle_instruction = shader_spirv_handle_instruction,
     .shader_precompile = shader_spirv_precompile,
     .shader_apply_draw_state = shader_spirv_apply_draw_state,
-    .shader_select_compute = shader_spirv_select_compute,
+    .shader_apply_compute_state = shader_spirv_apply_compute_state,
     .shader_disable = shader_spirv_disable,
     .shader_update_float_vertex_constants = shader_spirv_update_float_vertex_constants,
     .shader_update_float_pixel_constants = shader_spirv_update_float_pixel_constants,

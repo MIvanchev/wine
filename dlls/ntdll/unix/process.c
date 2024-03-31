@@ -65,6 +65,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "ddk/ntddk.h"
 #include "unix_private.h"
 #include "wine/condrv.h"
 #include "wine/server.h"
@@ -845,7 +846,6 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
 #endif
 
     wine_server_send_fd( socketfd[1] );
-    close( socketfd[1] );
 
     /* create the process on the server side */
 
@@ -874,6 +874,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         process_info = wine_server_ptr_handle( reply->info );
     }
     SERVER_END_REQ;
+    close( socketfd[1] );
     free( objattr );
     free( handles );
     free( jobs );
@@ -1600,6 +1601,23 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
 
     switch (class)
     {
+    case ProcessAccessToken:
+    {
+        const PROCESS_ACCESS_TOKEN *token = info;
+
+        if (size != sizeof(PROCESS_ACCESS_TOKEN)) return STATUS_INFO_LENGTH_MISMATCH;
+
+        SERVER_START_REQ( set_process_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->token = wine_server_obj_handle( token->Token );
+            req->mask = SET_PROCESS_INFO_TOKEN;
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+    }
+
     case ProcessDefaultHardErrorMode:
         if (size != sizeof(UINT)) return STATUS_INVALID_PARAMETER;
         process_error_mode = *(UINT *)info;

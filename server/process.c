@@ -684,6 +684,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
     memset( &process->image_info, 0, sizeof(process->image_info) );
+    list_init( &process->rawinput_entry );
     list_init( &process->kernel_object );
     list_init( &process->thread_list );
     list_init( &process->locks );
@@ -710,7 +711,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     if (!parent)
     {
         process->handles = alloc_handle_table( process, 0 );
-        process->token = token_create_admin( TRUE, -1, TokenElevationTypeFull, default_session_id );
+        process->token = token_create_admin( TRUE, -1, TokenElevationTypeLimited, default_session_id );
         process->affinity = ~0;
     }
     else
@@ -784,6 +785,7 @@ static void process_destroy( struct object *obj )
     if (process->idle_event) release_object( process->idle_event );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
+    list_remove( &process->rawinput_entry );
     free( process->rawinput_devices );
     free( process->dir_cache );
     free( process->image );
@@ -1624,6 +1626,16 @@ DECL_HANDLER(set_process_info)
     {
         if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
         if (req->mask & SET_PROCESS_INFO_AFFINITY) set_process_affinity( process, req->affinity );
+        if (req->mask & SET_PROCESS_INFO_TOKEN)
+        {
+            struct token *token;
+
+            if ((token = get_token_obj( current->process, req->token, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY )))
+            {
+                release_object( process->token );
+                process->token = token;
+            }
+        }
         release_object( process );
     }
 }
@@ -1659,7 +1671,6 @@ DECL_HANDLER(write_process_memory)
     {
         data_size_t len = get_req_data_size();
         if (len) write_process_memory( process, req->addr, len, get_req_data() );
-        else set_error( STATUS_INVALID_PARAMETER );
         release_object( process );
     }
 }

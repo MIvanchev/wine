@@ -38,6 +38,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(unwind);
 
 
 /***********************************************************************
+ * C specific handler
+ */
+extern LONG __C_ExecuteExceptionFilter( EXCEPTION_POINTERS *ptrs, void *frame,
+                                        PEXCEPTION_FILTER filter, BYTE *nonvolatile );
+
+#define DUMP_SCOPE_TABLE(base,table) do { \
+        for (unsigned int i = 0; i < table->Count; i++) \
+            TRACE( "  %u: %p-%p handler %p target %p\n", i, \
+                   (char *)base + table->ScopeRecord[i].BeginAddress,   \
+                   (char *)base + table->ScopeRecord[i].EndAddress,     \
+                   (char *)base + table->ScopeRecord[i].HandlerAddress, \
+                   (char *)base + table->ScopeRecord[i].JumpTarget );   \
+    } while(0)
+
+
+/***********************************************************************
  * Dynamic unwind tables
  */
 
@@ -134,8 +150,8 @@ BOOLEAN CDECL RtlInstallFunctionTableCallback( ULONG_PTR table, ULONG_PTR base, 
 /*************************************************************************
  *              RtlAddGrowableFunctionTable   (NTDLL.@)
  */
-DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functions, DWORD count,
-                                          DWORD max_count, ULONG_PTR base, ULONG_PTR end )
+NTSTATUS WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functions, DWORD count,
+                                             DWORD max_count, ULONG_PTR base, ULONG_PTR end )
 {
     struct dynamic_unwind_entry *entry;
 
@@ -249,7 +265,7 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionTable( ULONG_PTR pc, ULONG_PTR *base, 
     if (LdrFindEntryForAddress( (void *)pc, &module )) return NULL;
     *base = (ULONG_PTR)module->DllBase;
 #ifdef __arm64ec__
-    if (RtlIsEcCode( (void *)pc ))
+    if (RtlIsEcCode( pc ))
     {
         IMAGE_LOAD_CONFIG_DIRECTORY *cfg;
         IMAGE_ARM64EC_METADATA *metadata;
@@ -766,42 +782,131 @@ static ARM64_RUNTIME_FUNCTION *find_function_info_arm64( ULONG_PTR pc, ULONG_PTR
 
 #ifdef __arm64ec__
 #define RtlVirtualUnwind RtlVirtualUnwind_arm64
+#define RtlVirtualUnwind2 RtlVirtualUnwind2_arm64
 #define RtlLookupFunctionEntry RtlLookupFunctionEntry_arm64
+#define __C_specific_handler __C_specific_handler_arm64
 #endif
 
 /**********************************************************************
- *              RtlVirtualUnwind   (NTDLL.@)
+ *              RtlVirtualUnwind2   (NTDLL.@)
  */
-PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
-                               ARM64_RUNTIME_FUNCTION *func, ARM64_NT_CONTEXT *context,
-                               PVOID *handler_data, ULONG_PTR *frame_ret,
-                               KNONVOLATILE_CONTEXT_POINTERS_ARM64 *ctx_ptr )
+NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
+                                   ARM64_RUNTIME_FUNCTION *func, ARM64_NT_CONTEXT *context,
+                                   BOOLEAN *mach_frame_unwound, void **handler_data,
+                                   ULONG_PTR *frame_ret, KNONVOLATILE_CONTEXT_POINTERS_ARM64 *ctx_ptr,
+                                   ULONG_PTR *limit_low, ULONG_PTR *limit_high,
+                                   PEXCEPTION_ROUTINE *handler_ret, ULONG flags )
 {
-    void *handler;
+    TRACE( "type %lx base %I64x pc %I64x rva %I64x sp %I64x\n", type, base, pc, pc - base, context->Sp );
+    if (limit_low || limit_high) FIXME( "limits not supported\n" );
 
-    TRACE( "type %lx pc %I64x sp %I64x\n", type, pc, context->Sp );
-
-    if (!func && pc == context->Lr)  /* invalid leaf function */
-    {
-        context->Pc = 0;
-        return NULL;
-    }
+    if (!func && pc == context->Lr) return STATUS_BAD_FUNCTION_TABLE;  /* invalid leaf function */
 
     *handler_data = NULL;
     context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
 
     if (!func)  /* leaf function */
-        handler = NULL;
+        *handler_ret = NULL;
     else if (func->Flag)
-        handler = unwind_packed_data( base, pc, func, context, ctx_ptr );
+        *handler_ret = unwind_packed_data( base, pc, func, context, ctx_ptr );
     else
-        handler = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
+        *handler_ret = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
 
     if (context->ContextFlags & CONTEXT_UNWOUND_TO_CALL) context->Pc = context->Lr;
 
-    TRACE( "ret: pc=%I64x lr=%I64x sp=%I64x handler=%p\n", context->Pc, context->Lr, context->Sp, handler );
+    TRACE( "ret: pc=%I64x lr=%I64x sp=%I64x handler=%p\n", context->Pc, context->Lr, context->Sp, *handler_ret );
     *frame_ret = context->Sp;
-    return handler;
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *              RtlVirtualUnwind   (NTDLL.@)
+ */
+PEXCEPTION_ROUTINE WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
+                                            ARM64_RUNTIME_FUNCTION *func, ARM64_NT_CONTEXT *context,
+                                            PVOID *handler_data, ULONG_PTR *frame_ret,
+                                            KNONVOLATILE_CONTEXT_POINTERS_ARM64 *ctx_ptr )
+{
+    PEXCEPTION_ROUTINE handler;
+
+    if (!RtlVirtualUnwind2( type, base, pc, func, context, NULL, handler_data,
+                           frame_ret, ctx_ptr, NULL, NULL, &handler, 0 ))
+        return handler;
+
+    context->Pc = 0;
+    return NULL;
+}
+
+
+/*******************************************************************
+ *		__C_specific_handler (NTDLL.@)
+ */
+EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *frame,
+                                                   ARM64_NT_CONTEXT *context,
+                                                   DISPATCHER_CONTEXT_ARM64 *dispatch )
+{
+    const SCOPE_TABLE *table = dispatch->HandlerData;
+    ULONG_PTR base = dispatch->ImageBase;
+    ULONG_PTR pc = dispatch->ControlPc;
+    unsigned int i;
+    void *handler;
+
+    TRACE( "%p %p %p %p pc %Ix\n", rec, frame, context, dispatch, pc );
+    if (TRACE_ON(unwind)) DUMP_SCOPE_TABLE( base, table );
+
+    if (dispatch->ControlPcIsUnwound) pc -= 4;
+
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND))
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (table->ScopeRecord[i].JumpTarget) continue;
+
+            if (rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND &&
+                dispatch->TargetPc >= base + table->ScopeRecord[i].BeginAddress &&
+                dispatch->TargetPc < base + table->ScopeRecord[i].EndAddress)
+            {
+                break;
+            }
+            handler = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+            dispatch->ScopeIndex = i + 1;
+            TRACE( "scope %u calling __finally %p frame %p\n", i, handler, frame );
+            __C_ExecuteExceptionFilter( ULongToPtr(TRUE), frame, handler, dispatch->NonVolatileRegisters );
+        }
+    }
+    else
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (!table->ScopeRecord[i].JumpTarget) continue;
+
+            if (table->ScopeRecord[i].HandlerAddress != EXCEPTION_EXECUTE_HANDLER)
+            {
+                EXCEPTION_POINTERS ptrs = { rec, context };
+
+                handler = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+                TRACE( "scope %u calling filter %p ptrs %p frame %p\n", i, handler, &ptrs, frame );
+                switch (__C_ExecuteExceptionFilter( &ptrs, frame, handler, dispatch->NonVolatileRegisters ))
+                {
+                case EXCEPTION_EXECUTE_HANDLER:
+                    break;
+                case EXCEPTION_CONTINUE_SEARCH:
+                    continue;
+                case EXCEPTION_CONTINUE_EXECUTION:
+                    return ExceptionContinueExecution;
+                }
+            }
+            TRACE( "unwinding to target %Ix\n", base + table->ScopeRecord[i].JumpTarget );
+            RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
+                         rec, 0, dispatch->ContextRecord, dispatch->HistoryTable );
+        }
+    }
+    return ExceptionContinueSearch;
 }
 
 
@@ -850,7 +955,9 @@ BOOLEAN CDECL RtlAddFunctionTable( RUNTIME_FUNCTION *table, DWORD count, ULONG_P
 }
 #else
 #undef RtlVirtualUnwind
+#undef RtlVirtualUnwind2
 #undef RtlLookupFunctionEntry
+#undef __C_specific_handler
 #endif
 
 #endif  /* __aarch64__ */
@@ -1367,39 +1474,130 @@ static RUNTIME_FUNCTION *find_function_info( ULONG_PTR pc, ULONG_PTR base,
     return NULL;
 }
 
-/***********************************************************************
- *            RtlVirtualUnwind  (NTDLL.@)
- */
-PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
-                               RUNTIME_FUNCTION *func, CONTEXT *context,
-                               PVOID *handler_data, ULONG_PTR *frame_ret,
-                               KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
-{
-    void *handler;
 
-    TRACE( "type %lx pc %Ix sp %lx\n", type, pc, context->Sp );
+/**********************************************************************
+ *              RtlVirtualUnwind2   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
+                                   RUNTIME_FUNCTION *func, CONTEXT *context,
+                                   BOOLEAN *mach_frame_unwound, void **handler_data,
+                                   ULONG_PTR *frame_ret, KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr,
+                                   ULONG_PTR *limit_low, ULONG_PTR *limit_high,
+                                   PEXCEPTION_ROUTINE *handler_ret, ULONG flags )
+{
+    TRACE( "type %lx base %Ix pc %Ix rva %Ix sp %lx\n", type, base, pc, pc - base, context->Sp );
+    if (limit_low || limit_high) FIXME( "limits not supported\n" );
 
     context->Pc = 0;
 
-    if (!func && pc == context->Lr) return NULL;  /* invalid leaf function */
+    if (!func && pc == context->Lr) return STATUS_BAD_FUNCTION_TABLE;  /* invalid leaf function */
 
     *handler_data = NULL;
 
     if (!func)  /* leaf function */
-        handler = NULL;
+        *handler_ret = NULL;
     else if (func->Flag)
-        handler = unwind_packed_data( base, pc, func, context, ctx_ptr );
+        *handler_ret = unwind_packed_data( base, pc, func, context, ctx_ptr );
     else
-        handler = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
+        *handler_ret = unwind_full_data( base, pc, func, context, handler_data, ctx_ptr );
 
-    TRACE( "ret: pc=%lx lr=%lx sp=%lx handler=%p\n", context->Pc, context->Lr, context->Sp, handler );
+    TRACE( "ret: pc=%lx lr=%lx sp=%lx handler=%p\n", context->Pc, context->Lr, context->Sp, *handler_ret );
     if (!context->Pc)
     {
         context->Pc = context->Lr;
         context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
     }
     *frame_ret = context->Sp;
-    return handler;
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *            RtlVirtualUnwind  (NTDLL.@)
+ */
+PEXCEPTION_ROUTINE WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
+                                            RUNTIME_FUNCTION *func, CONTEXT *context,
+                                            PVOID *handler_data, ULONG_PTR *frame_ret,
+                                            KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+{
+    PEXCEPTION_ROUTINE handler;
+
+    if (!RtlVirtualUnwind2( type, base, pc, func, context, NULL, handler_data,
+                           frame_ret, ctx_ptr, NULL, NULL, &handler, 0 ))
+        return handler;
+
+    context->Pc = 0;
+    return NULL;
+}
+
+
+/*******************************************************************
+ *              __C_specific_handler  (NTDLL.@)
+ */
+EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *frame,
+                                                   CONTEXT *context, DISPATCHER_CONTEXT *dispatch )
+{
+    const SCOPE_TABLE *table = dispatch->HandlerData;
+    ULONG_PTR base = dispatch->ImageBase;
+    ULONG_PTR pc = dispatch->ControlPc;
+    unsigned int i;
+    void *handler;
+
+    TRACE( "%p %p %p %p pc %Ix\n", rec, frame, context, dispatch, pc );
+    if (TRACE_ON(unwind)) DUMP_SCOPE_TABLE( base, table );
+
+    if (dispatch->ControlPcIsUnwound) pc -= 2;
+
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND))
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (table->ScopeRecord[i].JumpTarget) continue;
+
+            if (rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND &&
+                dispatch->TargetPc >= base + table->ScopeRecord[i].BeginAddress &&
+                dispatch->TargetPc < base + table->ScopeRecord[i].EndAddress)
+            {
+                break;
+            }
+            handler = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+            dispatch->ScopeIndex = i + 1;
+            TRACE( "scope %u calling __finally %p frame %p\n", i, handler, frame );
+            __C_ExecuteExceptionFilter( ULongToPtr(TRUE), frame, handler, dispatch->NonVolatileRegisters );
+        }
+    }
+    else
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (!table->ScopeRecord[i].JumpTarget) continue;
+
+            if (table->ScopeRecord[i].HandlerAddress != EXCEPTION_EXECUTE_HANDLER)
+            {
+                EXCEPTION_POINTERS ptrs = { rec, context };
+
+                handler = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+                TRACE( "scope %u calling filter %p ptrs %p frame %p\n", i, handler, &ptrs, frame );
+                switch (__C_ExecuteExceptionFilter( &ptrs, frame, handler, dispatch->NonVolatileRegisters ))
+                {
+                case EXCEPTION_EXECUTE_HANDLER:
+                    break;
+                case EXCEPTION_CONTINUE_SEARCH:
+                    continue;
+                case EXCEPTION_CONTINUE_EXECUTION:
+                    return ExceptionContinueExecution;
+                }
+            }
+            TRACE( "unwinding to target %lx\n", base + table->ScopeRecord[i].JumpTarget );
+            RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
+                         rec, 0, dispatch->ContextRecord, dispatch->HistoryTable );
+        }
+    }
+    return ExceptionContinueSearch;
 }
 
 
@@ -1808,12 +2006,14 @@ static RUNTIME_FUNCTION *find_function_info( ULONG_PTR pc, ULONG_PTR base,
 
 
 /**********************************************************************
- *              RtlVirtualUnwind   (NTDLL.@)
+ *              RtlVirtualUnwind2   (NTDLL.@)
  */
-PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
-                               RUNTIME_FUNCTION *function, CONTEXT *context,
-                               PVOID *data, ULONG64 *frame_ret,
-                               KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+NTSTATUS WINAPI RtlVirtualUnwind2( ULONG type, ULONG_PTR base, ULONG_PTR pc,
+                                   RUNTIME_FUNCTION *function, CONTEXT *context,
+                                   BOOLEAN *mach_frame_unwound, void **data,
+                                   ULONG_PTR *frame_ret, KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr,
+                                   ULONG_PTR *limit_low, ULONG_PTR *limit_high,
+                                   PEXCEPTION_ROUTINE *handler_ret, ULONG flags )
 {
     union handler_data *handler_data;
     ULONG64 frame, off;
@@ -1822,22 +2022,24 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
     BOOL mach_frame = FALSE;
 
 #ifdef __arm64ec__
-    if (RtlIsEcCode( (void *)pc ))
+    if (RtlIsEcCode( pc ))
     {
         DWORD flags = context->ContextFlags & ~CONTEXT_UNWOUND_TO_CALL;
         ARM64_NT_CONTEXT arm_context;
-        void *ret;
+        NTSTATUS status;
 
         context_x64_to_arm( &arm_context, (ARM64EC_NT_CONTEXT *)context );
-        ret = RtlVirtualUnwind_arm64( type, base, pc, (ARM64_RUNTIME_FUNCTION *)function,
-                                      &arm_context, data, frame_ret, NULL );
+        status = RtlVirtualUnwind2_arm64( type, base, pc, (ARM64_RUNTIME_FUNCTION *)function,
+                                          &arm_context, NULL, data, frame_ret, NULL,
+                                          limit_low, limit_high, handler_ret, flags );
         context_arm_to_x64( (ARM64EC_NT_CONTEXT *)context, &arm_context );
         context->ContextFlags = flags | (arm_context.ContextFlags & CONTEXT_UNWOUND_TO_CALL);
-        return ret;
+        return status;
     }
 #endif
 
-    TRACE( "type %lx rip %I64x rsp %I64x\n", type, pc, context->Rsp );
+    TRACE( "type %lx base %I64x rip %I64x rva %I64x rsp %I64x\n", type, base, pc, pc - base, context->Rsp );
+    if (limit_low || limit_high) FIXME( "limits not supported\n" );
 
     frame = *frame_ret = context->Rsp;
 
@@ -1846,7 +2048,8 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
         context->Rip = *(ULONG64 *)context->Rsp;
         context->Rsp += sizeof(ULONG64);
         *data = NULL;
-        return NULL;
+        *handler_ret = NULL;
+        return STATUS_SUCCESS;
     }
 
     if (TRACE_ON(unwind)) dump_unwind_info( base, function );
@@ -1859,7 +2062,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
         if (info->version != 1 && info->version != 2)
         {
             FIXME( "unknown unwind info version %u at %p\n", info->version, info );
-            return NULL;
+            return STATUS_BAD_FUNCTION_TABLE;
         }
 
         if (info->frame_reg)
@@ -1880,7 +2083,8 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
                 TRACE("inside epilog.\n");
                 interpret_epilog( (BYTE *)pc, context, ctx_ptr );
                 *frame_ret = frame;
-                return NULL;
+                *handler_ret = NULL;
+                return STATUS_SUCCESS;
             }
         }
 
@@ -1959,11 +2163,109 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
         context->Rsp += sizeof(ULONG64);
     }
 
-    if (!(info->flags & type)) return NULL;  /* no matching handler */
-    if (prolog_offset != ~0) return NULL;  /* inside prolog */
+    *handler_ret = NULL;
 
+    if (!(info->flags & type)) return STATUS_SUCCESS;  /* no matching handler */
+    if (prolog_offset != ~0) return STATUS_SUCCESS;  /* inside prolog */
+
+    *handler_ret = (PEXCEPTION_ROUTINE)((char *)base + handler_data->handler);
     *data = &handler_data->handler + 1;
-    return (char *)base + handler_data->handler;
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *              RtlVirtualUnwind   (NTDLL.@)
+ */
+PEXCEPTION_ROUTINE WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
+                                            RUNTIME_FUNCTION *func, CONTEXT *context,
+                                            PVOID *handler_data, ULONG64 *frame_ret,
+                                            KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+{
+    PEXCEPTION_ROUTINE handler;
+
+    if (!RtlVirtualUnwind2( type, base, pc, func, context, NULL, handler_data,
+                           frame_ret, ctx_ptr, NULL, NULL, &handler, 0 ))
+        return handler;
+
+    context->Rip = 0;
+    return NULL;
+}
+
+
+/*******************************************************************
+ *		__C_specific_handler (NTDLL.@)
+ */
+EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec, void *frame,
+                                                   CONTEXT *context, DISPATCHER_CONTEXT *dispatch )
+{
+    const SCOPE_TABLE *table = dispatch->HandlerData;
+    ULONG_PTR base = dispatch->ImageBase;
+    ULONG_PTR pc = dispatch->ControlPc;
+    unsigned int i;
+
+#ifdef __arm64ec__
+    if (RtlIsEcCode( pc ))
+        return __C_specific_handler_arm64( rec, frame, (ARM64_NT_CONTEXT *)context,
+                                           (DISPATCHER_CONTEXT_ARM64 *)dispatch );
+#endif
+
+    TRACE( "%p %p %p %p pc %Ix\n", rec, frame, context, dispatch, pc );
+    if (TRACE_ON(unwind)) DUMP_SCOPE_TABLE( base, table );
+
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND))
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (table->ScopeRecord[i].JumpTarget) continue;
+
+            if (rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND &&
+                dispatch->TargetIp >= base + table->ScopeRecord[i].BeginAddress &&
+                dispatch->TargetIp < base + table->ScopeRecord[i].EndAddress)
+            {
+                break;
+            }
+            else
+            {
+                PTERMINATION_HANDLER handler = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+                dispatch->ScopeIndex = i + 1;
+                TRACE( "scope %u calling __finally %p frame %p\n", i, handler, frame );
+                handler( TRUE, frame );
+            }
+        }
+    }
+    else
+    {
+        for (i = dispatch->ScopeIndex; i < table->Count; i++)
+        {
+            if (pc < base + table->ScopeRecord[i].BeginAddress) continue;
+            if (pc >= base + table->ScopeRecord[i].EndAddress) continue;
+            if (!table->ScopeRecord[i].JumpTarget) continue;
+
+            if (table->ScopeRecord[i].HandlerAddress != EXCEPTION_EXECUTE_HANDLER)
+            {
+                EXCEPTION_POINTERS ptrs = { rec, context };
+                PEXCEPTION_FILTER filter = (void *)(base + table->ScopeRecord[i].HandlerAddress);
+
+                TRACE( "scope %u calling filter %p ptrs %p frame %p\n", i, filter, &ptrs, frame );
+                switch (filter( &ptrs, frame ))
+                {
+                case EXCEPTION_EXECUTE_HANDLER:
+                    break;
+                case EXCEPTION_CONTINUE_SEARCH:
+                    continue;
+                case EXCEPTION_CONTINUE_EXECUTION:
+                    return ExceptionContinueExecution;
+                }
+            }
+            TRACE( "unwinding to target %Ix\n", base + table->ScopeRecord[i].JumpTarget );
+            RtlUnwindEx( frame, (char *)base + table->ScopeRecord[i].JumpTarget,
+                         rec, 0, dispatch->ContextRecord, dispatch->HistoryTable );
+        }
+    }
+    return ExceptionContinueSearch;
 }
 
 
@@ -1978,7 +2280,7 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG_PTR pc, ULONG_PTR *base,
     ULONG size;
 
 #ifdef __arm64ec__
-    if (RtlIsEcCode( (void *)pc ))
+    if (RtlIsEcCode( pc ))
         return (RUNTIME_FUNCTION *)RtlLookupFunctionEntry_arm64( pc, base, table );
 #endif
 

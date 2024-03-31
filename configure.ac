@@ -154,26 +154,6 @@ case $host in
     ;;
 esac
 
-enable_win16=${enable_win16:-i386}
-enable_win64=${enable_win64:-no}
-enable_wow64=${enable_wow64:-aarch64,x86_64}
-enable_wow64win=${enable_wow64win:-aarch64,x86_64}
-enable_wow64cpu=${enable_wow64cpu:-x86_64}
-enable_vcruntime140_1=${enable_vcruntime140_1:-x86_64,arm64ec}
-
-dnl Explicitly enable some programs for arm64ec
-enable_cmd=${enable_cmd:-yes}
-enable_dllhost=${enable_dllhost:-yes}
-enable_dpnsvr=${enable_dpnsvr:-i386,x86_64,arm64ec}
-enable_dxdiag=${enable_dxdiag:-yes}
-enable_msiexec=${enable_msiexec:-yes}
-enable_netsh=${enable_netsh:-yes}
-enable_regsvr32=${enable_regsvr32:-yes}
-enable_rundll32=${enable_rundll32:-yes}
-
-dnl Disable winetest too if tests are disabled
-enable_winetest=${enable_winetest:-$enable_tests}
-
 dnl Some special cases for the 64-bit build
 if test "x$enable_win64" = "xyes"
 then
@@ -966,7 +946,10 @@ This is an error since --enable-archs=$wine_arch was requested.])])
     WINE_TRY_PE_CFLAGS([-Wpointer-arith])
     WINE_TRY_PE_CFLAGS([-Wlogical-op])
     WINE_TRY_PE_CFLAGS([-Wabsolute-value])
-    WINE_TRY_PE_CFLAGS([-Wenum-conversion])
+    WINE_TRY_PE_CFLAGS([-Wenum-enum-conversion],[:],WINE_TRY_PE_CFLAGS([-Wenum-conversion]))
+
+    dnl GCC can't handle large files when -Wmisleading-indentation is enabled (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=89549)
+    WINE_TRY_PE_CFLAGS([-flarge-source-files -Wmisleading-indentation],[AS_VAR_APPEND(${wine_arch}_EXTRACFLAGS,[" -Wno-misleading-indentation"])])
 
     case $wine_arch in
       i386) WINE_TRY_PE_CFLAGS([-fno-omit-frame-pointer])
@@ -1379,6 +1362,22 @@ then
     WINE_PACKAGE_FLAGS(XKBREGISTRY,[xkbregistry],,,,
         [AC_CHECK_HEADERS([xkbcommon/xkbregistry.h])
          AC_CHECK_LIB(xkbregistry,rxkb_context_new,[:],[XKBREGISTRY_LIBS=""],[$XKBREGISTRY_LIBS])])
+    if test "x$with_opengl" != "xno"
+    then
+        WINE_PACKAGE_FLAGS(EGL,[egl],[-lEGL],,,
+            [AC_CHECK_HEADER([EGL/egl.h],
+               [WINE_CHECK_SONAME(EGL,eglGetProcAddress,,,[$EGL_LIBS])])])
+        WINE_PACKAGE_FLAGS(WAYLAND_EGL,[wayland-egl],,,,
+            [AC_CHECK_HEADER([wayland-egl.h],
+               [AC_CHECK_LIB(wayland-egl,wl_egl_window_create,
+                  [AC_DEFINE(HAVE_LIBWAYLAND_EGL, 1, [Define if we have the wayland-egl development environment])],
+                  [WAYLAND_EGL_LIBS=""],[$WAYLAND_EGL_LIBS])])])
+        if test "x$with_wayland" != "x"
+        then
+            WINE_NOTICE_WITH(opengl, [test -z "$ac_cv_lib_soname_EGL" -o "$ac_cv_lib_wayland_egl_wl_egl_window_create" != yes],
+                [EGL ${notice_platform}development files not found, the Wayland driver won't support OpenGL])
+        fi
+    fi
 fi
 WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS" -o -z "$WAYLAND_SCANNER" -o -z "$XKBCOMMON_LIBS" -o -z "$XKBREGISTRY_LIBS" -o "$ac_cv_header_linux_input_h" = "no"],
                  [Wayland ${notice_platform}development files not found, the Wayland driver won't be supported.],
@@ -1839,7 +1838,7 @@ then
     WINE_CHECK_LIB(vulkan, vkGetInstanceProcAddr)
     if test "x$ac_cv_lib_vulkan_vkGetInstasnceProcAddr" != "xyes"
     then
-        WINE_CHECK_SONAME(MoltenVK, vkGetInstanceProcAddr)
+        WINE_CHECK_SONAME(MoltenVK, vkGetInstanceProcAddr, [AC_DEFINE_UNQUOTED(SONAME_LIBVULKAN,[$ac_cv_lib_soname_MoltenVK])])
     fi
 fi
 WINE_NOTICE_WITH(vulkan,[test "x$ac_cv_lib_vulkan_vkGetInstanceProcAddr" != "xyes" -a "x$ac_cv_lib_soname_MoltenVK" = "x"],
@@ -1873,6 +1872,9 @@ then
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
   WINE_TRY_CFLAGS([-Wvla])
   WINE_TRY_CFLAGS([-Wwrite-strings])
+
+  dnl GCC can't handle large files when -Wmisleading-indentation is enabled (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=89549)
+  WINE_TRY_CFLAGS([-flarge-source-files -Wmisleading-indentation],[EXTRACFLAGS="$EXTRACFLAGS -Wno-misleading-indentation"])
 
   dnl Check for noisy string.h
   WINE_TRY_CFLAGS([-Wpointer-arith],
@@ -2152,7 +2154,7 @@ AC_CACHE_CHECK([whether we can use re-entrant gethostbyname_r Linux style],
    fi
 
 dnl Check for socket structure members
-AC_CHECK_MEMBERS([struct msghdr.msg_accrights, struct sockaddr_un.sun_len],,,
+AC_CHECK_MEMBERS([struct sockaddr_un.sun_len],,,
 [#include <sys/types.h>
 #include <sys/socket.h>
 #ifdef HAVE_SYS_UN_H
@@ -2359,6 +2361,35 @@ esac
 case $host_vendor in
   *sun*) WINE_CHECK_DEFINE([__sun__]) ;;
 esac
+
+dnl *** Check for modules to disable by default
+
+enable_win16=${enable_win16:-i386}
+enable_vcruntime140_1=${enable_vcruntime140_1:-x86_64,arm64ec}
+
+if test -n "$PE_ARCHS"
+then
+    enable_wow64=${enable_wow64:-aarch64,x86_64}
+    enable_wow64win=${enable_wow64win:-aarch64,x86_64}
+    enable_wow64cpu=${enable_wow64cpu:-x86_64}
+else
+    enable_wow64=${enable_wow64:-no}
+    enable_wow64win=${enable_wow64win:-no}
+    enable_wow64cpu=${enable_wow64cpu:-no}
+fi
+
+dnl Explicitly enable some programs for arm64ec
+enable_cmd=${enable_cmd:-yes}
+enable_dllhost=${enable_dllhost:-yes}
+enable_dpnsvr=${enable_dpnsvr:-i386,x86_64,arm64ec}
+enable_dxdiag=${enable_dxdiag:-yes}
+enable_msiexec=${enable_msiexec:-yes}
+enable_netsh=${enable_netsh:-yes}
+enable_regsvr32=${enable_regsvr32:-yes}
+enable_rundll32=${enable_rundll32:-yes}
+
+dnl Disable winetest too if tests are disabled
+enable_winetest=${enable_winetest:-$enable_tests}
 
 dnl **** Generate output files ****
 

@@ -158,11 +158,9 @@ extern BOOL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
                         INT bottom, INT xstart, INT ystart, INT xend, INT yend );
 extern BOOL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                           INT xstart, INT ystart, INT xend, INT yend );
-extern NTSTATUS X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc );
 extern NTSTATUS X11DRV_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc );
 extern NTSTATUS X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc );
 extern NTSTATUS X11DRV_D3DKMTQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc );
-extern NTSTATUS X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc );
 extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom );
 extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType );
 extern BOOL X11DRV_FillPath( PHYSDEV dev );
@@ -294,7 +292,7 @@ extern BOOL shape_layered_windows;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void);
 
 extern struct opengl_funcs *get_glx_driver(UINT);
-extern const struct vulkan_funcs *get_vulkan_driver(UINT);
+extern UINT X11DRV_VulkanInit( UINT, void *, struct vulkan_funcs * );
 
 extern struct format_entry *import_xdnd_selection( Display *display, Window win, Atom selection,
                                                    Atom *targets, UINT count,
@@ -573,6 +571,8 @@ extern BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *event );
 extern int xinput2_opcode;
 extern void x11drv_xinput2_load(void);
 extern void x11drv_xinput2_init( struct x11drv_thread_data *data );
+extern void x11drv_xinput2_enable( Display *display, Window window );
+extern void x11drv_xinput2_disable( Display *display, Window window );
 
 #ifdef HAVE_LIBX11
 #define pXGetEventData XGetEventData

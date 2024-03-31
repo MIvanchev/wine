@@ -113,7 +113,7 @@ DEFINE_SYSCALL_HELPER32()
 static DWORD raise_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                             CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    if (rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND))
         return ExceptionContinueSearch;
     /* We shouldn't get here so we store faulty frame in dispatcher */
     *dispatcher = ((EXC_NESTED_FRAME*)frame)->prevFrame;
@@ -129,7 +129,7 @@ static DWORD raise_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD
 static DWORD unwind_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                              CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    if (!(rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))
+    if (!(rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)))
         return ExceptionContinueSearch;
     /* We shouldn't get here so we store faulty frame in dispatcher */
     *dispatcher = ((EXC_NESTED_FRAME*)frame)->prevFrame;
@@ -154,7 +154,7 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
         /* Check frame address */
         if (!is_valid_frame( (ULONG_PTR)frame ))
         {
-            rec->ExceptionFlags |= EH_STACK_INVALID;
+            rec->ExceptionFlags |= EXCEPTION_STACK_INVALID;
             break;
         }
 
@@ -168,19 +168,19 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
         {
             /* no longer nested */
             nested_frame = NULL;
-            rec->ExceptionFlags &= ~EH_NESTED_CALL;
+            rec->ExceptionFlags &= ~EXCEPTION_NESTED_CALL;
         }
 
         switch(res)
         {
         case ExceptionContinueExecution:
-            if (!(rec->ExceptionFlags & EH_NONCONTINUABLE)) return STATUS_SUCCESS;
+            if (!(rec->ExceptionFlags & EXCEPTION_NONCONTINUABLE)) return STATUS_SUCCESS;
             return STATUS_NONCONTINUABLE_EXCEPTION;
         case ExceptionContinueSearch:
             break;
         case ExceptionNestedException:
             if (nested_frame < dispatch) nested_frame = dispatch;
-            rec->ExceptionFlags |= EH_NESTED_CALL;
+            rec->ExceptionFlags |= EXCEPTION_NESTED_CALL;
             break;
         default:
             return STATUS_INVALID_DISPOSITION;
@@ -341,7 +341,7 @@ void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID ta
         pRecord = &record;
     }
 
-    pRecord->ExceptionFlags |= EH_UNWINDING | (pEndFrame ? 0 : EH_EXIT_UNWIND);
+    pRecord->ExceptionFlags |= EXCEPTION_UNWINDING | (pEndFrame ? 0 : EXCEPTION_EXIT_UNWIND);
 
     TRACE( "code=%lx flags=%lx\n", pRecord->ExceptionCode, pRecord->ExceptionFlags );
     TRACE_CONTEXT( context );
@@ -452,32 +452,25 @@ __ASM_STDCALL_FUNC( RtlRaiseException, 4,
 
 
 /*************************************************************************
- *		RtlCaptureStackBackTrace (NTDLL.@)
+ *		RtlWalkFrameChain (NTDLL.@)
  */
-USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, ULONG *hash )
+ULONG WINAPI RtlWalkFrameChain( void **buffer, ULONG count, ULONG flags )
 {
     CONTEXT context;
-    ULONG i;
     ULONG *frame;
+    ULONG i, skip = flags >> 8, pos = 0;
 
     RtlCaptureContext( &context );
-    if (hash) *hash = 0;
-    frame = (ULONG *)context.Ebp;
-
-    while (skip--)
-    {
-        if (!is_valid_frame( (ULONG_PTR)frame )) return 0;
-        frame = (ULONG *)*frame;
-    }
 
     for (i = 0; i < count; i++)
     {
-        if (!is_valid_frame( (ULONG_PTR)frame )) break;
-        buffer[i] = (void *)frame[1];
-        if (hash) *hash += frame[1];
-        frame = (ULONG *)*frame;
+        if (!is_valid_frame( context.Ebp )) break;
+        if (i >= skip) buffer[pos++] = (void *)context.Eip;
+        frame = (ULONG *)context.Ebp;
+        context.Ebp = frame[0];
+        context.Eip = frame[1];
     }
-    return i;
+    return pos;
 }
 
 

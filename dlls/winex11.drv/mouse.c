@@ -230,11 +230,10 @@ static void update_relative_valuators( XIAnyClassInfo **classes, int num_classes
 
 
 /***********************************************************************
- *              enable_xinput2
+ *              x11drv_xinput2_enable
  */
-static void enable_xinput2(void)
+void x11drv_xinput2_enable( Display *display, Window window )
 {
-    struct x11drv_thread_data *data = x11drv_thread_data();
     XIEventMask mask;
     unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)];
 
@@ -244,21 +243,29 @@ static void enable_xinput2(void)
     mask.mask_len = sizeof(mask_bits);
     mask.deviceid = XIAllMasterDevices;
     memset( mask_bits, 0, sizeof(mask_bits) );
-    XISetMask( mask_bits, XI_DeviceChanged );
-    XISetMask( mask_bits, XI_RawMotion );
-    XISetMask( mask_bits, XI_ButtonPress );
-    pXISelectEvents( data->display, DefaultRootWindow( data->display ), &mask, 1 );
+
+    if (window == DefaultRootWindow( display ))
+    {
+        XISetMask( mask_bits, XI_DeviceChanged );
+        XISetMask( mask_bits, XI_RawMotion );
+        XISetMask( mask_bits, XI_ButtonPress );
+    }
+    else
+    {
+        XISetMask( mask_bits, XI_TouchBegin );
+        XISetMask( mask_bits, XI_TouchUpdate );
+        XISetMask( mask_bits, XI_TouchEnd );
+    }
+
+    pXISelectEvents( display, window, &mask, 1 );
 }
 
-#endif
 
 /***********************************************************************
- *              disable_xinput2
+ *              x11drv_xinput2_disable
  */
-static void disable_xinput2(void)
+void x11drv_xinput2_disable( Display *display, Window window )
 {
-#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
-    struct x11drv_thread_data *data = x11drv_thread_data();
     unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)];
     XIEventMask mask;
 
@@ -268,9 +275,11 @@ static void disable_xinput2(void)
     mask.mask_len = sizeof(mask_bits);
     mask.deviceid = XIAllMasterDevices;
     memset( mask_bits, 0, sizeof(mask_bits) );
-    XISetMask( mask_bits, XI_DeviceChanged );
-    pXISelectEvents( data->display, DefaultRootWindow( data->display ), &mask, 1 );
-#endif
+
+    if (window == DefaultRootWindow( display ))
+        XISetMask( mask_bits, XI_DeviceChanged );
+
+    pXISelectEvents( display, window, &mask, 1 );
 }
 
 
@@ -279,7 +288,6 @@ static void disable_xinput2(void)
  */
 void x11drv_xinput2_init( struct x11drv_thread_data *data )
 {
-#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
     unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)];
     int major = 2, minor = 2;
     XIEventMask mask;
@@ -309,9 +317,23 @@ void x11drv_xinput2_init( struct x11drv_thread_data *data )
     }
 
     TRACE( "XInput2 %d.%d available\n", major, minor );
-#endif
 }
 
+#else /* HAVE_X11_EXTENSIONS_XINPUT2_H */
+
+void x11drv_xinput2_enable( Display *display, Window window )
+{
+}
+
+void x11drv_xinput2_disable( Display *display, Window window )
+{
+}
+
+void x11drv_xinput2_init( struct x11drv_thread_data *data )
+{
+}
+
+#endif /* HAVE_X11_EXTENSIONS_XINPUT2_H */
 
 /***********************************************************************
  *		grab_clipping_window
@@ -347,7 +369,7 @@ static BOOL grab_clipping_window( const RECT *clip )
     }
 
     /* enable XInput2 unless we are already clipping */
-    if (!data->clipping_cursor) enable_xinput2();
+    if (!data->clipping_cursor) x11drv_xinput2_enable( data->display, DefaultRootWindow( data->display ) );
 
     TRACE( "clipping to %s win %lx\n", wine_dbgstr_rect(clip), clip_window );
 
@@ -380,7 +402,7 @@ static BOOL grab_clipping_window( const RECT *clip )
 
     if (!clipping_cursor)
     {
-        disable_xinput2();
+        x11drv_xinput2_disable( data->display, DefaultRootWindow( data->display ) );
         return FALSE;
     }
     clip_rect = *clip;
@@ -409,7 +431,7 @@ void ungrab_clipping_window(void)
     if (clipping_cursor) XUngrabPointer( data->display, CurrentTime );
     clipping_cursor = FALSE;
     data->clipping_cursor = FALSE;
-    disable_xinput2();
+    x11drv_xinput2_disable( data->display, DefaultRootWindow( data->display ) );
 }
 
 /***********************************************************************
@@ -501,7 +523,7 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
     {
         struct x11drv_thread_data *thread_data = x11drv_thread_data();
         if (!thread_data->clipping_cursor || thread_data->clip_window != window) return;
-        __wine_send_input( hwnd, input, NULL );
+        NtUserSendHardwareInput( hwnd, 0, input, 0 );
         return;
     }
 
@@ -528,7 +550,7 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
         SERVER_END_REQ;
     }
 
-    __wine_send_input( hwnd, input, NULL );
+    NtUserSendHardwareInput( hwnd, 0, input, 0 );
 }
 
 #ifdef HAVE_LIBXCURSOR
@@ -1467,7 +1489,7 @@ void move_resize_window( HWND hwnd, int dir )
             input.mi.dwFlags     = button_up_flags[button - 1] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
             input.mi.time        = NtGetTickCount();
             input.mi.dwExtraInfo = 0;
-            __wine_send_input( hwnd, &input, NULL );
+            NtUserSendHardwareInput( hwnd, 0, &input, 0 );
         }
 
         while (NtUserPeekMessage( &msg, 0, 0, 0, PM_REMOVE ))
@@ -1695,7 +1717,45 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
     input.mi.dy          = 0;
     if (!map_raw_event_coords( event, &input )) return FALSE;
 
-    __wine_send_input( 0, &input, NULL );
+    NtUserSendHardwareInput( 0, 0, &input, 0 );
+    return TRUE;
+}
+
+static BOOL X11DRV_TouchEvent( HWND hwnd, XGenericEventCookie *xev )
+{
+    RECT virtual = NtUserGetVirtualScreenRect();
+    INPUT input = {.type = INPUT_HARDWARE};
+    XIDeviceEvent *event = xev->data;
+    int flags = 0;
+    POINT pos;
+
+    input.mi.dx = event->event_x;
+    input.mi.dy = event->event_y;
+    map_event_coords( hwnd, event->event, event->root, event->root_x, event->root_y, &input );
+    pos.x = input.mi.dx * 65535 / (virtual.right - virtual.left);
+    pos.y = input.mi.dy * 65535 / (virtual.bottom - virtual.top);
+
+    switch (event->evtype)
+    {
+    case XI_TouchBegin:
+        input.hi.uMsg = WM_POINTERDOWN;
+        flags |= POINTER_MESSAGE_FLAG_NEW;
+        TRACE("XI_TouchBegin detail %u pos %dx%d, flags %#x\n", event->detail, (int)pos.x, (int)pos.y, flags);
+        break;
+    case XI_TouchEnd:
+        input.hi.uMsg = WM_POINTERUP;
+        TRACE("XI_TouchEnd detail %u pos %dx%d, flags %#x\n", event->detail, (int)pos.x, (int)pos.y, flags);
+        break;
+    case XI_TouchUpdate:
+        input.hi.uMsg = WM_POINTERUPDATE;
+        TRACE("XI_TouchUpdate detail %u pos %dx%d, flags %#x\n", event->detail, (int)pos.x, (int)pos.y, flags);
+        break;
+    }
+
+    input.hi.wParamL = event->detail;
+    input.hi.wParamH = POINTER_MESSAGE_FLAG_INRANGE | POINTER_MESSAGE_FLAG_INCONTACT | flags;
+    NtUserSendHardwareInput( hwnd, 0, &input, MAKELPARAM( pos.x, pos.y ) );
+
     return TRUE;
 }
 
@@ -1742,6 +1802,12 @@ BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *xev )
         break;
     case XI_RawMotion:
         ret = X11DRV_RawMotion( event );
+        break;
+
+    case XI_TouchBegin:
+    case XI_TouchUpdate:
+    case XI_TouchEnd:
+        ret = X11DRV_TouchEvent( hwnd, event );
         break;
 
     default:

@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <dlfcn.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 
@@ -81,8 +83,6 @@ void vkDestroyInstance(VkInstance, const VkAllocationCallbacks *);
 void vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 void vkDestroySwapchainKHR(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
 VkResult vkEnumerateInstanceExtensionProperties(const char *, uint32_t *, VkExtensionProperties *);
-void * vkGetDeviceProcAddr(VkDevice, const char *);
-void * vkGetInstanceProcAddr(VkInstance, const char *);
 VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice, uint32_t, Display *, VisualID);
 VkResult vkGetSwapchainImagesKHR(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
 VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
@@ -94,29 +94,15 @@ VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
 #define pvkDestroySurfaceKHR                           vkDestroySurfaceKHR
 #define pvkDestroySwapchainKHR                         vkDestroySwapchainKHR
 #define pvkEnumerateInstanceExtensionProperties        vkEnumerateInstanceExtensionProperties
-#define pvkGetDeviceProcAddr                           vkGetDeviceProcAddr
-#define pvkGetInstanceProcAddr                         vkGetInstanceProcAddr
 #define pvkGetPhysicalDeviceXlibPresentationSupportKHR vkGetPhysicalDeviceXlibPresentationSupportKHR
 #define pvkGetSwapchainImagesKHR                       vkGetSwapchainImagesKHR
 #define pvkQueuePresentKHR vkQueuePresentKHR
 
-static void *X11DRV_get_vk_device_proc_addr(const char *name);
-static void *X11DRV_get_vk_instance_proc_addr(VkInstance instance, const char *name);
+static const struct vulkan_funcs vulkan_funcs;
 
 static inline struct wine_vk_surface *surface_from_handle(VkSurfaceKHR handle)
 {
     return (struct wine_vk_surface *)(uintptr_t)handle;
-}
-
-static int vulkan_initialized;
-
-static void wine_vk_init(void)
-{
-    init_recursive_mutex(&vulkan_mutex);
-
-    vulkan_initialized = 1;
-    vulkan_hwnd_context = XUniqueContext();
-    return;
 }
 
 /* Helper function for converting between win32 and X11 compatible VkInstanceCreateInfo.
@@ -359,13 +345,8 @@ static void X11DRV_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
-    /* vkDestroySurfaceKHR must handle VK_NULL_HANDLE (0) for surface. */
-    if (x11_surface)
-    {
-        pvkDestroySurfaceKHR( instance, x11_surface->host_surface, NULL /* allocator */ );
-
-        wine_vk_surface_release(x11_surface);
-    }
+    pvkDestroySurfaceKHR( instance, x11_surface->host_surface, NULL /* allocator */ );
+    wine_vk_surface_release(x11_surface);
 }
 
 static void X11DRV_vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
@@ -418,44 +399,6 @@ static VkResult X11DRV_vkEnumerateInstanceExtensionProperties(const char *layer_
 
     TRACE("Returning %u extensions.\n", *count);
     return res;
-}
-
-static const char *wine_vk_host_fn_name( const char *name )
-{
-    if (!strcmp(name, "vkCreateWin32SurfaceKHR"))
-        return "vkCreateXlibSurfaceKHR";
-    if (!strcmp(name, "vkGetPhysicalDeviceWin32PresentationSupportKHR"))
-        return "vkGetPhysicalDeviceXlibPresentationSupportKHR";
-
-    return name;
-}
-
-static void *X11DRV_vkGetDeviceProcAddr(VkDevice device, const char *name)
-{
-    void *proc_addr;
-
-    TRACE("%p, %s\n", device, debugstr_a(name));
-
-    if (!pvkGetDeviceProcAddr( device, wine_vk_host_fn_name( name ) )) return NULL;
-
-    if ((proc_addr = X11DRV_get_vk_device_proc_addr(name)))
-        return proc_addr;
-
-    return pvkGetDeviceProcAddr(device, name);
-}
-
-static void *X11DRV_vkGetInstanceProcAddr(VkInstance instance, const char *name)
-{
-    void *proc_addr;
-
-    TRACE("%p, %s\n", instance, debugstr_a(name));
-
-    if (!pvkGetInstanceProcAddr( instance, wine_vk_host_fn_name( name ) )) return NULL;
-
-    if ((proc_addr = X11DRV_get_vk_instance_proc_addr(instance, name)))
-        return proc_addr;
-
-    return pvkGetInstanceProcAddr(instance, name);
 }
 
 static VkBool32 X11DRV_vkGetPhysicalDeviceWin32PresentationSupportKHR(VkPhysicalDevice phys_dev,
@@ -524,8 +467,8 @@ static const struct vulkan_funcs vulkan_funcs =
     X11DRV_vkDestroySurfaceKHR,
     X11DRV_vkDestroySwapchainKHR,
     X11DRV_vkEnumerateInstanceExtensionProperties,
-    X11DRV_vkGetDeviceProcAddr,
-    X11DRV_vkGetInstanceProcAddr,
+    NULL,
+    NULL,
     X11DRV_vkGetPhysicalDeviceWin32PresentationSupportKHR,
     X11DRV_vkGetSwapchainImagesKHR,
     X11DRV_vkQueuePresentKHR,
@@ -533,39 +476,40 @@ static const struct vulkan_funcs vulkan_funcs =
     X11DRV_wine_get_host_surface,
 };
 
-static void *X11DRV_get_vk_device_proc_addr(const char *name)
+UINT X11DRV_VulkanInit( UINT version, void *vulkan_handle, struct vulkan_funcs *driver_funcs )
 {
-    return get_vulkan_driver_device_proc_addr(&vulkan_funcs, name);
-}
-
-static void *X11DRV_get_vk_instance_proc_addr(VkInstance instance, const char *name)
-{
-    return get_vulkan_driver_instance_proc_addr(&vulkan_funcs, instance, name);
-}
-
-const struct vulkan_funcs *get_vulkan_driver(UINT version)
-{
-    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
-
     if (version != WINE_VULKAN_DRIVER_VERSION)
     {
-        ERR("version mismatch, vulkan wants %u but driver has %u\n", version, WINE_VULKAN_DRIVER_VERSION);
-        return NULL;
+        ERR( "version mismatch, win32u wants %u but driver has %u\n", version, WINE_VULKAN_DRIVER_VERSION );
+        return STATUS_INVALID_PARAMETER;
     }
 
-    pthread_once(&init_once, wine_vk_init);
-    if (vulkan_initialized)
-        return &vulkan_funcs;
+    init_recursive_mutex( &vulkan_mutex );
 
-    return NULL;
+#define LOAD_FUNCPTR( f ) if (!(p##f = dlsym( vulkan_handle, #f ))) return STATUS_PROCEDURE_NOT_FOUND;
+    LOAD_FUNCPTR( vkCreateInstance );
+    LOAD_FUNCPTR( vkCreateSwapchainKHR );
+    LOAD_FUNCPTR( vkCreateXlibSurfaceKHR );
+    LOAD_FUNCPTR( vkDestroyInstance );
+    LOAD_FUNCPTR( vkDestroySurfaceKHR );
+    LOAD_FUNCPTR( vkDestroySwapchainKHR );
+    LOAD_FUNCPTR( vkEnumerateInstanceExtensionProperties );
+    LOAD_FUNCPTR( vkGetPhysicalDeviceXlibPresentationSupportKHR );
+    LOAD_FUNCPTR( vkGetSwapchainImagesKHR );
+    LOAD_FUNCPTR( vkQueuePresentKHR );
+#undef LOAD_FUNCPTR
+
+    vulkan_hwnd_context = XUniqueContext();
+    *driver_funcs = vulkan_funcs;
+    return STATUS_SUCCESS;
 }
 
 #else /* No vulkan */
 
-const struct vulkan_funcs *get_vulkan_driver(UINT version)
+UINT X11DRV_VulkanInit( UINT version, void *vulkan_handle, struct vulkan_funcs *driver_funcs )
 {
-    ERR("Wine was built without Vulkan support.\n");
-    return NULL;
+    ERR( "Wine was built without Vulkan support.\n" );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 void wine_vk_surface_destroy(HWND hwnd)
