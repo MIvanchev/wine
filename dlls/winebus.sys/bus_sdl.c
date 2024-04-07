@@ -127,7 +127,8 @@ static struct list device_list = LIST_INIT(device_list);
 #define SDL_HAS_JOYSTICKGETPRODUCTVERSION   (SDL_VERSION_ATLEAST(2, 0, 6))
 #define SDL_HAS_JOYSTICKGETVENDOR           (SDL_VERSION_ATLEAST(2, 0, 6))
 #define SDL_HAS_JOYSTICKGETTYPE             (SDL_VERSION_ATLEAST(2, 0, 6))
-#define SDK_HAS_JOYSTICKGETSERIAL           (SDL_VERSION_ATLEAST(2, 0, 14))
+#define SDL_HAS_JOYSTICKGETSERIAL           (SDL_VERSION_ATLEAST(2, 0, 14))
+#define SDL_HAS_GAMECONTROLLERADDMAPPING    (SDL_VERSION_ATLEAST(2, 0, 0))
 
 /* internal bits for extended rumble support, SDL_Haptic types are 16-bits */
 #define WINE_SDL_JOYSTICK_RUMBLE  0x40000000 /* using SDL_JoystickRumble API */
@@ -985,7 +986,7 @@ static void sdl_add_device(unsigned int index)
 #endif
 
 #if SDL_HAS_JOYSTICKGETSERIAL
-    if (sdl_serial = pSDL_JoystickGetSerial(joystick)))
+    if ((sdl_serial = pSDL_JoystickGetSerial(joystick)))
     {
         ntdll_umbstowcs(sdl_serial, strlen(sdl_serial) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
     }
@@ -1114,7 +1115,7 @@ NTSTATUS sdl_bus_init(void *args)
     pSDL_GameControllerEventState(SDL_ENABLE);
 
     /* Process mappings */
-    if (pSDL_GameControllerAddMapping)
+#if SDL_HAS_GAMECONTROLLERADDMAPPING
     {
         if ((mapping = getenv("SDL_GAMECONTROLLERCONFIG")))
         {
@@ -1129,6 +1130,7 @@ NTSTATUS sdl_bus_init(void *args)
                 WARN("Failed to add registry mapping %s\n", pSDL_GetError());
         }
     }
+#endif
 
     return STATUS_SUCCESS;
 

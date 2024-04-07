@@ -273,7 +273,9 @@ static NTSTATUS enum_printers( void *args )
     cups_dest_t *dests;
 
     *params->num = 0;
+#if 0
     if (!pcupsGetDests) return STATUS_NOT_SUPPORTED;
+#endif
 
     num = pcupsGetDests( &dests );
 

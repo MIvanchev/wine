@@ -389,7 +389,8 @@ static const GLubyte *(*pglGetString)(GLenum name);
 
 typedef struct osmesa_context *OSMesaContext;
 
-/* OSMesa prototypes so the OSMesa symbols will not be stripped away */
+/* static-wine32: OSMesa prototypes so the OSMesa symbols will not be stripped away */
+
 OSMesaContext OSMesaCreateContextExt( GLenum format, GLint depthBits, GLint stencilBits,
                                       GLint accumBits, OSMesaContext sharelist );
 void OSMesaDestroyContext( OSMesaContext ctx );
@@ -398,9 +399,13 @@ GLboolean OSMesaMakeCurrent( OSMesaContext ctx, void *buffer, GLenum type,
                              GLsizei width, GLsizei height );
 void OSMesaPixelStore( GLint pname, GLint value );
 
-void* OSMesa_funcs[] = { OSMesaCreateContextExt, OSMesaDestroyContext,
-                         OSMesaGetProcAddress, OSMesaMakeCurrent,
-                         OSMesaPixelStore };
+void* dummy_OSMesa_funcs[] = {
+    OSMesaCreateContextExt,
+    OSMesaDestroyContext,
+    OSMesaGetProcAddress,
+    OSMesaMakeCurrent,
+    OSMesaPixelStore
+};
 
 #endif /* HAVE_LIBOSMESA */
 

@@ -163,7 +163,7 @@ static inline void get_event_data( XEvent *event )
 {
 #if defined(GenericEvent) && defined(HAVE_XEVENT_XCOOKIE)
     if (event->xany.type != GenericEvent) return;
-    if (!pXGetEventData || !pXGetEventData( event->xany.display, event )) event->xcookie.data = NULL;
+    if (/*!pXGetEventData ||*/ !pXGetEventData( event->xany.display, event )) event->xcookie.data = NULL;
 #endif
 }
 

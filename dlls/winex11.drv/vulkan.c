@@ -76,6 +76,9 @@ typedef struct VkXlibSurfaceCreateInfoKHR
     Window window;
 } VkXlibSurfaceCreateInfoKHR;
 
+void vkGetDeviceProcAddr(VkDevice, const char *);
+void vkGetInstanceProcAddr(VkInstance, const char *);
+
 VkResult vkCreateInstance(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
 VkResult vkCreateSwapchainKHR(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
 VkResult vkCreateXlibSurfaceKHR(VkInstance, const VkXlibSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
@@ -87,6 +90,23 @@ VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice, uint32_
 VkResult vkGetSwapchainImagesKHR(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
 VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
 
+/* static-wine32: define this so no symbols are stripped away. */
+
+void* dummy_vulkan_funcs[] = {
+    vkGetDeviceProcAddr,
+    vkGetInstanceProcAddr,
+    vkCreateInstance,
+    vkCreateSwapchainKHR,
+    vkCreateXlibSurfaceKHR,
+    vkDestroyInstance,
+    vkDestroySurfaceKHR,
+    vkDestroySwapchainKHR,
+    vkEnumerateInstanceExtensionProperties,
+    vkGetPhysicalDeviceXlibPresentationSupportKHR,
+    vkGetSwapchainImagesKHR,
+    vkQueuePresentKHR
+};
+
 #define pvkCreateInstance                              vkCreateInstance
 #define pvkCreateSwapchainKHR                          vkCreateSwapchainKHR
 #define pvkCreateXlibSurfaceKHR                        vkCreateXlibSurfaceKHR
@@ -96,7 +116,7 @@ VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
 #define pvkEnumerateInstanceExtensionProperties        vkEnumerateInstanceExtensionProperties
 #define pvkGetPhysicalDeviceXlibPresentationSupportKHR vkGetPhysicalDeviceXlibPresentationSupportKHR
 #define pvkGetSwapchainImagesKHR                       vkGetSwapchainImagesKHR
-#define pvkQueuePresentKHR vkQueuePresentKHR
+#define pvkQueuePresentKHR                             vkQueuePresentKHR
 
 static const struct vulkan_funcs vulkan_funcs;
 
@@ -486,6 +506,8 @@ UINT X11DRV_VulkanInit( UINT version, void *vulkan_handle, struct vulkan_funcs *
 
     init_recursive_mutex( &vulkan_mutex );
 
+/* static-wine32 only: no need to load the functions because they exist in this module. */
+#if 0
 #define LOAD_FUNCPTR( f ) if (!(p##f = dlsym( vulkan_handle, #f ))) return STATUS_PROCEDURE_NOT_FOUND;
     LOAD_FUNCPTR( vkCreateInstance );
     LOAD_FUNCPTR( vkCreateSwapchainKHR );
@@ -498,6 +520,7 @@ UINT X11DRV_VulkanInit( UINT version, void *vulkan_handle, struct vulkan_funcs *
     LOAD_FUNCPTR( vkGetSwapchainImagesKHR );
     LOAD_FUNCPTR( vkQueuePresentKHR );
 #undef LOAD_FUNCPTR
+#endif
 
     vulkan_hwnd_context = XUniqueContext();
     *driver_funcs = vulkan_funcs;

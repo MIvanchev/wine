@@ -40,7 +40,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#ifdef SONAME_LIBVULKAN
+#ifdef HAVE_LIBVULKAN
 
 #define VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR 1000006000
 
@@ -568,4 +568,4 @@ UINT WAYLAND_VulkanInit(UINT version, void *vulkan_handle, struct vulkan_funcs *
     return STATUS_NOT_IMPLEMENTED;
 }
 
-#endif /* SONAME_LIBVULKAN */
+#endif /* HAVE_LIBVULKAN */

@@ -73,15 +73,16 @@ static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum 
                                         GLsizei width, GLsizei height );
 static void (*pOSMesaPixelStore)( GLint pname, GLint value );
 
-/* OpenGL (and OSMesa, really, it's the same blob) are statically linked in
- * winex11.so so to avoid linking them a second time we load winex11.so
- * through a dirty hack and import the symbols from there.
+/* OpenGL, OSMesa, EGL, Vulkan etc. are statically linked in
+ * winex11.so so to avoid linking them a second time we load
+ * winex11.so through a dirty hack and import the symbols from
+ * there.
  */
 
 #define BYPASS_LIBRARY "winex11.so"
 
-static int find_handle_to_winex11( struct dl_phdr_info *info,
-                                   size_t size, void *data )
+static int try_get_handle_to_winex11( struct dl_phdr_info *info,
+                                      size_t size, void *data )
 {
     const char *filename;
     char *buf;
@@ -109,7 +110,7 @@ static int find_handle_to_winex11( struct dl_phdr_info *info,
         buf = malloc(dirname_with_sep_len + strlen(BYPASS_LIBRARY) + 1);
         if (buf == NULL)
         {
-            ERR( "Failed to allocate memory for path string while initializing OSMesa.\n" );
+            ERR( "Failed to allocate memory for path string.\n" );
             goto failed_malloc;
         }
         /* Using strcpy here causes an error so 2x str(n)cat... */
@@ -121,7 +122,7 @@ static int find_handle_to_winex11( struct dl_phdr_info *info,
 
         if (handle == NULL)
         {
-            ERR( "Failed to load winex11.so in order to initialize OSMesa: %s\n", dlerror() );
+            ERR( "Failed to load winex11.so: %s\n", dlerror() );
             goto failed_dlopen;
         }
 
@@ -136,6 +137,13 @@ success:
     return ret;
 }
 
+void* get_handle_to_winex11(void)
+{
+    void *handle;
+    dl_iterate_phdr(try_get_handle_to_winex11, &handle);
+    return handle;
+}
+
 static BOOL init_opengl(void)
 {
     static BOOL init_done = FALSE;
@@ -145,7 +153,7 @@ static BOOL init_opengl(void)
     if (init_done) return (osmesa_handle != NULL);
     init_done = TRUE;
 
-    dl_iterate_phdr(find_handle_to_winex11, &osmesa_handle);
+    osmesa_handle = get_handle_to_winex11();
     if (osmesa_handle == NULL)
     {
         return FALSE;

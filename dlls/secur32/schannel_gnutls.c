@@ -62,7 +62,7 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 static const char *system_priority_file;
 
 /* Not present in gnutls version < 2.9.10. */
-static int (*pgnutls_cipher_get_block_size)(gnutls_cipher_algorithm_t);
+static unsigned int (*pgnutls_cipher_get_block_size)(gnutls_cipher_algorithm_t);
 
 /* Not present in gnutls version < 3.0. */
 static void (*pgnutls_transport_set_pull_timeout_function)(gnutls_session_t,

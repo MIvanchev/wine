@@ -267,8 +267,6 @@ NTSTATUS wg_init_gstreamer(void *arg)
         return STATUS_UNSUCCESSFUL;
     }
 
-    gst_init_static_plugins();
-
     GST_DEBUG_CATEGORY_INIT(wine, "WINE", GST_DEBUG_FG_RED, "Wine GStreamer support");
 
     GST_INFO("GStreamer library version %s; wine built with %d.%d.%d.",

@@ -1990,7 +1990,9 @@ static BOOL xrenderdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG n
     RECT rc;
     POINT pt[2];
 
+#if 0
     if (!pXRenderCreateLinearGradient) goto fallback;
+#endif
 
     /* <= 16-bpp uses dithering */
     if (!physdev->pict_format || physdev->pict_format->depth <= 16) goto fallback;

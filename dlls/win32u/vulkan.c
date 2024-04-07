@@ -38,7 +38,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#ifdef SONAME_LIBVULKAN
+#ifdef HAVE_LIBVULKAN
 
 static void *vulkan_handle;
 static struct vulkan_funcs vulkan_funcs;
@@ -84,13 +84,16 @@ static void *win32u_vkGetInstanceProcAddr( VkInstance instance, const char *name
     return p_vkGetInstanceProcAddr( instance, name );
 }
 
+// Defined in win32u/dibdrv/opengl.c for now
+void* get_handle_to_winex11(void);
+
 static void vulkan_init(void)
 {
     UINT status;
 
-    if (!(vulkan_handle = dlopen( SONAME_LIBVULKAN, RTLD_NOW )))
+    if (!(vulkan_handle = get_handle_to_winex11()))
     {
-        ERR( "Failed to load %s\n", SONAME_LIBVULKAN );
+        ERR( "Failed to load winex11.so\n" );
         return;
     }
 
@@ -137,7 +140,7 @@ const struct vulkan_funcs *__wine_get_vulkan_driver( UINT version )
     return vulkan_handle ? &vulkan_funcs : NULL;
 }
 
-#else /* SONAME_LIBVULKAN */
+#else /* HAVE_LIBVULKAN */
 
 /***********************************************************************
  *      __wine_get_vulkan_driver  (win32u.so)
@@ -148,4 +151,4 @@ const struct vulkan_funcs *__wine_get_vulkan_driver( UINT version )
     return NULL;
 }
 
-#endif /* SONAME_LIBVULKAN */
+#endif /* HAVE_LIBVULKAN */
