@@ -63,13 +63,9 @@ static void *win32u_vkGetInstanceProcAddr( VkInstance instance, const char *name
 {
     TRACE( "instance %p, name %s\n", instance, debugstr_a(name) );
 
-    if (!strcmp( name, "vkCreateInstance" )) return vulkan_funcs.p_vkCreateInstance;
-    if (!strcmp( name, "vkEnumerateInstanceExtensionProperties" )) return vulkan_funcs.p_vkEnumerateInstanceExtensionProperties;
-
     if (!instance) return p_vkGetInstanceProcAddr( instance, name );
 
     if (!strcmp( name, "vkCreateWin32SurfaceKHR" )) return vulkan_funcs.p_vkCreateWin32SurfaceKHR;
-    if (!strcmp( name, "vkDestroyInstance" )) return vulkan_funcs.p_vkDestroyInstance;
     if (!strcmp( name, "vkDestroySurfaceKHR" )) return vulkan_funcs.p_vkDestroySurfaceKHR;
     if (!strcmp( name, "vkGetInstanceProcAddr" )) return win32u_vkGetInstanceProcAddr;
     if (!strcmp( name, "vkGetPhysicalDeviceWin32PresentationSupportKHR" )) return vulkan_funcs.p_vkGetPhysicalDeviceWin32PresentationSupportKHR;

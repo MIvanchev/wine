@@ -1836,10 +1836,10 @@ dnl *** Check for Vulkan ***
 if test "x$with_vulkan" != "xno"
 then
     WINE_CHECK_LIB(vulkan, vkGetInstanceProcAddr)
-#    if test "x$ac_cv_lib_vulkan_vkGetInstasnceProcAddr" != "xyes"
-#    then
-#        WINE_CHECK_SONAME(MoltenVK, vkGetInstanceProcAddr, [AC_DEFINE_UNQUOTED(SONAME_LIBVULKAN,[$ac_cv_lib_soname_MoltenVK])])
-#    fi
+    # if test "x$ac_cv_lib_soname_vulkan" = "x"
+    # then
+    #     WINE_CHECK_SONAME(MoltenVK, vkGetInstanceProcAddr, [AC_DEFINE_UNQUOTED(SONAME_LIBVULKAN,["$ac_cv_lib_soname_MoltenVK"])])
+    # fi
 fi
 WINE_NOTICE_WITH(vulkan,[test "x$ac_cv_lib_vulkan_vkGetInstanceProcAddr" != "xyes" -a "x$ac_cv_lib_soname_MoltenVK" = "x"],
                  [libvulkan and libMoltenVK ${notice_platform}development files not found, Vulkan won't be supported.])

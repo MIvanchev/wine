@@ -466,8 +466,6 @@ enum wined3d_shader_backend
 {
     WINED3D_SHADER_BACKEND_AUTO,
     WINED3D_SHADER_BACKEND_GLSL,
-    WINED3D_SHADER_BACKEND_ARB,
-    WINED3D_SHADER_BACKEND_NONE,
 };
 
 #define WINED3D_CSMT_ENABLE    0x00000001
@@ -1967,7 +1965,9 @@ struct wined3d_context
     DWORD destroyed : 1;
     DWORD destroy_delayed : 1;
     DWORD namedArraysLoaded : 1;
-    DWORD padding : 5;
+    DWORD update_primitive_type : 1;
+    DWORD update_patch_vertex_count : 1;
+    DWORD padding : 3;
 
     DWORD clip_distance_mask : 8; /* WINED3D_MAX_CLIP_DISTANCES, 8 */
 

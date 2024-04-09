@@ -604,6 +604,7 @@ static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProvid
     VkPhysicalDevice *vk_physical_devices = NULL;
     VkPhysicalDeviceProperties2 properties2;
     VkPhysicalDeviceMemoryProperties mem_properties;
+    PFN_vkCreateInstance pvkCreateInstance;
     VkInstanceCreateInfo create_info;
     VkPhysicalDeviceIDProperties id;
     VkInstance vk_instance = NULL;
@@ -620,18 +621,20 @@ static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProvid
     create_info.enabledExtensionCount = ARRAY_SIZE(extensions);
     create_info.ppEnabledExtensionNames = extensions;
 
-    vr = vulkan_funcs->p_vkCreateInstance( &create_info, NULL, &vk_instance );
-    if (vr != VK_SUCCESS)
-    {
-        WARN("Failed to create a Vulkan instance, vr %d.\n", vr);
-        goto done;
-    }
-
 #define LOAD_VK_FUNC(f)                                                             \
     if (!(p##f = (void *)vulkan_funcs->p_vkGetInstanceProcAddr( vk_instance, #f ))) \
     {                                                                               \
         WARN("Failed to load " #f ".\n");                                           \
         goto done;                                                                  \
+    }
+
+    LOAD_VK_FUNC( vkCreateInstance )
+
+    vr = pvkCreateInstance( &create_info, NULL, &vk_instance );
+    if (vr != VK_SUCCESS)
+    {
+        WARN( "Failed to create a Vulkan instance, vr %d.\n", vr );
+        goto done;
     }
 
     LOAD_VK_FUNC(vkEnumeratePhysicalDevices)
@@ -711,7 +714,11 @@ static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProvid
 done:
     free( vk_physical_devices );
     if (vk_instance)
-        vulkan_funcs->p_vkDestroyInstance( vk_instance, NULL );
+    {
+        PFN_vkDestroyInstance p_vkDestroyInstance;
+        p_vkDestroyInstance = vulkan_funcs->p_vkGetInstanceProcAddr( vk_instance, "vkDestroyInstance" );
+        p_vkDestroyInstance( vk_instance, NULL );
+    }
     return ret;
 }
 
@@ -819,9 +826,9 @@ static void xrandr14_free_gpus( struct gdi_gpu *gpus )
     free( gpus );
 }
 
-static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_adapters, int *count )
+static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new_adapters, int *count )
 {
-    struct gdi_adapter *adapters = NULL;
+    struct x11drv_adapter *adapters = NULL;
     XRRScreenResources *screen_resources = NULL;
     XRRProviderInfo *provider_info = NULL;
     XRRCrtcInfo *enum_crtc_info, *crtc_info = NULL;
@@ -955,7 +962,7 @@ static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_ad
     /* Make primary adapter the first */
     if (primary_adapter)
     {
-        struct gdi_adapter tmp = adapters[0];
+        struct x11drv_adapter tmp = adapters[0];
         adapters[0] = adapters[primary_adapter];
         adapters[primary_adapter] = tmp;
     }
@@ -980,7 +987,7 @@ done:
     return ret;
 }
 
-static void xrandr14_free_adapters( struct gdi_adapter *adapters )
+static void xrandr14_free_adapters( struct x11drv_adapter *adapters )
 {
     free( adapters );
 }
@@ -1175,7 +1182,7 @@ static BOOL xrandr14_get_id( const WCHAR *device_name, BOOL is_primary, x11drv_s
     struct current_mode *tmp_modes, *new_current_modes = NULL;
     INT gpu_count, adapter_count, new_current_mode_count = 0;
     INT gpu_idx, adapter_idx, display_idx;
-    struct gdi_adapter *adapters;
+    struct x11drv_adapter *adapters;
     struct gdi_gpu *gpus;
     WCHAR *end;
 
