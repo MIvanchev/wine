@@ -47,31 +47,31 @@ WINE_DEFAULT_DEBUG_CHANNEL(localspl);
 /* cups.h before version 1.7.0 doesn't have HTTP_STATUS_CONTINUE */
 #define HTTP_STATUS_CONTINUE 100
 
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
 
-static void *libcups_handle;
+#define pcupsAddOption        cupsAddOption
+#define pcupsCreateJob        cupsCreateJob
+#define pcupsFinishDocument   cupsFinishDocument
+#define pcupsFreeDests        cupsFreeDests
+#define pcupsFreeOptions      cupsFreeOptions
+#define pcupsGetOption        cupsGetOption
+#define pcupsParseOptions     cupsParseOptions
+#define pcupsStartDocument    cupsStartDocument
+#define pcupsWriteRequestData cupsWriteRequestData
 
-#define CUPS_FUNCS \
-    DO_FUNC(cupsAddOption); \
-    DO_FUNC(cupsCreateJob); \
-    DO_FUNC(cupsFinishDocument); \
-    DO_FUNC(cupsFreeDests); \
-    DO_FUNC(cupsFreeOptions); \
-    DO_FUNC(cupsGetOption); \
-    DO_FUNC(cupsParseOptions); \
-    DO_FUNC(cupsStartDocument); \
-    DO_FUNC(cupsWriteRequestData)
-#define CUPS_OPT_FUNCS \
-    DO_FUNC(cupsGetNamedDest); \
-    DO_FUNC(cupsLastErrorString)
+#define CUPS_VERSION_ATLEAST(major, minor, patch) \
+    ((CUPS_VERSION_MAJOR) > (major) \
+     || ((CUPS_VERSION_MAJOR) == (major) && (CUPS_VERSION_MINOR) > (minor)) \
+     || ((CUPS_VERSION_MAJOR) == (major) && (CUPS_VERSION_MINOR) == (minor) \
+          && (CUPS_VERSION_PATCH) >= (patch)))
 
-#define DO_FUNC(f) static typeof(f) *p##f
-CUPS_FUNCS;
-#undef DO_FUNC
-static cups_dest_t * (*pcupsGetNamedDest)(http_t *, const char *, const char *);
-static const char *  (*pcupsLastErrorString)(void);
+#define CUPS_HAS_GETNAMEDDEST       (CUPS_VERSION_ATLEAST(1, 4, 0))
+#define CUPS_HAS_LASTERRORSTRING    (CUPS_VERSION_ATLEAST(1, 2, 0))
 
-#endif /* SONAME_LIBCUPS */
+#define pcupsGetNameDest        cupsGetNameDest
+#define pcupsLastErrorString    cupsLastErrorString
+
+#endif /* HAVE_LIBCUPS */
 
 typedef struct _doc_t
 {
@@ -89,7 +89,7 @@ typedef struct _doc_t
         {
             int fd;
         } unixname;
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
         struct
         {
             char *queue;
@@ -233,13 +233,15 @@ static BOOL lpr_start_doc(doc_t *doc, const WCHAR *printer_name)
     return ret;
 }
 
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
 static int get_cups_default_options(const char *printer, int num_options, cups_option_t **options)
 {
     cups_dest_t *dest;
     int i;
 
-    if (!pcupsGetNamedDest) return num_options;
+#if !CUPS_HAS_GETNAMEDDEST
+    return num_options;
+#endif
 
     dest = pcupsGetNamedDest(NULL, printer, NULL);
     if (!dest) return num_options;
@@ -279,8 +281,9 @@ static BOOL cups_write(const char *buf, unsigned int size)
 
     if (pcupsWriteRequestData(CUPS_HTTP_DEFAULT, buf, size) != HTTP_STATUS_CONTINUE)
     {
-        if (pcupsLastErrorString)
-            WARN("cupsWriteRequestData failed: %s\n", debugstr_a(pcupsLastErrorString()));
+#if CUPS_HAS_LASTERRORSTRING
+        WARN("cupsWriteRequestData failed: %s\n", debugstr_a(pcupsLastErrorString()));
+#endif
         return FALSE;
     }
     return TRUE;
@@ -416,7 +419,7 @@ static BOOL cups_end_doc(doc_t *doc)
 
 static BOOL cups_start_doc(doc_t *doc, const WCHAR *printer_name, const WCHAR *document_title)
 {
-#ifdef SONAME_LIBCUPS
+#ifdef HAVE_LIBCUPS
     if (pcupsWriteRequestData)
     {
         int len;
@@ -441,28 +444,11 @@ static BOOL cups_start_doc(doc_t *doc, const WCHAR *printer_name, const WCHAR *d
 
 static NTSTATUS process_attach(void *args)
 {
-#ifdef SONAME_LIBCUPS
-    libcups_handle = dlopen(SONAME_LIBCUPS, RTLD_NOW);
-    TRACE("%p: %s loaded\n", libcups_handle, SONAME_LIBCUPS);
-    if (!libcups_handle) return STATUS_DLL_NOT_FOUND;
-
-#define DO_FUNC(x) \
-    p##x = dlsym(libcups_handle, #x); \
-    if (!p##x) \
-    { \
-        ERR("failed to load symbol %s\n", #x); \
-        libcups_handle = NULL; \
-        return STATUS_ENTRYPOINT_NOT_FOUND; \
-    }
-    CUPS_FUNCS;
-#undef DO_FUNC
-#define DO_FUNC(x) p##x = dlsym(libcups_handle, #x)
-    CUPS_OPT_FUNCS;
-#undef DO_FUNC
+#ifdef HAVE_LIBCUPS
     return STATUS_SUCCESS;
-#else /* SONAME_LIBCUPS */
+#else /* HAVE_LIBCUPS */
     return STATUS_NOT_SUPPORTED;
-#endif /* SONAME_LIBCUPS */
+#endif /* HAVE_LIBCUPS */
 }
 
 static NTSTATUS start_doc(void *args)

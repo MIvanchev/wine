@@ -122,8 +122,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(winspool);
 #define pcupsFreeDests   cupsFreeDests
 #define pcupsGetDests    cupsGetDests
 #define pcupsGetOption   cupsGetOption
-#define pcupsGetPPD      cupsGetPPD
-#define pcupsGetPPD3     cupsGetPPD3
 
 #define CUPS_VERSION_ATLEAST(major, minor, patch) \
     ((CUPS_VERSION_MAJOR) > (major) \
@@ -131,8 +129,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(winspool);
      || ((CUPS_VERSION_MAJOR) == (major) && (CUPS_VERSION_MINOR) == (minor) \
           && (CUPS_VERSION_PATCH) >= (patch)))
 
-#define CUPS_HAS_CUPSGETPPD             (CUPS_VERSION_ATLEAST(0, 0, 0))
-#define CUPS_HAS_CUPSGETPPD3            (CUPS_VERSION_ATLEAST(1, 4, 0))
+#define CUPS_HAS_GETPPD     (CUPS_VERSION_ATLEAST(0, 0, 0))
+#define CUPS_HAS_GETPPD3    (CUPS_VERSION_ATLEAST(1, 4, 0))
+
+#define pcupsGetPPD      cupsGetPPD
+#define pcupsGetPPD3     cupsGetPPD3
 
 #endif /* HAVE_LIBCUPS */
 
