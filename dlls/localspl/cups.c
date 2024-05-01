@@ -68,7 +68,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(localspl);
 #define CUPS_HAS_GETNAMEDDEST       (CUPS_VERSION_ATLEAST(1, 4, 0))
 #define CUPS_HAS_LASTERRORSTRING    (CUPS_VERSION_ATLEAST(1, 2, 0))
 
-#define pcupsGetNameDest        cupsGetNameDest
+#define pcupsGetNamedDest       cupsGetNamedDest
 #define pcupsLastErrorString    cupsLastErrorString
 
 #endif /* HAVE_LIBCUPS */
