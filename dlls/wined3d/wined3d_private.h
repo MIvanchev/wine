@@ -466,6 +466,7 @@ enum wined3d_shader_backend
 {
     WINED3D_SHADER_BACKEND_AUTO,
     WINED3D_SHADER_BACKEND_GLSL,
+    WINED3D_SHADER_BACKEND_GLSL_VKD3D,
 };
 
 #define WINED3D_CSMT_ENABLE    0x00000001
@@ -2363,11 +2364,13 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX1060     = 0x1c03,
     CARD_NVIDIA_GEFORCE_GTX1060M    = 0x1c20,
     CARD_NVIDIA_GEFORCE_GTX1070     = 0x1b81,
+    CARD_NVIDIA_GEFORCE_GTX1070M    = 0x1be1,
     CARD_NVIDIA_GEFORCE_GTX1080     = 0x1b80,
     CARD_NVIDIA_GEFORCE_GTX1080M    = 0x1be0,
     CARD_NVIDIA_GEFORCE_GTX1080TI   = 0x1b06,
     CARD_NVIDIA_TITANX_PASCAL       = 0x1b00,
     CARD_NVIDIA_TITANV              = 0x1d81,
+    CARD_NVIDIA_GEFORCE_GTX1650     = 0x1f82,
     CARD_NVIDIA_GEFORCE_GTX1650SUPER= 0x2187,
     CARD_NVIDIA_GEFORCE_GTX1660SUPER= 0x21c4,
     CARD_NVIDIA_GEFORCE_GTX1660TI   = 0x2182,
@@ -2376,6 +2379,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_RTX2080     = 0x1e87,
     CARD_NVIDIA_GEFORCE_RTX2080TI   = 0x1e07,
     CARD_NVIDIA_GEFORCE_RTX3070     = 0x249d,
+    CARD_NVIDIA_GEFORCE_RTX3080     = 0x2206,
     CARD_NVIDIA_TESLA_T4            = 0x1eb8,
     CARD_NVIDIA_AMPERE_A10          = 0x2236,
 
@@ -4329,6 +4333,8 @@ HRESULT shader_generate_code(const struct wined3d_shader *shader, struct wined3d
         const struct wined3d_shader_reg_maps *reg_maps, void *backend_ctx,
         const DWORD *start, const DWORD *end);
 BOOL shader_match_semantic(const char *semantic_name, enum wined3d_decl_usage usage);
+
+enum vkd3d_shader_visibility vkd3d_shader_visibility_from_wined3d(enum wined3d_shader_type shader_type);
 
 static inline BOOL shader_is_scalar(const struct wined3d_shader_register *reg)
 {

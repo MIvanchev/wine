@@ -1604,7 +1604,7 @@ static void client_window_events_disable( struct x11drv_win_data *data, Window c
 /**********************************************************************
  *		detach_client_window
  */
-static void detach_client_window( struct x11drv_win_data *data, Window client_window )
+void detach_client_window( struct x11drv_win_data *data, Window client_window )
 {
     if (data->client_window != client_window || !client_window) return;
 
@@ -1807,12 +1807,7 @@ static void destroy_whole_window( struct x11drv_win_data *data, BOOL already_des
             Window xwin = (Window)NtUserGetProp( data->hwnd, foreign_window_prop );
             if (xwin)
             {
-                if (!already_destroyed)
-                {
-                    x11drv_xinput2_disable( data->display, xwin );
-                    XSelectInput( data->display, xwin, 0 );
-                }
-
+                if (!already_destroyed) XSelectInput( data->display, xwin, 0 );
                 XDeleteContext( data->display, xwin, winContext );
                 NtUserRemoveProp( data->hwnd, foreign_window_prop );
             }
@@ -1940,7 +1935,6 @@ void X11DRV_DestroyWindow( HWND hwnd )
     release_win_data( data );
     free( data );
     destroy_gl_drawable( hwnd );
-    destroy_vk_surface( hwnd );
 }
 
 
@@ -2000,10 +1994,7 @@ void X11DRV_SetDesktopWindow( HWND hwnd )
 
     if (!width && !height)  /* not initialized yet */
     {
-        RECT rect;
-
-        X11DRV_DisplayDevices_Init( TRUE );
-        rect = NtUserGetVirtualScreenRect();
+        RECT rect = NtUserGetVirtualScreenRect();
 
         SERVER_START_REQ( set_window_pos )
         {
@@ -2036,11 +2027,7 @@ void X11DRV_SetDesktopWindow( HWND hwnd )
     else
     {
         Window win = (Window)NtUserGetProp( hwnd, whole_window_prop );
-        if (win && win != root_window)
-        {
-            X11DRV_init_desktop( win, width, height );
-            X11DRV_DisplayDevices_Init( TRUE );
-        }
+        if (win && win != root_window) X11DRV_init_desktop( win, width, height );
     }
 }
 
@@ -2101,7 +2088,6 @@ BOOL X11DRV_CreateWindow( HWND hwnd )
                                            CWOverrideRedirect | CWEventMask, &attr );
         XFlush( data->display );
         NtUserSetProp( hwnd, clip_window_prop, (HANDLE)data->clip_window );
-        X11DRV_DisplayDevices_RegisterEventHandlers();
     }
     return TRUE;
 }
@@ -2185,7 +2171,6 @@ static struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd, const RECT *wi
  */
 HWND create_foreign_window( Display *display, Window xwin )
 {
-    static const WCHAR classW[] = {'_','_','w','i','n','e','_','x','1','1','_','f','o','r','e','i','g','n','_','w','i','n','d','o','w',0};
     static BOOL class_registered;
     struct x11drv_win_data *data;
     HWND hwnd, parent;
@@ -2195,7 +2180,7 @@ HWND create_foreign_window( Display *display, Window xwin )
     unsigned int nchildren;
     XWindowAttributes attr;
     UINT style = WS_CLIPCHILDREN;
-    UNICODE_STRING class_name = RTL_CONSTANT_STRING( classW );
+    UNICODE_STRING class_name = RTL_CONSTANT_STRING( foreign_window_prop );
 
     if (!class_registered)
     {
@@ -2205,7 +2190,7 @@ HWND create_foreign_window( Display *display, Window xwin )
         memset( &class, 0, sizeof(class) );
         class.cbSize        = sizeof(class);
         class.lpfnWndProc   = client_foreign_window_proc;
-        class.lpszClassName = classW;
+        class.lpszClassName = foreign_window_prop;
         if (!NtUserRegisterClassExWOW( &class, &class_name, &version, NULL, 0, 0, NULL ) &&
             RtlGetLastWin32Error() != ERROR_CLASS_ALREADY_EXISTS)
         {
@@ -2241,19 +2226,15 @@ HWND create_foreign_window( Display *display, Window xwin )
         pos.y = attr.y;
     }
 
-    RtlInitUnicodeString( &class_name, classW );
     hwnd = NtUserCreateWindowEx( 0, &class_name, &class_name, NULL, style, pos.x, pos.y,
                                  attr.width, attr.height, parent, 0, NULL, NULL, 0, NULL,
                                  0, FALSE );
-
-    if (!(data = alloc_win_data( display, hwnd )))
+    if (!(data = get_win_data( hwnd )))
     {
         NtUserDestroyWindow( hwnd );
         return 0;
     }
-    SetRect( &data->window_rect, pos.x, pos.y, pos.x + attr.width, pos.y + attr.height );
-    data->whole_rect = data->client_rect = data->window_rect;
-    data->whole_window = data->client_window = 0;
+    destroy_whole_window( data, FALSE );
     data->embedded = TRUE;
     data->mapped = TRUE;
 
