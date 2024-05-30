@@ -42,6 +42,7 @@ AC_ARG_WITH(inotify,   AS_HELP_STRING([--without-inotify],[do not use inotify (f
 AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerberos)]))
 AC_ARG_WITH(mingw,     AS_HELP_STRING([--without-mingw],[do not use the MinGW cross-compiler]))
 AC_ARG_WITH(netapi,    AS_HELP_STRING([--without-netapi],[do not use the Samba NetAPI library]))
+AC_ARG_WITH(odbc,      AS_HELP_STRING([--without-odbc],[do not use the ODBC library]))
 AC_ARG_WITH(opencl,    AS_HELP_STRING([--without-opencl],[do not use OpenCL]),
             [if test "x$withval" = "xno"; then ac_cv_header_CL_cl_h=no; ac_cv_header_OpenCL_opencl_h=no; fi])
 AC_ARG_WITH(opengl,    AS_HELP_STRING([--without-opengl],[do not use OpenGL]))
@@ -1016,6 +1017,9 @@ case $HOST_ARCH in
   arm|aarch64)
     test "x$PE_ARCHS" != x || AC_MSG_ERROR([PE cross-compilation is required for $HOST_ARCH, please install clang/llvm-dlltool/lld, or llvm-mingw.])
     DLLEXT="" ;;
+  *)
+    WINE_NOTICE_WITH(mingw,[test "x$PE_ARCHS" = "x"],
+                     [Suitable PE cross-compiler not found, PE files won't be built.]) ;;
 esac
 
 dnl **** External libraries ****
@@ -1424,6 +1428,16 @@ WINE_NOTICE_WITH(pcsclite,[test "x$ac_cv_lib_pcsclite_SCardEstablishContext" != 
                  [libpcsclite not found, smart cards won't be supported.],
                  [enable_winscard])
 
+dnl **** Check for libodbc ****
+if test "x$with_odbc" != "xno"
+then
+    WINE_PACKAGE_FLAGS(ODBC,[odbc],[-lodbc],,,
+        [AC_CHECK_LIB(odbc,SQLConnect,[:],[ODBC_LIBS=""],[$ODBC_LIBS])])
+fi
+WINE_NOTICE_WITH(odbc,[test "x$ODBC_LIBS" = x],
+                 [libodbc not found, ODBC won't be supported.],
+                 [enable_odbc32])
+
 dnl **** Check for inotify ****
 if test "x$with_inotify" != "xno"
 then
@@ -1821,9 +1835,6 @@ then
                  [AC_DEFINE(HAVE_LIBPROCSTAT, 1, [Define to 1 if you have the `procstat' library (-lprocstat).])
                   AC_SUBST(PROCSTAT_LIBS,"-lprocstat")])
 fi
-
-dnl **** Check for libodbc ****
-WINE_CHECK_SONAME(odbc,SQLConnect,,[AC_DEFINE_UNQUOTED(SONAME_LIBODBC,["libodbc.$LIBEXT"])])
 
 dnl **** Check for libnetapi ****
 if test "x$with_netapi" != "xno"
@@ -2982,6 +2993,7 @@ WINE_CONFIG_MAKEFILE(dlls/ntprint)
 WINE_CONFIG_MAKEFILE(dlls/ntprint/tests)
 WINE_CONFIG_MAKEFILE(dlls/objsel)
 WINE_CONFIG_MAKEFILE(dlls/odbc32)
+WINE_CONFIG_MAKEFILE(dlls/odbc32/tests)
 WINE_CONFIG_MAKEFILE(dlls/odbcbcp)
 WINE_CONFIG_MAKEFILE(dlls/odbccp32)
 WINE_CONFIG_MAKEFILE(dlls/odbccp32/tests)
