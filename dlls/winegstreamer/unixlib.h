@@ -226,7 +226,7 @@ struct wg_parser_get_stream_params
     wg_parser_stream_t stream;
 };
 
-struct wg_parser_stream_get_preferred_format_params
+struct wg_parser_stream_get_current_format_params
 {
     wg_parser_stream_t stream;
     struct wg_format *format;
@@ -302,7 +302,7 @@ struct wg_transform_attrs
 {
     UINT32 output_plane_align;
     UINT32 input_queue_length;
-    BOOL allow_size_change;
+    BOOL allow_format_change;
     BOOL low_latency;
 };
 
@@ -325,8 +325,13 @@ struct wg_transform_read_data_params
 {
     wg_transform_t transform;
     struct wg_sample *sample;
-    struct wg_format *format;
     HRESULT result;
+};
+
+struct wg_transform_get_output_format_params
+{
+    wg_transform_t transform;
+    struct wg_format *format;
 };
 
 struct wg_transform_set_output_format_params
@@ -394,7 +399,7 @@ enum unix_funcs
     unix_wg_parser_get_stream_count,
     unix_wg_parser_get_stream,
 
-    unix_wg_parser_stream_get_preferred_format,
+    unix_wg_parser_stream_get_current_format,
     unix_wg_parser_stream_get_codec_format,
     unix_wg_parser_stream_enable,
     unix_wg_parser_stream_disable,
@@ -410,6 +415,7 @@ enum unix_funcs
 
     unix_wg_transform_create,
     unix_wg_transform_destroy,
+    unix_wg_transform_get_output_format,
     unix_wg_transform_set_output_format,
 
     unix_wg_transform_push_data,

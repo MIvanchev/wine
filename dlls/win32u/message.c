@@ -288,7 +288,6 @@ struct send_message_info
 };
 
 static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
-static BOOL keyboard_auto_repeat_enabled;
 
 /* flag for messages that contain pointers */
 /* 32 messages per entry, messages 0..31 map to bits 0..31 */
@@ -379,7 +378,7 @@ static BOOL init_win_proc_params( struct win_proc_params *params, HWND hwnd, UIN
     params->lparam = lparam;
     params->ansi = params->ansi_dst = ansi;
     params->mapping = WMCHAR_MAP_CALLWINDOWPROC;
-    params->dpi_awareness = get_window_dpi_awareness_context( params->hwnd );
+    params->dpi_context = get_window_dpi_awareness_context( params->hwnd );
     get_winproc_params( params, TRUE );
     return TRUE;
 }
@@ -410,7 +409,7 @@ static BOOL init_window_call_params( struct win_proc_params *params, HWND hwnd, 
     params->lparam = lParam;
     params->ansi = ansi;
     params->mapping = mapping;
-    params->dpi_awareness = get_window_dpi_awareness_context( params->hwnd );
+    params->dpi_context = get_window_dpi_awareness_context( params->hwnd );
     get_winproc_params( params, !is_dialog );
     return TRUE;
 }
@@ -514,13 +513,6 @@ static inline BOOL check_hwnd_filter( const MSG *msg, HWND hwnd_filter )
 {
     if (!hwnd_filter || hwnd_filter == get_desktop_window()) return TRUE;
     return (msg->hwnd == hwnd_filter || is_child( hwnd_filter, msg->hwnd ));
-}
-
-BOOL set_keyboard_auto_repeat( BOOL enable )
-{
-    BOOL enabled = keyboard_auto_repeat_enabled;
-    keyboard_auto_repeat_enabled = enable;
-    return enabled;
 }
 
 /***********************************************************************
@@ -2160,10 +2152,7 @@ BOOL WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
             info->hwndMenuOwner  = wine_server_ptr_handle( reply->menu_owner );
             info->hwndMoveSize   = wine_server_ptr_handle( reply->move_size );
             info->hwndCaret      = wine_server_ptr_handle( reply->caret );
-            info->rcCaret.left   = reply->rect.left;
-            info->rcCaret.top    = reply->rect.top;
-            info->rcCaret.right  = reply->rect.right;
-            info->rcCaret.bottom = reply->rect.bottom;
+            info->rcCaret        = wine_server_get_rect( reply->rect );
             if (reply->menu_owner) info->flags |= GUI_INMENUMODE;
             if (reply->move_size) info->flags |= GUI_INMOVESIZE;
             if (reply->caret) info->flags |= GUI_CARETBLINKING;
@@ -2309,21 +2298,6 @@ static void send_parent_notify( HWND hwnd, WORD event, WORD idChild, POINT pt )
     }
 }
 
-
-static void handle_keyboard_repeat_message( HWND hwnd )
-{
-    struct user_thread_info *thread_info = get_user_thread_info();
-    MSG *msg = &thread_info->key_repeat_msg;
-    UINT speed;
-
-    msg->lParam = (msg->lParam & ~(LPARAM)0xffff) + ((msg->lParam + 1) & 0xffff);
-
-    if (NtUserSystemParametersInfo( SPI_GETKEYBOARDSPEED, 0, &speed, 0 ))
-        NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_KEY_REPEAT, 400 / (speed + 1) );
-
-    NtUserPostMessage( hwnd, msg->message, msg->wParam, msg->lParam );
-}
-
 /***********************************************************************
  *          process_pointer_message
  *
@@ -2416,37 +2390,6 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
         if (ImmProcessKey( msg->hwnd, NtUserGetKeyboardLayout(0), msg->wParam, msg->lParam, 0 ))
             msg->wParam = VK_PROCESSKEY;
 
-    /* set/kill timers for key auto-repeat */
-    if (remove && keyboard_auto_repeat_enabled)
-    {
-        struct user_thread_info *thread_info = get_user_thread_info();
-
-        switch (msg->message)
-        {
-        case WM_KEYDOWN:
-        case WM_SYSKEYDOWN:
-        {
-            UINT delay;
-
-            if (msg->wParam == VK_PROCESSKEY) break;
-
-            if (thread_info->key_repeat_msg.hwnd != msg->hwnd)
-                kill_system_timer( thread_info->key_repeat_msg.hwnd, SYSTEM_TIMER_KEY_REPEAT );
-            thread_info->key_repeat_msg = *msg;
-            if (NtUserSystemParametersInfo( SPI_GETKEYBOARDDELAY, 0, &delay, 0 ))
-                NtUserSetSystemTimer( msg->hwnd, SYSTEM_TIMER_KEY_REPEAT, (delay + 1) * 250 );
-            break;
-        }
-
-        case WM_KEYUP:
-        case WM_SYSKEYUP:
-            /* Only stop repeat if the scan codes match. */
-            if ((thread_info->key_repeat_msg.lParam & 0x01ff0000) == (msg->lParam & 0x01ff0000))
-                kill_system_timer( thread_info->key_repeat_msg.hwnd, SYSTEM_TIMER_KEY_REPEAT );
-            break;
-        }
-    }
-
     return TRUE;
 }
 
@@ -2500,7 +2443,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     }
 
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
-    SetThreadDpiAwarenessContext( get_window_dpi_awareness_context( msg->hwnd ));
+    set_thread_dpi_awareness_context( get_window_dpi_awareness_context( msg->hwnd ));
 
     /* FIXME: is this really the right place for this hook? */
     event.message = msg->message;
@@ -2673,14 +2616,14 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
                                       HWND hwnd_filter, UINT first, UINT last, BOOL remove )
 {
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
-    DPI_AWARENESS_CONTEXT context;
+    UINT context;
     BOOL ret = FALSE;
 
     thread_info->msg_source.deviceType = msg_data->source.device;
     thread_info->msg_source.originId   = msg_data->source.origin;
 
     /* hardware messages are always in physical coords */
-    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+    context = set_thread_dpi_awareness_context( NTUSER_DPI_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
         ret = process_rawinput_message( msg, hw_id, msg_data );
@@ -2696,7 +2639,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
         process_wine_setcursor( msg->hwnd, (HWND)msg->wParam, (HCURSOR)msg->lParam );
     else
         ERR( "unknown message type %x\n", msg->message );
-    SetThreadDpiAwarenessContext( context );
+    set_thread_dpi_awareness_context( context );
     return ret;
 }
 
@@ -3558,9 +3501,26 @@ NTSTATUS send_hardware_message( HWND hwnd, UINT flags, const INPUT *input, LPARA
                                                         MOUSEEVENTF_XDOWN | MOUSEEVENTF_XUP));
             break;
         case INPUT_KEYBOARD:
-            req->input.kbd.vkey  = input->ki.wVk;
-            req->input.kbd.scan  = input->ki.wScan;
-            req->input.kbd.flags = input->ki.dwFlags;
+            if (input->ki.dwFlags & KEYEVENTF_SCANCODE)
+            {
+                UINT scan = input->ki.wScan;
+                /* TODO: Use the keyboard layout of the target hwnd, once
+                 * NtUserGetKeyboardLayout supports non-current threads. */
+                HKL layout = NtUserGetKeyboardLayout( 0 );
+                if (flags & SEND_HWMSG_INJECTED)
+                {
+                    scan = scan & 0xff;
+                    if (input->ki.dwFlags & KEYEVENTF_EXTENDEDKEY) scan |= 0xe000;
+                }
+                req->input.kbd.vkey = map_scan_to_kbd_vkey( scan, layout );
+                req->input.kbd.scan = input->ki.wScan & 0xff;
+            }
+            else
+            {
+                req->input.kbd.vkey = input->ki.wVk;
+                req->input.kbd.scan = input->ki.wScan;
+            }
+            req->input.kbd.flags = input->ki.dwFlags & ~KEYEVENTF_SCANCODE;
             req->input.kbd.time  = input->ki.time;
             req->input.kbd.info  = input->ki.dwExtraInfo;
             affects_key_state = TRUE;
@@ -3637,10 +3597,6 @@ LRESULT WINAPI NtUserDispatchMessage( const MSG *msg )
 
             case SYSTEM_TIMER_TRACK_MOUSE:
                 update_mouse_tracking_info( msg->hwnd );
-                return 0;
-
-            case SYSTEM_TIMER_KEY_REPEAT:
-                handle_keyboard_repeat_message( msg->hwnd );
                 return 0;
         }
     }

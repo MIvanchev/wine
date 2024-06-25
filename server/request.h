@@ -275,7 +275,6 @@ DECL_HANDLER(get_window_text);
 DECL_HANDLER(set_window_text);
 DECL_HANDLER(get_windows_offset);
 DECL_HANDLER(get_visible_region);
-DECL_HANDLER(get_surface_region);
 DECL_HANDLER(get_window_region);
 DECL_HANDLER(set_window_region);
 DECL_HANDLER(get_update_region);
@@ -353,7 +352,7 @@ DECL_HANDLER(create_mailslot);
 DECL_HANDLER(set_mailslot_info);
 DECL_HANDLER(create_directory);
 DECL_HANDLER(open_directory);
-DECL_HANDLER(get_directory_entry);
+DECL_HANDLER(get_directory_entries);
 DECL_HANDLER(create_symlink);
 DECL_HANDLER(open_symlink);
 DECL_HANDLER(query_symlink);
@@ -404,6 +403,7 @@ DECL_HANDLER(terminate_job);
 DECL_HANDLER(suspend_process);
 DECL_HANDLER(resume_process);
 DECL_HANDLER(get_next_thread);
+DECL_HANDLER(set_keyboard_repeat);
 
 #ifdef WANT_REQUEST_HANDLERS
 
@@ -566,7 +566,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_window_text,
     (req_handler)req_get_windows_offset,
     (req_handler)req_get_visible_region,
-    (req_handler)req_get_surface_region,
     (req_handler)req_get_window_region,
     (req_handler)req_set_window_region,
     (req_handler)req_get_update_region,
@@ -644,7 +643,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_mailslot_info,
     (req_handler)req_create_directory,
     (req_handler)req_open_directory,
-    (req_handler)req_get_directory_entry,
+    (req_handler)req_get_directory_entries,
     (req_handler)req_create_symlink,
     (req_handler)req_open_symlink,
     (req_handler)req_query_symlink,
@@ -695,6 +694,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_suspend_process,
     (req_handler)req_resume_process,
     (req_handler)req_get_next_thread,
+    (req_handler)req_set_keyboard_repeat,
 };
 
 C_ASSERT( sizeof(abstime_t) == 8 );
@@ -1525,18 +1525,16 @@ C_ASSERT( FIELD_OFFSET(struct create_window_request, parent) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_window_request, owner) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_window_request, atom) == 20 );
 C_ASSERT( FIELD_OFFSET(struct create_window_request, instance) == 24 );
-C_ASSERT( FIELD_OFFSET(struct create_window_request, dpi) == 32 );
-C_ASSERT( FIELD_OFFSET(struct create_window_request, awareness) == 36 );
-C_ASSERT( FIELD_OFFSET(struct create_window_request, style) == 40 );
-C_ASSERT( FIELD_OFFSET(struct create_window_request, ex_style) == 44 );
+C_ASSERT( FIELD_OFFSET(struct create_window_request, dpi_context) == 32 );
+C_ASSERT( FIELD_OFFSET(struct create_window_request, style) == 36 );
+C_ASSERT( FIELD_OFFSET(struct create_window_request, ex_style) == 40 );
 C_ASSERT( sizeof(struct create_window_request) == 48 );
 C_ASSERT( FIELD_OFFSET(struct create_window_reply, handle) == 8 );
 C_ASSERT( FIELD_OFFSET(struct create_window_reply, parent) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_window_reply, owner) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_window_reply, extra) == 20 );
 C_ASSERT( FIELD_OFFSET(struct create_window_reply, class_ptr) == 24 );
-C_ASSERT( FIELD_OFFSET(struct create_window_reply, dpi) == 32 );
-C_ASSERT( FIELD_OFFSET(struct create_window_reply, awareness) == 36 );
+C_ASSERT( FIELD_OFFSET(struct create_window_reply, dpi_context) == 32 );
 C_ASSERT( sizeof(struct create_window_reply) == 40 );
 C_ASSERT( FIELD_OFFSET(struct destroy_window_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_window_request) == 16 );
@@ -1559,8 +1557,7 @@ C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, pid) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, tid) == 20 );
 C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, atom) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, is_unicode) == 28 );
-C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, dpi) == 32 );
-C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, awareness) == 36 );
+C_ASSERT( FIELD_OFFSET(struct get_window_info_reply, dpi_context) == 32 );
 C_ASSERT( sizeof(struct get_window_info_reply) == 40 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, flags) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_window_info_request, is_unicode) == 14 );
@@ -1585,8 +1582,7 @@ C_ASSERT( FIELD_OFFSET(struct set_parent_request, parent) == 16 );
 C_ASSERT( sizeof(struct set_parent_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_parent_reply, old_parent) == 8 );
 C_ASSERT( FIELD_OFFSET(struct set_parent_reply, full_parent) == 12 );
-C_ASSERT( FIELD_OFFSET(struct set_parent_reply, dpi) == 16 );
-C_ASSERT( FIELD_OFFSET(struct set_parent_reply, awareness) == 20 );
+C_ASSERT( FIELD_OFFSET(struct set_parent_reply, dpi_context) == 16 );
 C_ASSERT( sizeof(struct set_parent_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_window_parents_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_window_parents_request) == 16 );
@@ -1659,15 +1655,12 @@ C_ASSERT( FIELD_OFFSET(struct get_visible_region_reply, win_rect) == 28 );
 C_ASSERT( FIELD_OFFSET(struct get_visible_region_reply, paint_flags) == 44 );
 C_ASSERT( FIELD_OFFSET(struct get_visible_region_reply, total_size) == 48 );
 C_ASSERT( sizeof(struct get_visible_region_reply) == 56 );
-C_ASSERT( FIELD_OFFSET(struct get_surface_region_request, window) == 12 );
-C_ASSERT( sizeof(struct get_surface_region_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_surface_region_reply, visible_rect) == 8 );
-C_ASSERT( FIELD_OFFSET(struct get_surface_region_reply, total_size) == 24 );
-C_ASSERT( sizeof(struct get_surface_region_reply) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_window_region_request, window) == 12 );
-C_ASSERT( sizeof(struct get_window_region_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_window_region_reply, total_size) == 8 );
-C_ASSERT( sizeof(struct get_window_region_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_window_region_request, surface) == 16 );
+C_ASSERT( sizeof(struct get_window_region_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_window_region_reply, visible_rect) == 8 );
+C_ASSERT( FIELD_OFFSET(struct get_window_region_reply, total_size) == 24 );
+C_ASSERT( sizeof(struct get_window_region_reply) == 32 );
 C_ASSERT( FIELD_OFFSET(struct set_window_region_request, window) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_window_region_request, redraw) == 16 );
 C_ASSERT( sizeof(struct set_window_region_request) == 24 );
@@ -2101,12 +2094,13 @@ C_ASSERT( FIELD_OFFSET(struct open_directory_request, rootdir) == 20 );
 C_ASSERT( sizeof(struct open_directory_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct open_directory_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_directory_reply) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_directory_entry_request, handle) == 12 );
-C_ASSERT( FIELD_OFFSET(struct get_directory_entry_request, index) == 16 );
-C_ASSERT( sizeof(struct get_directory_entry_request) == 24 );
-C_ASSERT( FIELD_OFFSET(struct get_directory_entry_reply, total_len) == 8 );
-C_ASSERT( FIELD_OFFSET(struct get_directory_entry_reply, name_len) == 12 );
-C_ASSERT( sizeof(struct get_directory_entry_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_directory_entries_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct get_directory_entries_request, index) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_directory_entries_request, max_count) == 20 );
+C_ASSERT( sizeof(struct get_directory_entries_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_directory_entries_reply, total_len) == 8 );
+C_ASSERT( FIELD_OFFSET(struct get_directory_entries_reply, count) == 12 );
+C_ASSERT( sizeof(struct get_directory_entries_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_symlink_request, access) == 12 );
 C_ASSERT( sizeof(struct create_symlink_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_symlink_reply, handle) == 8 );
@@ -2344,6 +2338,12 @@ C_ASSERT( FIELD_OFFSET(struct get_next_thread_request, flags) == 28 );
 C_ASSERT( sizeof(struct get_next_thread_request) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_next_thread_reply, handle) == 8 );
 C_ASSERT( sizeof(struct get_next_thread_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_keyboard_repeat_request, enable) == 12 );
+C_ASSERT( FIELD_OFFSET(struct set_keyboard_repeat_request, delay) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_keyboard_repeat_request, period) == 20 );
+C_ASSERT( sizeof(struct set_keyboard_repeat_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct set_keyboard_repeat_reply, enable) == 8 );
+C_ASSERT( sizeof(struct set_keyboard_repeat_reply) == 16 );
 
 #endif  /* WANT_REQUEST_HANDLERS */
 

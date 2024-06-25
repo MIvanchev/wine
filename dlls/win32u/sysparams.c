@@ -39,6 +39,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(system);
 
+static LONG dpi_context; /* process DPI awareness context */
 
 static HKEY video_key, enum_key, control_key, config_key, volatile_base_key;
 
@@ -932,6 +933,7 @@ struct device_manager_ctx
     struct gpu gpu;
     struct source source;
     HKEY source_key;
+    struct list vulkan_gpus;
     /* for the virtual desktop settings */
     BOOL is_primary;
     DEVMODEW primary;
@@ -1183,18 +1185,43 @@ static BOOL write_gpu_to_registry( const struct gpu *gpu, const struct pci_id *p
     return TRUE;
 }
 
-static void add_gpu( const char *name, const struct pci_id *pci_id, const GUID *vulkan_uuid,
-                     ULONGLONG memory_size, void *param )
+static struct vulkan_gpu *find_vulkan_gpu_from_uuid( const struct device_manager_ctx *ctx, const GUID *uuid )
+{
+    struct vulkan_gpu *gpu;
+
+    if (!uuid) return NULL;
+
+    LIST_FOR_EACH_ENTRY( gpu, &ctx->vulkan_gpus, struct vulkan_gpu, entry )
+        if (!memcmp( &gpu->uuid, uuid, sizeof(*uuid) )) return gpu;
+
+    return NULL;
+}
+
+static struct vulkan_gpu *find_vulkan_gpu_from_pci_id( const struct device_manager_ctx *ctx, const struct pci_id *pci_id )
+{
+    struct vulkan_gpu *gpu;
+
+    LIST_FOR_EACH_ENTRY( gpu, &ctx->vulkan_gpus, struct vulkan_gpu, entry )
+        if (gpu->pci_id.vendor == pci_id->vendor && gpu->pci_id.device == pci_id->device) return gpu;
+
+    return NULL;
+}
+
+static void add_gpu( const char *name, const struct pci_id *pci_id, const GUID *vulkan_uuid, void *param )
 {
     struct device_manager_ctx *ctx = param;
     char buffer[4096];
     KEY_VALUE_PARTIAL_INFORMATION *value = (void *)buffer;
+    struct vulkan_gpu *vulkan_gpu = NULL;
+    struct list *ptr;
     unsigned int i;
     HKEY hkey, subkey;
     DWORD len;
 
-    TRACE( "%s %04X %04X %08X %02X\n", debugstr_a( name ), pci_id->vendor, pci_id->device,
-           pci_id->subsystem, pci_id->revision );
+    static const GUID empty_uuid;
+
+    TRACE( "%s %04X %04X %08X %02X %s\n", debugstr_a( name ), pci_id->vendor, pci_id->device,
+           pci_id->subsystem, pci_id->revision, debugstr_guid( vulkan_uuid ) );
 
     if (!enum_key && !(enum_key = reg_create_ascii_key( NULL, enum_keyA, 0, NULL )))
         return;
@@ -1208,7 +1235,28 @@ static void add_gpu( const char *name, const struct pci_id *pci_id, const GUID *
 
     memset( &ctx->gpu, 0, sizeof(ctx->gpu) );
     ctx->gpu.index = ctx->gpu_count;
-    if (vulkan_uuid) ctx->gpu.vulkan_uuid = *vulkan_uuid;
+
+    if ((vulkan_gpu = find_vulkan_gpu_from_uuid( ctx, vulkan_uuid )))
+        TRACE( "Found vulkan GPU matching uuid %s, pci_id %#04x:%#04x, name %s\n", debugstr_guid(&vulkan_gpu->uuid),
+               vulkan_gpu->pci_id.vendor, vulkan_gpu->pci_id.device, debugstr_a(vulkan_gpu->name));
+    else if ((vulkan_gpu = find_vulkan_gpu_from_pci_id( ctx, pci_id )))
+        TRACE( "Found vulkan GPU matching pci_id %#04x:%#04x, uuid %s, name %s\n",
+               vulkan_gpu->pci_id.vendor, vulkan_gpu->pci_id.device,
+               debugstr_guid(&vulkan_gpu->uuid), debugstr_a(vulkan_gpu->name));
+    else if ((ptr = list_head( &ctx->vulkan_gpus )))
+    {
+        vulkan_gpu = LIST_ENTRY( ptr, struct vulkan_gpu, entry );
+        WARN( "Using vulkan GPU pci_id %#04x:%#04x, uuid %s, name %s\n",
+               vulkan_gpu->pci_id.vendor, vulkan_gpu->pci_id.device,
+               debugstr_guid(&vulkan_gpu->uuid), debugstr_a(vulkan_gpu->name));
+    }
+
+    if (vulkan_uuid && !IsEqualGUID( vulkan_uuid, &empty_uuid )) ctx->gpu.vulkan_uuid = *vulkan_uuid;
+    else if (vulkan_gpu) ctx->gpu.vulkan_uuid = vulkan_gpu->uuid;
+
+    if (!pci_id->vendor && !pci_id->device && vulkan_gpu) pci_id = &vulkan_gpu->pci_id;
+
+    if ((!name || !strcmp( name, "Wine GPU" )) && vulkan_gpu) name = vulkan_gpu->name;
     if (name) RtlUTF8ToUnicodeN( ctx->gpu.name, sizeof(ctx->gpu.name) - sizeof(WCHAR), &len, name, strlen( name ) );
 
     snprintf( ctx->gpu.path, sizeof(ctx->gpu.path), "PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\%08X",
@@ -1252,10 +1300,16 @@ static void add_gpu( const char *name, const struct pci_id *pci_id, const GUID *
 
     NtClose( hkey );
 
-    if (!write_gpu_to_registry( &ctx->gpu, pci_id, memory_size ))
+    if (!write_gpu_to_registry( &ctx->gpu, pci_id, vulkan_gpu ? vulkan_gpu->memory : 0 ))
         WARN( "Failed to write gpu to registry\n" );
     else
         ctx->gpu_count++;
+
+    if (vulkan_gpu)
+    {
+        list_remove( &vulkan_gpu->entry );
+        free_vulkan_gpu( vulkan_gpu );
+    }
 }
 
 static BOOL write_source_to_registry( const struct source *source, HKEY *source_key )
@@ -1487,6 +1541,13 @@ static void release_display_manager_ctx( struct device_manager_ctx *ctx )
         last_query_display_time = 0;
     }
     if (ctx->gpu_count) cleanup_devices();
+
+    while (!list_empty( &ctx->vulkan_gpus ))
+    {
+        struct vulkan_gpu *gpu = LIST_ENTRY( list_head( &ctx->vulkan_gpus ), struct vulkan_gpu, entry );
+        list_remove( &gpu->entry );
+        free_vulkan_gpu( gpu );
+    }
 }
 
 static void clear_display_devices(void)
@@ -1711,7 +1772,7 @@ static BOOL update_display_cache_from_registry(void)
     return ret;
 }
 
-static BOOL default_update_display_devices( BOOL force, struct device_manager_ctx *ctx )
+static NTSTATUS default_update_display_devices( struct device_manager_ctx *ctx )
 {
     /* default implementation: expose an adapter and a monitor with a few standard modes,
      * and read / write current display settings from / to the registry.
@@ -1742,9 +1803,7 @@ static BOOL default_update_display_devices( BOOL force, struct device_manager_ct
     struct gdi_monitor monitor = {0};
     DEVMODEW mode = {.dmSize = sizeof(mode)};
 
-    if (!force) return TRUE;
-
-    add_gpu( "Default GPU", &pci_id, NULL, 0, ctx );
+    add_gpu( "Wine GPU", &pci_id, NULL, ctx );
     add_source( "Default", source_flags, ctx );
 
     if (!read_source_mode( ctx->source_key, ENUM_CURRENT_SETTINGS, &mode ))
@@ -1760,7 +1819,7 @@ static BOOL default_update_display_devices( BOOL force, struct device_manager_ct
     add_monitor( &monitor, ctx );
     add_modes( &mode, ARRAY_SIZE(modes), modes, ctx );
 
-    return TRUE;
+    return STATUS_SUCCESS;
 }
 
 /* parse the desktop size specification */
@@ -1926,18 +1985,29 @@ static BOOL add_virtual_source( struct device_manager_ctx *ctx )
     return STATUS_SUCCESS;
 }
 
-static UINT update_display_devices( BOOL force, struct device_manager_ctx *ctx )
+static UINT update_display_devices( struct device_manager_ctx *ctx )
 {
     UINT status;
 
-    if (!(status = user_driver->pUpdateDisplayDevices( &device_manager, force, ctx )))
+    if (!(status = user_driver->pUpdateDisplayDevices( &device_manager, ctx )))
     {
         if (ctx->source_count && is_virtual_desktop()) return add_virtual_source( ctx );
         return status;
     }
 
-    if (status == STATUS_NOT_IMPLEMENTED) return default_update_display_devices( force, ctx );
+    if (status == STATUS_NOT_IMPLEMENTED) return default_update_display_devices( ctx );
     return status;
+}
+
+static void add_vulkan_only_gpus( struct device_manager_ctx *ctx )
+{
+    struct vulkan_gpu *gpu, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE( gpu, next, &ctx->vulkan_gpus, struct vulkan_gpu, entry )
+    {
+        TRACE( "adding vulkan-only gpu uuid %s, name %s\n", debugstr_guid(&gpu->uuid), debugstr_a(gpu->name));
+        add_gpu( gpu->name, &gpu->pci_id, &gpu->uuid, ctx );
+    }
 }
 
 BOOL update_display_cache( BOOL force )
@@ -1945,7 +2015,7 @@ BOOL update_display_cache( BOOL force )
     static const WCHAR wine_service_station_name[] =
         {'_','_','w','i','n','e','s','e','r','v','i','c','e','_','w','i','n','s','t','a','t','i','o','n',0};
     HWINSTA winstation = NtUserGetProcessWindowStation();
-    struct device_manager_ctx ctx = {0};
+    struct device_manager_ctx ctx = {.vulkan_gpus = LIST_INIT(ctx.vulkan_gpus)};
     UINT status;
     WCHAR name[MAX_PATH];
 
@@ -1960,10 +2030,13 @@ BOOL update_display_cache( BOOL force )
         return TRUE;
     }
 
-    status = update_display_devices( force, &ctx );
-
-    release_display_manager_ctx( &ctx );
-    if (status && status != STATUS_ALREADY_COMPLETE) WARN( "Failed to update display devices, status %#x\n", status );
+    if (force)
+    {
+        if (!get_vulkan_gpus( &ctx.vulkan_gpus )) WARN( "Failed to find any vulkan GPU\n" );
+        if (!(status = update_display_devices( &ctx ))) add_vulkan_only_gpus( &ctx );
+        else WARN( "Failed to update display devices, status %#x\n", status );
+        release_display_manager_ctx( &ctx );
+    }
 
     if (!update_display_cache_from_registry())
     {
@@ -2029,6 +2102,12 @@ UINT get_monitor_dpi( HMONITOR monitor )
     return system_dpi;
 }
 
+static RECT get_monitor_rect( struct monitor *monitor, BOOL work, UINT dpi )
+{
+    RECT rect = work ? monitor->rc_work : monitor->rc_monitor;
+    return map_dpi_rect( rect, get_monitor_dpi( monitor->handle ), dpi );
+}
+
 /**********************************************************************
  *              get_win_monitor_dpi
  */
@@ -2038,43 +2117,42 @@ UINT get_win_monitor_dpi( HWND hwnd )
     return system_dpi;
 }
 
-/* copied from user32 GetAwarenessFromDpiAwarenessContext, make sure to keep that in sync */
-static DPI_AWARENESS get_awareness_from_dpi_awareness_context( DPI_AWARENESS_CONTEXT context )
+/* keep in sync with user32 */
+static BOOL is_valid_dpi_awareness_context( UINT context, UINT dpi )
 {
-    switch ((ULONG_PTR)context)
+    switch (NTUSER_DPI_CONTEXT_GET_AWARENESS( context ))
     {
-    case 0x10:
-    case 0x11:
-    case 0x12:
-    case 0x22:
-    case 0x80000010:
-    case 0x80000011:
-    case 0x80000012:
-    case 0x80000022:
-        return (ULONG_PTR)context & 3;
-    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_UNAWARE:
-    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_SYSTEM_AWARE:
-    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE:
-        return ~(ULONG_PTR)context;
-    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2:
-        return ~(ULONG_PTR)DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE;
-    default:
-        return DPI_AWARENESS_INVALID;
+    case DPI_AWARENESS_UNAWARE:
+        if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & ~NTUSER_DPI_CONTEXT_FLAG_VALID_MASK) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_VERSION( context ) != 1) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_DPI( context ) != USER_DEFAULT_SCREEN_DPI) return FALSE;
+        return TRUE;
+
+    case DPI_AWARENESS_SYSTEM_AWARE:
+        if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & ~NTUSER_DPI_CONTEXT_FLAG_VALID_MASK) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & NTUSER_DPI_CONTEXT_FLAG_GDISCALED) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_VERSION( context ) != 1) return FALSE;
+        if (dpi && NTUSER_DPI_CONTEXT_GET_DPI( context ) != dpi) return FALSE;
+        return TRUE;
+
+    case DPI_AWARENESS_PER_MONITOR_AWARE:
+        if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & ~NTUSER_DPI_CONTEXT_FLAG_VALID_MASK) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & NTUSER_DPI_CONTEXT_FLAG_GDISCALED) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_VERSION( context ) != 1 && NTUSER_DPI_CONTEXT_GET_VERSION( context ) != 2) return FALSE;
+        if (NTUSER_DPI_CONTEXT_GET_DPI( context )) return FALSE;
+        return TRUE;
     }
+
+    return FALSE;
 }
 
-/**********************************************************************
- *           get_thread_dpi_awareness
- */
-DPI_AWARENESS get_thread_dpi_awareness(void)
+UINT get_thread_dpi_awareness_context(void)
 {
     struct ntuser_thread_info *info = NtUserGetThreadInfo();
-    ULONG_PTR context = info->dpi_awareness;
+    UINT context;
 
-    if (context == 0) /* process default */
-        return NtUserGetProcessDpiAwarenessContext( NULL ) & 3;
-
-    return get_awareness_from_dpi_awareness_context((DPI_AWARENESS_CONTEXT)context);
+    if (!(context = info->dpi_context)) context = ReadNoFence( &dpi_context );
+    return context ? context : NTUSER_DPI_UNAWARE;
 }
 
 DWORD get_process_layout(void)
@@ -2087,7 +2165,7 @@ DWORD get_process_layout(void)
  */
 UINT get_thread_dpi(void)
 {
-    switch (get_thread_dpi_awareness())
+    switch (NTUSER_DPI_CONTEXT_GET_AWARENESS( get_thread_dpi_awareness_context() ))
     {
     case DPI_AWARENESS_UNAWARE:      return USER_DEFAULT_SCREEN_DPI;
     case DPI_AWARENESS_SYSTEM_AWARE: return system_dpi;
@@ -2098,34 +2176,28 @@ UINT get_thread_dpi(void)
 /* see GetDpiForSystem */
 UINT get_system_dpi(void)
 {
-    if (get_thread_dpi_awareness() == DPI_AWARENESS_UNAWARE) return USER_DEFAULT_SCREEN_DPI;
+    DPI_AWARENESS awareness = NTUSER_DPI_CONTEXT_GET_AWARENESS( get_thread_dpi_awareness_context() );
+    if (awareness == DPI_AWARENESS_UNAWARE) return USER_DEFAULT_SCREEN_DPI;
     return system_dpi;
 }
 
-/**********************************************************************
- *           SetThreadDpiAwarenessContext   (win32u.so)
- *           copied from user32, make sure to keep that in sync
- */
-DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
+/* keep in sync with user32 */
+UINT set_thread_dpi_awareness_context( UINT context )
 {
     struct ntuser_thread_info *info = NtUserGetThreadInfo();
-    DPI_AWARENESS prev, val = get_awareness_from_dpi_awareness_context( context );
+    UINT prev;
 
-    if (val == DPI_AWARENESS_INVALID)
+    if (!is_valid_dpi_awareness_context( context, system_dpi ))
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
-    if (!(prev = info->dpi_awareness))
-    {
-        prev = NtUserGetProcessDpiAwarenessContext( GetCurrentProcess() ) & 3;
-        prev |= 0x80000010;  /* restore to process default */
-    }
-    if (((ULONG_PTR)context & ~(ULONG_PTR)0x33) == 0x80000000) info->dpi_awareness = 0;
-    else if (context == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 || context == (DPI_AWARENESS_CONTEXT)0x22)
-        info->dpi_awareness = 0x22;
-    else info->dpi_awareness = val | 0x10;
-    return ULongToHandle( prev );
+
+    if (!(prev = info->dpi_context)) prev = NtUserGetProcessDpiAwarenessContext( GetCurrentProcess() ) | NTUSER_DPI_CONTEXT_FLAG_PROCESS;
+    if (NTUSER_DPI_CONTEXT_GET_FLAGS( context ) & NTUSER_DPI_CONTEXT_FLAG_PROCESS) info->dpi_context = 0;
+    else info->dpi_context = context;
+
+    return prev;
 }
 
 /**********************************************************************
@@ -2214,17 +2286,18 @@ RECT get_virtual_screen_rect( UINT dpi )
 
     LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
     {
+        RECT monitor_rect;
         if (!is_monitor_active( monitor ) || monitor->is_clone) continue;
-        union_rect( &rect, &rect, &monitor->rc_monitor );
+        monitor_rect = get_monitor_rect( monitor, FALSE, dpi );
+        union_rect( &rect, &rect, &monitor_rect );
     }
 
     unlock_display_devices();
 
-    if (dpi) rect = map_dpi_rect( rect, system_dpi, dpi );
     return rect;
 }
 
-static BOOL is_window_rect_full_screen( const RECT *rect )
+static BOOL is_window_rect_full_screen( const RECT *rect, UINT dpi )
 {
     struct monitor *monitor;
     BOOL ret = FALSE;
@@ -2237,9 +2310,7 @@ static BOOL is_window_rect_full_screen( const RECT *rect )
 
         if (!is_monitor_active( monitor ) || monitor->is_clone) continue;
 
-        monrect = map_dpi_rect( monitor->rc_monitor, get_monitor_dpi( monitor->handle ),
-                                get_thread_dpi() );
-
+        monrect = get_monitor_rect( monitor, FALSE, dpi );
         if (rect->left <= monrect.left && rect->right >= monrect.right &&
             rect->top <= monrect.top && rect->bottom >= monrect.bottom)
         {
@@ -2269,7 +2340,7 @@ RECT get_display_rect( const WCHAR *display )
     struct monitor *monitor;
     UNICODE_STRING name;
     RECT rect = {0};
-    UINT index;
+    UINT index, dpi = get_thread_dpi();
 
     RtlInitUnicodeString( &name, display );
     if (!(index = get_display_index( &name ))) return rect;
@@ -2278,12 +2349,12 @@ RECT get_display_rect( const WCHAR *display )
     LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
     {
         if (!monitor->source || monitor->source->id + 1 != index) continue;
-        rect = monitor->rc_monitor;
+        rect = get_monitor_rect( monitor, FALSE, dpi );
         break;
     }
 
     unlock_display_devices();
-    return map_dpi_rect( rect, system_dpi, get_thread_dpi() );
+    return rect;
 }
 
 RECT get_primary_monitor_rect( UINT dpi )
@@ -2296,12 +2367,12 @@ RECT get_primary_monitor_rect( UINT dpi )
     LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
     {
         if (!is_monitor_primary( monitor )) continue;
-        rect = monitor->rc_monitor;
+        rect = get_monitor_rect( monitor, FALSE, dpi );
         break;
     }
 
     unlock_display_devices();
-    return map_dpi_rect( rect, system_dpi, dpi );
+    return rect;
 }
 
 /**********************************************************************
@@ -2663,6 +2734,34 @@ static void monitor_get_interface_name( struct monitor *monitor, WCHAR *interfac
 
     asciiz_to_unicode( interface_name, buffer );
 }
+
+/* see D3DKMTOpenAdapterFromGdiDisplayName */
+static NTSTATUS d3dkmt_open_adapter_from_gdi_display_name( D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc )
+{
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    D3DKMT_OPENADAPTERFROMLUID luid_desc;
+    struct source *source;
+    UNICODE_STRING name;
+
+    TRACE( "desc %p, name %s\n", desc, debugstr_w( desc->DeviceName ) );
+
+    RtlInitUnicodeString( &name, desc->DeviceName );
+    if (!name.Length) return STATUS_UNSUCCESSFUL;
+    if (!(source = find_source( &name ))) return STATUS_UNSUCCESSFUL;
+
+    luid_desc.AdapterLuid = source->gpu->luid;
+    if ((source->state_flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) &&
+        !(status = NtGdiDdDDIOpenAdapterFromLuid( &luid_desc )))
+    {
+        desc->hAdapter = luid_desc.hAdapter;
+        desc->AdapterLuid = luid_desc.AdapterLuid;
+        desc->VidPnSourceId = source->id + 1;
+    }
+
+    source_release( source );
+    return status;
+}
+
 
 /***********************************************************************
  *	     NtUserEnumDisplayDevices    (win32u.@)
@@ -3137,12 +3236,56 @@ static BOOL all_detached_settings( const DEVMODEW *displays )
     return TRUE;
 }
 
+static BOOL get_primary_source_mode( DEVMODEW *mode )
+{
+    struct source *primary;
+    BOOL ret;
+
+    if (!(primary = find_source( NULL ))) return FALSE;
+    ret = source_get_current_settings( primary, mode );
+    source_release( primary );
+
+    return ret;
+}
+
+static void display_mode_changed( BOOL broadcast )
+{
+    DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
+
+    if (!update_display_cache( TRUE ))
+    {
+        ERR( "Failed to update display cache after mode change.\n" );
+        return;
+    }
+    if (!get_primary_source_mode( &current_mode ))
+    {
+        ERR( "Failed to get primary source current display settings.\n" );
+        return;
+    }
+
+    if (!broadcast)
+        send_message( get_desktop_window(), WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
+                      MAKELPARAM( current_mode.dmPelsWidth, current_mode.dmPelsHeight ) );
+    else
+    {
+        /* broadcast to all the windows as well if an application changed the display settings */
+        NtUserClipCursor( NULL );
+        send_notify_message( get_desktop_window(), WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
+                             MAKELPARAM( current_mode.dmPelsWidth, current_mode.dmPelsHeight ), FALSE );
+        send_message_timeout( HWND_BROADCAST, WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
+                              MAKELPARAM( current_mode.dmPelsWidth, current_mode.dmPelsHeight ),
+                              SMTO_ABORTIFHUNG, 2000, FALSE );
+        /* post clip_fullscreen_window request to the foreground window */
+        NtUserPostMessage( NtUserGetForegroundWindow(), WM_WINE_CLIPCURSOR, SET_CURSOR_FSCLIP, 0 );
+    }
+}
+
 static LONG apply_display_settings( struct source *target, const DEVMODEW *devmode,
                                     HWND hwnd, DWORD flags, void *lparam )
 {
     static const WCHAR restorerW[] = {'_','_','w','i','n','e','_','d','i','s','p','l','a','y','_',
                                       's','e','t','t','i','n','g','s','_','r','e','s','t','o','r','e','r',0};
-    UNICODE_STRING restoter_str = RTL_CONSTANT_STRING( restorerW );
+    UNICODE_STRING restorer_str = RTL_CONSTANT_STRING( restorerW );
     WCHAR primary_name[CCHDEVICENAME];
     struct source *primary, *source;
     DEVMODEW *mode, *displays;
@@ -3195,7 +3338,7 @@ static LONG apply_display_settings( struct source *target, const DEVMODEW *devmo
     free( displays );
     if (ret) return ret;
 
-    if ((restorer_window = NtUserFindWindowEx( NULL, NULL, &restoter_str, NULL, 0 )))
+    if ((restorer_window = NtUserFindWindowEx( NULL, NULL, &restorer_str, NULL, 0 )))
     {
         if (NtUserGetWindowThread( restorer_window, NULL ) != GetCurrentThreadId())
         {
@@ -3204,26 +3347,7 @@ static LONG apply_display_settings( struct source *target, const DEVMODEW *devmo
         }
     }
 
-    if (!update_display_cache( TRUE ))
-        WARN( "Failed to update display cache after mode change.\n" );
-
-    if ((source = find_source( NULL )))
-    {
-        DEVMODEW current_mode = {.dmSize = sizeof(DEVMODEW)};
-
-        if (!source_get_current_settings( source, &current_mode )) WARN( "Failed to get primary source current display settings.\n" );
-        source_release( source );
-
-        NtUserClipCursor( NULL );
-        send_notify_message( NtUserGetDesktopWindow(), WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
-                             MAKELPARAM( current_mode.dmPelsWidth, current_mode.dmPelsHeight ), FALSE );
-        send_message_timeout( HWND_BROADCAST, WM_DISPLAYCHANGE, current_mode.dmBitsPerPel,
-                              MAKELPARAM( current_mode.dmPelsWidth, current_mode.dmPelsHeight ),
-                              SMTO_ABORTIFHUNG, 2000, FALSE );
-        /* post clip_fullscreen_window request to the foreground window */
-        NtUserPostMessage( NtUserGetForegroundWindow(), WM_WINE_CLIPCURSOR, SET_CURSOR_FSCLIP, 0 );
-    }
-
+    display_mode_changed( TRUE );
     return ret;
 }
 
@@ -3383,8 +3507,7 @@ static BOOL should_enumerate_monitor( struct monitor *monitor, const POINT *orig
     if (!is_monitor_active( monitor )) return FALSE;
     if (monitor->is_clone) return FALSE;
 
-    *rect = map_dpi_rect( monitor->rc_monitor, get_monitor_dpi( monitor->handle ),
-                          get_thread_dpi() );
+    *rect = get_monitor_rect( monitor, FALSE, get_thread_dpi() );
     OffsetRect( rect, -origin->x, -origin->y );
     return intersect_rect( rect, rect, limit );
 }
@@ -3471,10 +3594,9 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
     return ret;
 }
 
-BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
+BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info, UINT dpi )
 {
     struct monitor *monitor;
-    UINT dpi_from, dpi_to;
 
     if (info->cbSize != sizeof(MONITORINFOEXW) && info->cbSize != sizeof(MONITORINFO)) return FALSE;
 
@@ -3485,9 +3607,8 @@ BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
         if (monitor->handle != handle) continue;
         if (!is_monitor_active( monitor )) continue;
 
-        /* FIXME: map dpi */
-        info->rcMonitor = monitor->rc_monitor;
-        info->rcWork = monitor->rc_work;
+        info->rcMonitor = get_monitor_rect( monitor, FALSE, dpi );
+        info->rcWork = get_monitor_rect( monitor, TRUE, dpi );
         info->dwFlags = is_monitor_primary( monitor ) ? MONITORINFOF_PRIMARY : 0;
         if (info->cbSize >= sizeof(MONITORINFOEXW))
         {
@@ -3498,12 +3619,6 @@ BOOL get_monitor_info( HMONITOR handle, MONITORINFO *info )
         }
         unlock_display_devices();
 
-        if ((dpi_to = get_thread_dpi()))
-        {
-            dpi_from = get_monitor_dpi( handle );
-            info->rcMonitor = map_dpi_rect( info->rcMonitor, dpi_from, dpi_to );
-            info->rcWork = map_dpi_rect( info->rcWork, dpi_from, dpi_to );
-        }
         TRACE( "flags %04x, monitor %s, work %s\n", (int)info->dwFlags,
                wine_dbgstr_rect(&info->rcMonitor), wine_dbgstr_rect(&info->rcWork));
         return TRUE;
@@ -3537,7 +3652,7 @@ HMONITOR monitor_from_rect( const RECT *rect, UINT flags, UINT dpi )
 
         if (!is_monitor_active( monitor ) || monitor->is_clone) continue;
 
-        monitor_rect = map_dpi_rect( monitor->rc_monitor, get_monitor_dpi( monitor->handle ), system_dpi );
+        monitor_rect = get_monitor_rect( monitor, FALSE, system_dpi );
         if (intersect_rect( &intersect, &monitor_rect, &r ))
         {
             /* check for larger intersecting area */
@@ -3639,7 +3754,7 @@ BOOL WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *
         RtlSetLastWin32Error( ERROR_INVALID_ADDRESS );
         return FALSE;
     }
-    switch (get_thread_dpi_awareness())
+    switch (NTUSER_DPI_CONTEXT_GET_AWARENESS( get_thread_dpi_awareness_context() ))
     {
     case DPI_AWARENESS_UNAWARE:      *x = *y = USER_DEFAULT_SCREEN_DPI; break;
     case DPI_AWARENESS_SYSTEM_AWARE: *x = *y = system_dpi; break;
@@ -3676,6 +3791,25 @@ BOOL WINAPI NtUserPerMonitorDPIPhysicalToLogicalPoint( HWND hwnd, POINT *pt )
         ret = TRUE;
     }
     return ret;
+}
+
+/* Set server auto-repeat properties. delay and speed are expressed in terms of
+ * SPI_KEYBOARDDELAY and SPI_KEYBOARDSPEED values. Returns whether auto-repeat
+ * was enabled before this request. */
+static BOOL set_server_keyboard_repeat( int enable, int delay, int speed )
+{
+    BOOL enabled = FALSE;
+
+    SERVER_START_REQ( set_keyboard_repeat )
+    {
+        req->enable = enable >= 0 ? (enable > 0) : -1;
+        req->delay = delay >= 0 ? (delay + 1) * 250 : -1;
+        req->period = speed >= 0 ? 400 / (speed + 1) : -1;
+        if (!wine_server_call( req )) enabled = reply->enable;
+    }
+    SERVER_END_REQ;
+
+    return enabled;
 }
 
 /* retrieve the cached base keys for a given entry */
@@ -4908,7 +5042,8 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
         break;
     case SPI_SETKEYBOARDSPEED:
         if (val > 31) val = 31;
-        ret = set_entry( &entry_KEYBOARDSPEED, val, ptr, winini );
+        if ((ret = set_entry( &entry_KEYBOARDSPEED, val, ptr, winini )))
+            set_server_keyboard_repeat( -1,  -1, val );
         break;
 
     WINE_SPI_WARN(SPI_LANGDRIVER); /* not implemented in Windows */
@@ -4952,7 +5087,8 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
         ret = get_entry( &entry_KEYBOARDDELAY, val, ptr );
         break;
     case SPI_SETKEYBOARDDELAY:
-        ret = set_entry( &entry_KEYBOARDDELAY, val, ptr, winini );
+        if ((ret = set_entry( &entry_KEYBOARDDELAY, val, ptr, winini )))
+            set_server_keyboard_repeat( -1,  val, -1 );
         break;
     case SPI_ICONVERTICALSPACING:
         if (ptr != NULL)
@@ -5123,6 +5259,8 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
     }
     case SPI_GETWORKAREA:
     {
+        UINT dpi = get_thread_dpi();
+
         if (!ptr) return FALSE;
 
         spi_idx = SPI_SETWORKAREA_IDX;
@@ -5135,14 +5273,14 @@ BOOL WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT w
             LIST_FOR_EACH_ENTRY( monitor, &monitors, struct monitor, entry )
             {
                 if (!is_monitor_primary( monitor )) continue;
-                work_area = monitor->rc_work;
+                work_area = get_monitor_rect( monitor, TRUE, dpi );
                 break;
             }
 
             unlock_display_devices();
             spi_loaded[spi_idx] = TRUE;
         }
-        *(RECT *)ptr = map_dpi_rect( work_area, system_dpi, get_thread_dpi() );
+        *(RECT *)ptr = work_area;
         ret = TRUE;
         TRACE("work area %s\n", wine_dbgstr_rect( &work_area ));
         break;
@@ -6132,28 +6270,25 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
     return TRUE;
 }
 
-
-static LONG dpi_awareness;
-
 /***********************************************************************
  *	     NtUserSetProcessDpiAwarenessContext    (win32u.@)
  */
-BOOL WINAPI NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown )
+BOOL WINAPI NtUserSetProcessDpiAwarenessContext( ULONG context, ULONG unknown )
 {
-    switch (awareness)
+    if (!is_valid_dpi_awareness_context( context, system_dpi ))
     {
-    case NTUSER_DPI_UNAWARE:
-    case NTUSER_DPI_SYSTEM_AWARE:
-    case NTUSER_DPI_PER_MONITOR_AWARE:
-    case NTUSER_DPI_PER_MONITOR_AWARE_V2:
-    case NTUSER_DPI_PER_UNAWARE_GDISCALED:
-        break;
-    default:
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 
-    return !InterlockedCompareExchange( &dpi_awareness, awareness, 0 );
+    if (InterlockedCompareExchange( &dpi_context, context, 0 ))
+    {
+        RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+
+    TRACE( "set to %#x\n", (UINT)context );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -6161,7 +6296,7 @@ BOOL WINAPI NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown 
  */
 ULONG WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process )
 {
-    DPI_AWARENESS val;
+    ULONG context;
 
     if (process && process != GetCurrentProcess())
     {
@@ -6169,9 +6304,9 @@ ULONG WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process )
         return NTUSER_DPI_UNAWARE;
     }
 
-    val = ReadNoFence( &dpi_awareness );
-    if (!val) return NTUSER_DPI_UNAWARE;
-    return val;
+    context = ReadNoFence( &dpi_context );
+    if (!context) return NTUSER_DPI_UNAWARE;
+    return context;
 }
 
 BOOL message_beep( UINT i )
@@ -6209,6 +6344,15 @@ static void thread_detach(void)
     exiting_thread_id = 0;
 }
 
+static BOOL set_keyboard_auto_repeat( BOOL enable )
+{
+    UINT delay, speed;
+
+    get_entry( &entry_KEYBOARDDELAY, 0, &delay );
+    get_entry( &entry_KEYBOARDSPEED, 0, &speed );
+    return set_server_keyboard_repeat( enable, delay, speed );
+}
+
 /***********************************************************************
  *	     NtUserCallNoParam    (win32u.@)
  */
@@ -6242,6 +6386,10 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 
     case NtUserCallNoParam_ReleaseCapture:
         return release_capture();
+
+    case NtUserCallNoParam_DisplayModeChanged:
+        display_mode_changed( FALSE );
+        return TRUE;
 
     /* temporary exports */
     case NtUserExitingThread:
@@ -6285,7 +6433,7 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         return enum_clipboard_formats( arg );
 
     case NtUserCallOneParam_GetClipCursor:
-        return get_clip_cursor( (RECT *)arg );
+        return get_clip_cursor( (RECT *)arg, get_thread_dpi() );
 
     case NtUserCallOneParam_GetCursorPos:
         return get_cursor_pos( (POINT *)arg );
@@ -6298,9 +6446,6 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 
     case NtUserCallOneParam_GetSysColor:
         return get_sys_color( arg );
-
-    case NtUserCallOneParam_IsWindowRectFullScreen:
-        return is_window_rect_full_screen( (const RECT *)arg );
 
     case NtUserCallOneParam_RealizePalette:
         return realize_palette( UlongToHandle(arg) );
@@ -6338,6 +6483,12 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
     case NtUserCallOneParam_SetKeyboardAutoRepeat:
         return set_keyboard_auto_repeat( arg );
 
+    case NtUserCallOneParam_SetThreadDpiAwarenessContext:
+        return set_thread_dpi_awareness_context( arg );
+
+    case NtUserCallOneParam_D3DKMTOpenAdapterFromGdiDisplayName:
+        return d3dkmt_open_adapter_from_gdi_display_name( (void *)arg );
+
     /* temporary exports */
     case NtUserGetDeskPattern:
         return get_entry( &entry_DESKPATTERN, 256, (WCHAR *)arg );
@@ -6362,7 +6513,7 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
         return get_menu_info( UlongToHandle(arg1), (MENUINFO *)arg2 );
 
     case NtUserCallTwoParam_GetMonitorInfo:
-        return get_monitor_info( UlongToHandle(arg1), (MONITORINFO *)arg2 );
+        return get_monitor_info( UlongToHandle(arg1), (MONITORINFO *)arg2, get_thread_dpi() );
 
     case NtUserCallTwoParam_GetSystemMetricsForDpi:
         return get_system_metrics_for_dpi( arg1, arg2 );
@@ -6378,6 +6529,15 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
 
     case NtUserCallTwoParam_UnhookWindowsHook:
         return unhook_windows_hook( arg1, (HOOKPROC)arg2 );
+
+    case NtUserCallTwoParam_AdjustWindowRect:
+    {
+        struct adjust_window_rect_params *params = (void *)arg2;
+        return adjust_window_rect( (RECT *)arg1, params->style, params->menu, params->ex_style, params->dpi );
+    }
+
+    case NtUserCallTwoParam_IsWindowRectFullScreen:
+        return is_window_rect_full_screen( (const RECT *)arg1, arg2 );
 
     /* temporary exports */
     case NtUserAllocWinProc:

@@ -33,9 +33,6 @@ enum system_timer_id
 {
     SYSTEM_TIMER_TRACK_MOUSE = 0xfffa,
     SYSTEM_TIMER_CARET = 0xffff,
-
-    /* not compatible with native */
-    SYSTEM_TIMER_KEY_REPEAT = 0xfff0,
 };
 
 struct user_object
@@ -74,8 +71,7 @@ typedef struct tagWND
     HICON              hIconSmall;    /* window's small icon */
     HICON              hIconSmall2;   /* window's secondary small icon, derived from hIcon */
     HIMC               imc;           /* window's input context */
-    UINT               dpi;           /* window DPI */
-    DPI_AWARENESS      dpi_awareness; /* DPI awareness */
+    UINT               dpi_context;   /* window DPI awareness context */
     struct window_surface *surface;   /* Window surface if any */
     struct list        vulkan_surfaces; /* list of vulkan surfaces created for this window */
     struct tagDIALOGINFO *dlgInfo;    /* Dialog additional info (dialogs only) */
@@ -121,7 +117,6 @@ struct user_thread_info
     struct received_message_info *receive_info;           /* Message being currently received */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
     struct imm_thread_data       *imm_thread_data;        /* IMM thread data */
-    MSG                           key_repeat_msg;         /* Last WM_KEYDOWN message to repeat */
     HKL                           kbd_layout;             /* Current keyboard layout */
     UINT                          kbd_layout_id;          /* Current keyboard layout ID */
     struct hardware_msg_data     *rawinput;               /* Current rawinput message data */
@@ -250,7 +245,6 @@ struct peek_message_filter
 };
 
 extern int peek_message( MSG *msg, const struct peek_message_filter *filter );
-extern BOOL set_keyboard_auto_repeat( BOOL enable );
 
 /* systray.c */
 extern LRESULT system_tray_call( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, void *data );

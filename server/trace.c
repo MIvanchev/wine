@@ -1372,6 +1372,40 @@ static void dump_varargs_handle_infos( const char *prefix, data_size_t size )
     fputc( '}', stderr );
 }
 
+static void dump_varargs_directory_entries( const char *prefix, data_size_t size )
+{
+    fprintf( stderr, "%s{", prefix );
+    while (size)
+    {
+        const struct directory_entry *entry = cur_data;
+        data_size_t entry_size;
+        const char *next;
+
+        if (size < sizeof(*entry) ||
+            (size - sizeof(*entry) < entry->name_len) ||
+            (size - sizeof(*entry) - entry->name_len < entry->type_len))
+        {
+            fprintf( stderr, "***invalid***}" );
+            remove_data( size );
+            return;
+        }
+
+        next = (const char *)(entry + 1);
+        fprintf( stderr, "{name=L\"" );
+        dump_strW( (const WCHAR *)next, entry->name_len, stderr, "\"\"" );
+        next += entry->name_len;
+        fprintf( stderr, "\",type=L\"" );
+        dump_strW( (const WCHAR *)next, entry->type_len, stderr, "\"\"" );
+        fprintf( stderr, "\"}" );
+
+        entry_size = min( size, (sizeof(*entry) + entry->name_len + entry->type_len + 3) & ~3 );
+        size -= entry_size;
+        remove_data( entry_size );
+        if (size) fputc( ',', stderr );
+    }
+    fputc( '}', stderr );
+}
+
 typedef void (*dump_func)( const void *req );
 
 /* Everything below this line is generated automatically by tools/make_requests */
@@ -2956,8 +2990,7 @@ static void dump_create_window_request( const struct create_window_request *req 
     fprintf( stderr, ", owner=%08x", req->owner );
     fprintf( stderr, ", atom=%04x", req->atom );
     dump_uint64( ", instance=", &req->instance );
-    fprintf( stderr, ", dpi=%d", req->dpi );
-    fprintf( stderr, ", awareness=%d", req->awareness );
+    fprintf( stderr, ", dpi_context=%08x", req->dpi_context );
     fprintf( stderr, ", style=%08x", req->style );
     fprintf( stderr, ", ex_style=%08x", req->ex_style );
     dump_varargs_unicode_str( ", class=", cur_size );
@@ -2970,8 +3003,7 @@ static void dump_create_window_reply( const struct create_window_reply *req )
     fprintf( stderr, ", owner=%08x", req->owner );
     fprintf( stderr, ", extra=%d", req->extra );
     dump_uint64( ", class_ptr=", &req->class_ptr );
-    fprintf( stderr, ", dpi=%d", req->dpi );
-    fprintf( stderr, ", awareness=%d", req->awareness );
+    fprintf( stderr, ", dpi_context=%08x", req->dpi_context );
 }
 
 static void dump_destroy_window_request( const struct destroy_window_request *req )
@@ -3015,8 +3047,7 @@ static void dump_get_window_info_reply( const struct get_window_info_reply *req 
     fprintf( stderr, ", tid=%04x", req->tid );
     fprintf( stderr, ", atom=%04x", req->atom );
     fprintf( stderr, ", is_unicode=%d", req->is_unicode );
-    fprintf( stderr, ", dpi=%d", req->dpi );
-    fprintf( stderr, ", awareness=%d", req->awareness );
+    fprintf( stderr, ", dpi_context=%08x", req->dpi_context );
 }
 
 static void dump_set_window_info_request( const struct set_window_info_request *req )
@@ -3053,8 +3084,7 @@ static void dump_set_parent_reply( const struct set_parent_reply *req )
 {
     fprintf( stderr, " old_parent=%08x", req->old_parent );
     fprintf( stderr, ", full_parent=%08x", req->full_parent );
-    fprintf( stderr, ", dpi=%d", req->dpi );
-    fprintf( stderr, ", awareness=%d", req->awareness );
+    fprintf( stderr, ", dpi_context=%08x", req->dpi_context );
 }
 
 static void dump_get_window_parents_request( const struct get_window_parents_request *req )
@@ -3193,26 +3223,16 @@ static void dump_get_visible_region_reply( const struct get_visible_region_reply
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
-static void dump_get_surface_region_request( const struct get_surface_region_request *req )
-{
-    fprintf( stderr, " window=%08x", req->window );
-}
-
-static void dump_get_surface_region_reply( const struct get_surface_region_reply *req )
-{
-    dump_rectangle( " visible_rect=", &req->visible_rect );
-    fprintf( stderr, ", total_size=%u", req->total_size );
-    dump_varargs_rectangles( ", region=", cur_size );
-}
-
 static void dump_get_window_region_request( const struct get_window_region_request *req )
 {
     fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", surface=%d", req->surface );
 }
 
 static void dump_get_window_region_reply( const struct get_window_region_reply *req )
 {
-    fprintf( stderr, " total_size=%u", req->total_size );
+    dump_rectangle( " visible_rect=", &req->visible_rect );
+    fprintf( stderr, ", total_size=%u", req->total_size );
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
@@ -4099,18 +4119,18 @@ static void dump_open_directory_reply( const struct open_directory_reply *req )
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_get_directory_entry_request( const struct get_directory_entry_request *req )
+static void dump_get_directory_entries_request( const struct get_directory_entries_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", index=%08x", req->index );
+    fprintf( stderr, ", max_count=%08x", req->max_count );
 }
 
-static void dump_get_directory_entry_reply( const struct get_directory_entry_reply *req )
+static void dump_get_directory_entries_reply( const struct get_directory_entries_reply *req )
 {
     fprintf( stderr, " total_len=%u", req->total_len );
-    fprintf( stderr, ", name_len=%u", req->name_len );
-    dump_varargs_unicode_str( ", name=", min(cur_size,req->name_len) );
-    dump_varargs_unicode_str( ", type=", cur_size );
+    fprintf( stderr, ", count=%08x", req->count );
+    dump_varargs_directory_entries( ", entries=", cur_size );
 }
 
 static void dump_create_symlink_request( const struct create_symlink_request *req )
@@ -4604,6 +4624,18 @@ static void dump_get_next_thread_reply( const struct get_next_thread_reply *req 
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_set_keyboard_repeat_request( const struct set_keyboard_repeat_request *req )
+{
+    fprintf( stderr, " enable=%d", req->enable );
+    fprintf( stderr, ", delay=%d", req->delay );
+    fprintf( stderr, ", period=%d", req->period );
+}
+
+static void dump_set_keyboard_repeat_reply( const struct set_keyboard_repeat_reply *req )
+{
+    fprintf( stderr, " enable=%d", req->enable );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -4761,7 +4793,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_window_text_request,
     (dump_func)dump_get_windows_offset_request,
     (dump_func)dump_get_visible_region_request,
-    (dump_func)dump_get_surface_region_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
     (dump_func)dump_get_update_region_request,
@@ -4839,7 +4870,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_mailslot_info_request,
     (dump_func)dump_create_directory_request,
     (dump_func)dump_open_directory_request,
-    (dump_func)dump_get_directory_entry_request,
+    (dump_func)dump_get_directory_entries_request,
     (dump_func)dump_create_symlink_request,
     (dump_func)dump_open_symlink_request,
     (dump_func)dump_query_symlink_request,
@@ -4890,6 +4921,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_suspend_process_request,
     (dump_func)dump_resume_process_request,
     (dump_func)dump_get_next_thread_request,
+    (dump_func)dump_set_keyboard_repeat_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -5049,7 +5081,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_get_windows_offset_reply,
     (dump_func)dump_get_visible_region_reply,
-    (dump_func)dump_get_surface_region_reply,
     (dump_func)dump_get_window_region_reply,
     NULL,
     (dump_func)dump_get_update_region_reply,
@@ -5127,7 +5158,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_mailslot_info_reply,
     (dump_func)dump_create_directory_reply,
     (dump_func)dump_open_directory_reply,
-    (dump_func)dump_get_directory_entry_reply,
+    (dump_func)dump_get_directory_entries_reply,
     (dump_func)dump_create_symlink_reply,
     (dump_func)dump_open_symlink_reply,
     (dump_func)dump_query_symlink_reply,
@@ -5178,6 +5209,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     (dump_func)dump_get_next_thread_reply,
+    (dump_func)dump_set_keyboard_repeat_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -5337,7 +5369,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_window_text",
     "get_windows_offset",
     "get_visible_region",
-    "get_surface_region",
     "get_window_region",
     "set_window_region",
     "get_update_region",
@@ -5415,7 +5446,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_mailslot_info",
     "create_directory",
     "open_directory",
-    "get_directory_entry",
+    "get_directory_entries",
     "create_symlink",
     "open_symlink",
     "query_symlink",
@@ -5466,6 +5497,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "suspend_process",
     "resume_process",
     "get_next_thread",
+    "set_keyboard_repeat",
 };
 
 static const struct
@@ -5545,6 +5577,7 @@ static const struct
     { "KERNEL_APC",                  STATUS_KERNEL_APC },
     { "KEY_DELETED",                 STATUS_KEY_DELETED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
+    { "MORE_ENTRIES",                STATUS_MORE_ENTRIES },
     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },
     { "NETWORK_BUSY",                STATUS_NETWORK_BUSY },

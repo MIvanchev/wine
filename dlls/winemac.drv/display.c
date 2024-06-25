@@ -1112,15 +1112,10 @@ void macdrv_displays_changed(const macdrv_event *event)
        process it (by sending it to the desktop window). */
     if (event->displays_changed.activating ||
         NtUserGetWindowThread(hwnd, NULL) == GetCurrentThreadId())
-    {
-        macdrv_init_display_devices(TRUE);
-        macdrv_resize_desktop();
-    }
+        NtUserCallNoParam(NtUserCallNoParam_DisplayModeChanged);
 }
 
-static BOOL force_display_devices_refresh;
-
-UINT macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, BOOL force, void *param )
+UINT macdrv_UpdateDisplayDevices(const struct gdi_device_manager *device_manager, void *param)
 {
     struct macdrv_adapter *adapters, *adapter;
     struct macdrv_monitor *monitors, *monitor;
@@ -1128,9 +1123,6 @@ UINT macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     struct macdrv_display *displays, *display;
     INT gpu_count, adapter_count, monitor_count, mode_count, display_count;
     DEVMODEW *modes;
-
-    if (!force && !force_display_devices_refresh) return STATUS_ALREADY_COMPLETE;
-    force_display_devices_refresh = FALSE;
 
     if (macdrv_get_displays(&displays, &display_count))
     {
@@ -1155,7 +1147,7 @@ UINT macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
             .subsystem = gpu->subsys_id,
             .revision = gpu->revision_id,
         };
-        device_manager->add_gpu(gpu->name, &pci_id, NULL, 0, param);
+        device_manager->add_gpu(gpu->name, &pci_id, NULL, param);
 
         /* Initialize adapters */
         if (macdrv_get_adapters(gpu->id, &adapters, &adapter_count)) break;
@@ -1208,18 +1200,4 @@ UINT macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     macdrv_free_gpus(gpus);
     macdrv_free_displays(displays);
     return STATUS_SUCCESS;
-}
-
-/***********************************************************************
- *              macdrv_init_display_devices
- *
- * Initialize display device registry data.
- */
-void macdrv_init_display_devices(BOOL force)
-{
-    UINT32 num_path, num_mode;
-
-    if (force) force_display_devices_refresh = TRUE;
-    /* trigger refresh in win32u */
-    NtUserGetDisplayConfigBufferSizes( QDC_ONLY_ACTIVE_PATHS, &num_path, &num_mode );
 }

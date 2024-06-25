@@ -1318,7 +1318,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct glx_pixel
     RECT rect;
     int width, height;
 
-    NtUserGetClientRect( hwnd, &rect );
+    NtUserGetClientRect( hwnd, &rect, get_win_monitor_dpi( hwnd ) );
     width  = min( max( 1, rect.right ), 65535 );
     height = min( max( 1, rect.bottom ), 65535 );
 
@@ -3459,7 +3459,6 @@ static struct opengl_funcs opengl_funcs =
         glxdrv_wglCopyContext,              /* p_wglCopyContext */
         glxdrv_wglCreateContext,            /* p_wglCreateContext */
         glxdrv_wglDeleteContext,            /* p_wglDeleteContext */
-        NULL,                               /* p_wglDescribePixelFormat */
         glxdrv_wglGetPixelFormat,           /* p_wglGetPixelFormat */
         glxdrv_wglGetProcAddress,           /* p_wglGetProcAddress */
         glxdrv_wglMakeCurrent,              /* p_wglMakeCurrent */

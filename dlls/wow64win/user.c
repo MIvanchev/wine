@@ -355,7 +355,7 @@ struct win_proc_params32
     BOOL ansi;
     BOOL ansi_dst;
     enum wm_char_mapping mapping;
-    ULONG dpi_awareness;
+    ULONG dpi_context;
     ULONG procA;
     ULONG procW;
 };
@@ -471,7 +471,7 @@ static void win_proc_params_64to32( const struct win_proc_params *src, struct wi
     params.ansi = src->ansi;
     params.ansi_dst = src->ansi_dst;
     params.mapping = src->mapping;
-    params.dpi_awareness = HandleToUlong( src->dpi_awareness );
+    params.dpi_context = src->dpi_context;
     params.procA = PtrToUlong( src->procA );
     params.procW = PtrToUlong( src->procW );
     memcpy( dst, &params, sizeof(params) );
@@ -1694,6 +1694,22 @@ NTSTATUS WINAPI wow64_NtUserCallHwndParam( UINT *args )
             return NtUserCallHwndParam( hwnd, (UINT_PTR)&info, code );
         }
 
+    case NtUserCallHwndParam_GetWindowRects:
+        {
+            struct
+            {
+                ULONG rect;
+                BOOL client;
+                UINT dpi;
+            } *params32 = UlongToPtr( param );
+            struct get_window_rects_params params;
+
+            params.rect = UlongToPtr( params32->rect );
+            params.client = params32->client;
+            params.dpi = params32->dpi;
+            return NtUserCallHwndParam( hwnd, (UINT_PTR)&params, code );
+        }
+
     case NtUserCallHwndParam_MapWindowPoints:
         {
             struct
@@ -1701,12 +1717,14 @@ NTSTATUS WINAPI wow64_NtUserCallHwndParam( UINT *args )
                 ULONG hwnd_to;
                 ULONG points;
                 UINT count;
+                UINT dpi;
             } *params32 = UlongToPtr( param );
             struct map_window_points_params params;
 
             params.hwnd_to = LongToHandle( params32->hwnd_to );
             params.points = UlongToPtr( params32->points );
             params.count = params32->count;
+            params.dpi = params32->dpi;
             return NtUserCallHwndParam( hwnd, (UINT_PTR)&params, code );
         }
 

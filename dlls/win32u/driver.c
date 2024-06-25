@@ -761,7 +761,7 @@ static INT nulldrv_GetDisplayDepth( LPCWSTR name, BOOL is_primary )
     return -1; /* use default implementation */
 }
 
-static UINT nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, BOOL force, void *param )
+static UINT nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, void *param )
 {
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -867,10 +867,16 @@ static LRESULT nulldrv_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
     return -1;
 }
 
-static BOOL nulldrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                         const RECT *window_rect )
+static BOOL nulldrv_CreateLayeredWindow( HWND hwnd, const RECT *window_rect, COLORREF color_key,
+                                         struct window_surface **surface )
 {
+    *surface = NULL;
     return TRUE;
+}
+
+static void nulldrv_UpdateLayeredWindow( HWND hwnd, const RECT *window_rect, COLORREF color_key,
+                                         BYTE alpha, UINT flags )
+{
 }
 
 static LRESULT nulldrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -878,9 +884,12 @@ static LRESULT nulldrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM
     return 0;
 }
 
-static BOOL nulldrv_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
-                                       const RECT *window_rect, const RECT *client_rect,
-                                       RECT *visible_rect, struct window_surface **surface )
+static BOOL nulldrv_WindowPosChanging( HWND hwnd, UINT swp_flags, const RECT *window_rect, const RECT *client_rect, RECT *visible_rect )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_CreateWindowSurface( HWND hwnd, UINT swp_flags, const RECT *visible_rect, struct window_surface **surface )
 {
     return FALSE;
 }
@@ -1012,6 +1021,7 @@ static const struct user_driver_funcs *load_driver(void)
         __wine_set_user_driver( &null_user_driver, WINE_GDI_DRIVER_VERSION );
     }
 
+    update_display_cache( FALSE );
     return user_driver;
 }
 
@@ -1166,9 +1176,9 @@ static void loaderdrv_UpdateClipboard(void)
     load_driver()->pUpdateClipboard();
 }
 
-static UINT loaderdrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, BOOL force, void *param )
+static UINT loaderdrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, void *param )
 {
-    return load_driver()->pUpdateDisplayDevices( manager, force, param );
+    return load_driver()->pUpdateDisplayDevices( manager, param );
 }
 
 static BOOL loaderdrv_CreateDesktop( const WCHAR *name, UINT width, UINT height )
@@ -1207,10 +1217,16 @@ static void loaderdrv_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
     load_driver()->pSetWindowRgn( hwnd, hrgn, redraw );
 }
 
-static BOOL loaderdrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                           const RECT *window_rect )
+static BOOL loaderdrv_CreateLayeredWindow( HWND hwnd, const RECT *window_rect, COLORREF color_key,
+                                           struct window_surface **surface )
 {
-    return load_driver()->pUpdateLayeredWindow( hwnd, info, window_rect );
+    return load_driver()->pCreateLayeredWindow( hwnd, window_rect, color_key, surface );
+}
+
+static void loaderdrv_UpdateLayeredWindow( HWND hwnd, const RECT *window_rect, COLORREF color_key,
+                                           BYTE alpha, UINT flags )
+{
+    load_driver()->pUpdateLayeredWindow( hwnd, window_rect, color_key, alpha, flags );
 }
 
 static UINT loaderdrv_VulkanInit( UINT version, void *vulkan_handle, const struct vulkan_driver_funcs **driver_funcs )
@@ -1277,9 +1293,11 @@ static const struct user_driver_funcs lazy_load_driver =
     nulldrv_SetWindowText,
     nulldrv_ShowWindow,
     nulldrv_SysCommand,
+    loaderdrv_CreateLayeredWindow,
     loaderdrv_UpdateLayeredWindow,
     nulldrv_WindowMessage,
     nulldrv_WindowPosChanging,
+    nulldrv_CreateWindowSurface,
     nulldrv_WindowPosChanged,
     /* system parameters */
     nulldrv_SystemParametersInfo,
@@ -1363,9 +1381,11 @@ void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version
     SET_USER_FUNC(SetWindowText);
     SET_USER_FUNC(ShowWindow);
     SET_USER_FUNC(SysCommand);
+    SET_USER_FUNC(CreateLayeredWindow);
     SET_USER_FUNC(UpdateLayeredWindow);
     SET_USER_FUNC(WindowMessage);
     SET_USER_FUNC(WindowPosChanging);
+    SET_USER_FUNC(CreateWindowSurface);
     SET_USER_FUNC(WindowPosChanged);
     SET_USER_FUNC(SystemParametersInfo);
     SET_USER_FUNC(VulkanInit);

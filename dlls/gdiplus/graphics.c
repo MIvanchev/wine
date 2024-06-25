@@ -55,6 +55,14 @@ GpStatus gdi_dc_acquire(GpGraphics *graphics, HDC *hdc)
         graphics->hdc_refs++;
         return Ok;
     }
+    else if (graphics->owndc)
+    {
+        *hdc = graphics->hdc = GetDC(graphics->hwnd);
+        if (!graphics->hdc)
+            return OutOfMemory;
+        graphics->hdc_refs++;
+        return Ok;
+    }
 
     *hdc = NULL;
     return InvalidParameter;
@@ -64,6 +72,13 @@ void gdi_dc_release(GpGraphics *graphics, HDC hdc)
 {
     assert(graphics->hdc_refs > 0);
     graphics->hdc_refs--;
+
+    if (graphics->owndc && !graphics->hdc_refs)
+    {
+        assert(graphics->hdc == hdc);
+        graphics->hdc = NULL;
+        ReleaseDC(graphics->hwnd, hdc);
+    }
 }
 
 static GpStatus draw_driver_string(GpGraphics *graphics, GDIPCONST UINT16 *text, INT length,
@@ -504,7 +519,8 @@ static GpStatus alpha_blend_hdc_pixels(GpGraphics *graphics, INT dst_x, INT dst_
     if(!hbitmap || !temp_bits)
         goto done;
 
-    if ((GetDeviceCaps(graphics->hdc, TECHNOLOGY) == DT_RASPRINTER &&
+    if ((graphics->hdc &&
+         GetDeviceCaps(graphics->hdc, TECHNOLOGY) == DT_RASPRINTER &&
          GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS) == SB_NONE) ||
             fmt & PixelFormatPAlpha)
         memcpy(temp_bits, src, src_width * src_height * 4);
@@ -2556,6 +2572,9 @@ GpStatus WINGDIPAPI GdipCreateFromHWND(HWND hwnd, GpGraphics **graphics)
     (*graphics)->hwnd = hwnd;
     (*graphics)->owndc = TRUE;
 
+    ReleaseDC(hwnd, hdc);
+    (*graphics)->hdc = NULL;
+
     return Ok;
 }
 
@@ -2610,12 +2629,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
 
     if (graphics->temp_hdc)
     {
-        DeleteDC(graphics->temp_hdc);
+        if (graphics->owndc)
+            ReleaseDC(graphics->hwnd, graphics->temp_hdc);
+        else
+            DeleteDC(graphics->temp_hdc);
         graphics->temp_hdc = NULL;
     }
-
-    if(graphics->owndc)
-        ReleaseDC(graphics->hwnd, graphics->hdc);
 
     LIST_FOR_EACH_ENTRY_SAFE(cont, next, &graphics->containers, GraphicsContainerItem, entry){
         list_remove(&cont->entry);
@@ -3408,6 +3427,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             BITMAPINFOHEADER bih;
             BYTE *temp_bits;
             PixelFormat dst_format;
+            INT dib_stride;
 
             src_hdc = CreateCompatibleDC(0);
 
@@ -3434,8 +3454,10 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             hbitmap = CreateDIBSection(src_hdc, (BITMAPINFO*)&bih, DIB_RGB_COLORS,
                 (void**)&temp_bits, NULL, 0);
 
+            dib_stride = ((bitmap->width * PIXELFORMATBPP(dst_format) + 31) / 8) & ~3;
+
             convert_pixels(bitmap->width, bitmap->height,
-                bitmap->width*PIXELFORMATBPP(dst_format)/8, temp_bits, dst_format, bitmap->image.palette,
+                dib_stride, temp_bits, dst_format, bitmap->image.palette,
                 bitmap->stride, bitmap->bits, bitmap->format,
                 bitmap->image.palette);
 
@@ -4907,7 +4929,7 @@ GpStatus WINGDIPAPI GdipFlush(GpGraphics *graphics, GpFlushIntention intention)
 
     /* We have no internal operation queue, so there's no need to clear it. */
 
-    if (graphics->hdc)
+    if (has_gdi_dc(graphics))
         GdiFlush();
 
     return Ok;
@@ -5734,13 +5756,17 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     if (regionCount < stringFormat->range_count)
         return InvalidParameter;
 
-    if(!graphics->hdc)
+    if(!has_gdi_dc(graphics))
     {
         hdc = temp_hdc = CreateCompatibleDC(0);
         if (!temp_hdc) return OutOfMemory;
     }
     else
-        hdc = graphics->hdc;
+    {
+        stat = gdi_dc_acquire(graphics, &hdc);
+        if (stat != Ok)
+            return stat;
+    }
 
     if (stringFormat->attr)
         TRACE("may be ignoring some format flags: attr %x\n", stringFormat->attr);
@@ -5787,6 +5813,8 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
 
     if (temp_hdc)
         DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return stat;
 }
@@ -5830,6 +5858,7 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format, RectF *bounds,
     INT *codepointsfitted, INT *linesfilled)
 {
+    GpStatus status;
     HFONT oldfont, gdifont;
     struct measure_string_args args;
     HDC temp_hdc=NULL, hdc;
@@ -5844,13 +5873,17 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     if(!graphics || !string || !font || !rect || !bounds)
         return InvalidParameter;
 
-    if(!graphics->hdc)
+    if(!has_gdi_dc(graphics))
     {
         hdc = temp_hdc = CreateCompatibleDC(0);
         if (!temp_hdc) return OutOfMemory;
     }
     else
-        hdc = graphics->hdc;
+    {
+        status = gdi_dc_acquire(graphics, &hdc);
+        if (status != Ok)
+            return status;
+    }
 
     if(linesfilled) *linesfilled = 0;
     if(codepointsfitted) *codepointsfitted = 0;
@@ -5903,6 +5936,8 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
 
     if (temp_hdc)
         DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -5974,6 +6009,7 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     INT length, GDIPCONST GpFont *font, GDIPCONST RectF *rect,
     GDIPCONST GpStringFormat *format, GDIPCONST GpBrush *brush)
 {
+    GpStatus status;
     HRGN rgn = NULL;
     HFONT gdifont;
     GpPointF rectcpy[4];
@@ -5992,9 +6028,11 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     if(!graphics || !string || !font || !brush || !rect)
         return InvalidParameter;
 
-    if(graphics->hdc)
+    if(has_gdi_dc(graphics))
     {
-        hdc = graphics->hdc;
+        status = gdi_dc_acquire(graphics, &hdc);
+        if (status != Ok)
+            return status;
     }
     else
     {
@@ -6084,7 +6122,10 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
 
     RestoreDC(hdc, save_state);
 
-    DeleteDC(temp_hdc);
+    if (temp_hdc)
+        DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -6983,6 +7024,13 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
     {
         stat = METAFILE_GetDC((GpMetafile*)graphics->image, hdc);
     }
+    else if (graphics->owndc)
+    {
+        graphics->temp_hdc = GetDC(graphics->hwnd);
+        if (!graphics->temp_hdc)
+            return OutOfMemory;
+        *hdc = graphics->temp_hdc;
+    }
     else if (!graphics->hdc ||
         (graphics->image && graphics->image->type == ImageTypeBitmap))
     {
@@ -7064,6 +7112,11 @@ GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
     {
         stat = METAFILE_ReleaseDC((GpMetafile*)graphics->image, hdc);
     }
+    else if (graphics->owndc)
+    {
+        ReleaseDC(graphics->hwnd, graphics->temp_hdc);
+        graphics->temp_hdc = NULL;
+    }
     else if (graphics->temp_hdc == hdc)
     {
         DWORD* pos;
@@ -7135,14 +7188,21 @@ GpStatus WINGDIPAPI GdipGetClip(GpGraphics *graphics, GpRegion *region)
 
 GpStatus gdi_transform_acquire(GpGraphics *graphics)
 {
-    if (graphics->gdi_transform_acquire_count == 0 && graphics->hdc)
+    if (graphics->gdi_transform_acquire_count == 0 && has_gdi_dc(graphics))
     {
-        graphics->gdi_transform_save = SaveDC(graphics->hdc);
-        ModifyWorldTransform(graphics->hdc, NULL, MWT_IDENTITY);
-        SetGraphicsMode(graphics->hdc, GM_COMPATIBLE);
-        SetMapMode(graphics->hdc, MM_TEXT);
-        SetWindowOrgEx(graphics->hdc, 0, 0, NULL);
-        SetViewportOrgEx(graphics->hdc, 0, 0, NULL);
+        HDC hdc;
+        GpStatus stat;
+
+        stat = gdi_dc_acquire(graphics, &hdc);
+        if (stat != Ok)
+            return stat;
+
+        graphics->gdi_transform_save = SaveDC(hdc);
+        ModifyWorldTransform(hdc, NULL, MWT_IDENTITY);
+        SetGraphicsMode(hdc, GM_COMPATIBLE);
+        SetMapMode(hdc, MM_TEXT);
+        SetWindowOrgEx(hdc, 0, 0, NULL);
+        SetViewportOrgEx(hdc, 0, 0, NULL);
     }
     graphics->gdi_transform_acquire_count++;
     return Ok;
@@ -7158,6 +7218,7 @@ GpStatus gdi_transform_release(GpGraphics *graphics)
     if (graphics->gdi_transform_acquire_count == 1 && graphics->hdc)
     {
         RestoreDC(graphics->hdc, graphics->gdi_transform_save);
+        gdi_dc_release(graphics, graphics->hdc);
     }
     graphics->gdi_transform_acquire_count--;
     return Ok;
@@ -7473,6 +7534,7 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
     LOGFONTW lfw;
     UINT eto_flags=0;
     GpStatus status;
+    HDC hdc;
     HRGN hrgn;
 
     if (!(flags & DriverStringOptionsCmapLookup))
@@ -7490,15 +7552,23 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
         }
     }
 
-    save_state = SaveDC(graphics->hdc);
-    SetBkMode(graphics->hdc, TRANSPARENT);
-    SetTextColor(graphics->hdc, get_gdi_brush_color(brush));
+    status = gdi_dc_acquire(graphics, &hdc);
+    if (status != Ok)
+    {
+        free(real_positions);
+        free(eto_positions);
+        return status;
+    }
+
+    save_state = SaveDC(hdc);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, get_gdi_brush_color(brush));
 
     status = get_clip_hrgn(graphics, &hrgn);
 
     if (status == Ok)
     {
-        ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+        ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
         DeleteObject(hrgn);
     }
 
@@ -7529,22 +7599,24 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
         }
     }
 
-    SelectObject(graphics->hdc, hfont);
+    SelectObject(hdc, hfont);
 
-    SetTextAlign(graphics->hdc, TA_BASELINE|TA_LEFT);
+    SetTextAlign(hdc, TA_BASELINE|TA_LEFT);
 
     gdi_transform_acquire(graphics);
 
-    ExtTextOutW(graphics->hdc, gdip_round(pt.X), gdip_round(pt.Y), eto_flags, NULL, text, length, eto_positions);
+    ExtTextOutW(hdc, gdip_round(pt.X), gdip_round(pt.Y), eto_flags, NULL, text, length, eto_positions);
 
     gdi_transform_release(graphics);
 
-    RestoreDC(graphics->hdc, save_state);
+    RestoreDC(hdc, save_state);
 
     DeleteObject(hfont);
 
     free(real_positions);
     free(eto_positions);
+
+    gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -7776,7 +7848,7 @@ static GpStatus draw_driver_string(GpGraphics *graphics, GDIPCONST UINT16 *text,
         return METAFILE_DrawDriverString((GpMetafile*)graphics->image, text, length, font,
             format, brush, positions, flags, matrix);
 
-    if (graphics->hdc && !graphics->alpha_hdc &&
+    if (has_gdi_dc(graphics) && !graphics->alpha_hdc &&
         brush->bt == BrushTypeSolidColor &&
         (((GpSolidFill*)brush)->color & 0xff000000) == 0xff000000)
         stat = GDI32_GdipDrawDriverString(graphics, text, length, font, format,

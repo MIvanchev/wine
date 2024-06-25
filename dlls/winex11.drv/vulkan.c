@@ -70,11 +70,10 @@ VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice, uint32_
 /* static-wine32: define this so no symbols are stripped away. */
 
 void* dummy_vulkan_funcs[] = {
-    vkGetDeviceProcAddr,
-    vkGetInstanceProcAddr,
+    vkDestroySurfaceKHR,
     vkQueuePresentKHR,
-    vkCreateXlibSurfaceKHR,
-    vkGetPhysicalDeviceXlibPresentationSupportKHR,
+    vkGetDeviceProcAddr,
+    vkGetInstanceProcAddr
 };
 
 #define pvkCreateXlibSurfaceKHR                        vkCreateXlibSurfaceKHR
