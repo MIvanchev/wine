@@ -59,22 +59,8 @@ typedef struct VkXlibSurfaceCreateInfoKHR
     Window window;
 } VkXlibSurfaceCreateInfoKHR;
 
-void vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
-VkResult vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR *);
-void vkGetDeviceProcAddr(VkDevice, const char *);
-void vkGetInstanceProcAddr(VkInstance, const char *);
-
 VkResult vkCreateXlibSurfaceKHR(VkInstance, const VkXlibSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
 VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice, uint32_t, Display *, VisualID);
-
-/* static-wine32: define this so no symbols are stripped away. */
-
-void* dummy_vulkan_funcs[] = {
-    vkDestroySurfaceKHR,
-    vkQueuePresentKHR,
-    vkGetDeviceProcAddr,
-    vkGetInstanceProcAddr
-};
 
 #define pvkCreateXlibSurfaceKHR                        vkCreateXlibSurfaceKHR
 #define pvkGetPhysicalDeviceXlibPresentationSupportKHR vkGetPhysicalDeviceXlibPresentationSupportKHR
