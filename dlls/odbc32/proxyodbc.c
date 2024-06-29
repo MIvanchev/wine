@@ -198,7 +198,7 @@ static const char *debugstr_sqllen( SQLLEN len )
 }
 
 #define MAX_BINDING_PARAMS 1024
-static BOOL alloc_binding( struct param_binding *binding, UINT column, UINT row_count )
+static BOOL alloc_binding( struct param_binding *binding, USHORT type, UINT column, UINT row_count )
 {
     if (column > MAX_BINDING_PARAMS)
     {
@@ -208,6 +208,7 @@ static BOOL alloc_binding( struct param_binding *binding, UINT column, UINT row_
     if (!binding->param && !(binding->param = calloc( MAX_BINDING_PARAMS, sizeof(*binding->param)))) return FALSE;
 
     if (!(binding->param[column - 1].len = calloc( row_count, sizeof(UINT64) ))) return FALSE;
+    binding->param[column - 1].type = type;
     binding->count = column;
     return TRUE;
 }
@@ -232,10 +233,13 @@ SQLRETURN WINAPI SQLBindCol(SQLHSTMT StatementHandle, SQLUSMALLINT ColumnNumber,
         FIXME( "column 0 not handled\n" );
         return SQL_ERROR;
     }
-    if (!alloc_binding( &handle->bind_col, ColumnNumber, handle->row_count )) return SQL_ERROR;
+    if (!alloc_binding( &handle->bind_col, SQL_PARAM_INPUT_OUTPUT, ColumnNumber, handle->row_count )) return SQL_ERROR;
+    handle->bind_col.param[i].col.target_type   = TargetType;
+    handle->bind_col.param[i].col.target_value  = TargetValue;
+    handle->bind_col.param[i].col.buffer_length = BufferLength;
+
     params.StatementHandle = handle->unix_handle;
-    params.StrLen_or_Ind   = handle->bind_col.param[i].len;
-    *(UINT64 *)params.StrLen_or_Ind = *StrLen_or_Ind;
+    if (StrLen_or_Ind) params.StrLen_or_Ind = handle->bind_col.param[i].len;
     if (SUCCESS(( ret = ODBC_CALL( SQLBindCol, &params )))) handle->bind_col.param[i].ptr = StrLen_or_Ind;
     TRACE ("Returning %d\n", ret);
     return ret;
@@ -273,7 +277,12 @@ SQLRETURN WINAPI SQLBindParam(SQLHSTMT StatementHandle, SQLUSMALLINT ParameterNu
         FIXME( "parameter 0 not handled\n" );
         return SQL_ERROR;
     }
-    if (!alloc_binding( &handle->bind_param, ParameterNumber, handle->row_count )) return SQL_ERROR;
+    if (!alloc_binding( &handle->bind_param, SQL_PARAM_INPUT, ParameterNumber, handle->row_count )) return SQL_ERROR;
+    handle->bind_param.param[i].param.value_type       = ValueType;
+    handle->bind_param.param[i].param.parameter_type   = ParameterType;
+    handle->bind_param.param[i].param.length_precision = LengthPrecision;
+    handle->bind_param.param[i].param.parameter_scale  = ParameterScale;
+    handle->bind_param.param[i].param.parameter_value  = ParameterValue;
 
     params.StatementHandle = handle->unix_handle;
     params.StrLen_or_Ind   = handle->bind_param.param[i].len;
@@ -342,7 +351,7 @@ SQLRETURN WINAPI SQLColAttribute(SQLHSTMT StatementHandle, SQLUSMALLINT ColumnNu
 
     params.StatementHandle  = handle->unix_handle;
     params.NumericAttribute = &num_attr;
-    if (SUCCESS(( ret = ODBC_CALL( SQLColAttribute, &params )))) *NumericAttribute = num_attr;
+    if (SUCCESS(( ret = ODBC_CALL( SQLColAttribute, &params ))) && NumericAttribute) *NumericAttribute = num_attr;
     TRACE("Returning %d\n", ret);
     return ret;
 }
@@ -586,6 +595,66 @@ SQLRETURN WINAPI SQLExecDirect(SQLHSTMT StatementHandle, SQLCHAR *StatementText,
     return ret;
 }
 
+static void len_to_user( SQLLEN *ptr, UINT8 *len, UINT row_count, UINT width )
+{
+    UINT i;
+    for (i = 0; i < row_count; i++)
+    {
+        *ptr++ = *(SQLLEN *)(len + i * width);
+    }
+}
+
+static void len_from_user( UINT8 *len, SQLLEN *ptr, UINT row_count, UINT width )
+{
+    UINT i;
+    for (i = 0; i < row_count; i++)
+    {
+        *(SQLLEN *)(len + i * width) = *ptr++;
+    }
+}
+
+static void update_result_lengths( struct handle *handle, USHORT type )
+{
+    UINT i, width = sizeof(void *) == 8 ? 8 : is_wow64 ? 8 : 4;
+
+    switch (type)
+    {
+    case SQL_PARAM_OUTPUT:
+        for (i = 0; i < handle->bind_col.count; i++)
+        {
+            len_to_user( handle->bind_col.param[i].ptr, handle->bind_col.param[i].len, handle->row_count, width );
+        }
+        for (i = 0; i < handle->bind_param.count; i++)
+        {
+            len_to_user( handle->bind_param.param[i].ptr, handle->bind_param.param[i].len, handle->row_count, width );
+        }
+        for (i = 0; i < handle->bind_parameter.count; i++)
+        {
+            if (handle->bind_parameter.param[i].type != SQL_PARAM_OUTPUT &&
+                handle->bind_parameter.param[i].type != SQL_PARAM_INPUT_OUTPUT) continue;
+
+            len_to_user( handle->bind_parameter.param[i].ptr, handle->bind_parameter.param[i].len, handle->row_count, width );
+        }
+        break;
+
+    case SQL_PARAM_INPUT:
+        for (i = 0; i < handle->bind_col.count; i++)
+        {
+            len_from_user( handle->bind_col.param[i].len, handle->bind_col.param[i].ptr, handle->row_count, width );
+        }
+        /* FIXME: handle bind_param */
+        for (i = 0; i < handle->bind_parameter.count; i++)
+        {
+            if (handle->bind_parameter.param[i].type != SQL_PARAM_INPUT &&
+                handle->bind_parameter.param[i].type != SQL_PARAM_INPUT_OUTPUT) continue;
+
+            len_from_user( handle->bind_parameter.param[i].len, handle->bind_parameter.param[i].ptr, handle->row_count, width );
+        }
+
+    default: break;
+    }
+}
+
 /*************************************************************************
  *				SQLExecute           [ODBC32.012]
  */
@@ -600,48 +669,10 @@ SQLRETURN WINAPI SQLExecute(SQLHSTMT StatementHandle)
     if (!handle) return SQL_INVALID_HANDLE;
 
     params.StatementHandle = handle->unix_handle;
-    ret = ODBC_CALL( SQLExecute, &params );
+    update_result_lengths( handle, SQL_PARAM_INPUT );
+    if (SUCCESS(( ret = ODBC_CALL( SQLExecute, &params )))) update_result_lengths( handle, SQL_PARAM_OUTPUT );
     TRACE("Returning %d\n", ret);
     return ret;
-}
-
-static void update_result_lengths( struct handle *handle )
-{
-    UINT i, j, width = sizeof(void *) == 8 ? 8 : is_wow64 ? 8 : 4;
-
-    for (i = 0; i < handle->bind_col.count; i++)
-    {
-        SQLLEN *ptr = handle->bind_col.param[i].ptr;
-        if (ptr)
-        {
-            for (j = 0; j < handle->row_count; j++)
-            {
-                *ptr++ = *(SQLLEN *)(handle->bind_col.param[i].len + j * width);
-            }
-        }
-    }
-    for (i = 0; i < handle->bind_param.count; i++)
-    {
-        SQLLEN *ptr = handle->bind_param.param[i].ptr;
-        if (ptr)
-        {
-            for (j = 0; j < handle->row_count; j++)
-            {
-                *ptr++ = *(SQLLEN *)(handle->bind_param.param[i].len + j * width);
-            }
-        }
-    }
-    for (i = 0; i < handle->bind_parameter.count; i++)
-    {
-        SQLLEN *ptr = handle->bind_parameter.param[i].ptr;
-        if (ptr)
-        {
-            for (j = 0; j < handle->row_count; j++)
-            {
-                *ptr++ = *(SQLLEN *)(handle->bind_parameter.param[i].len + j * width);
-            }
-        }
-    }
 }
 
 /*************************************************************************
@@ -658,7 +689,7 @@ SQLRETURN WINAPI SQLFetch(SQLHSTMT StatementHandle)
     if (!handle) return SQL_INVALID_HANDLE;
 
     params.StatementHandle = handle->unix_handle;
-    if (SUCCESS(( ret = ODBC_CALL( SQLFetch, &params )))) update_result_lengths( handle );
+    if (SUCCESS(( ret = ODBC_CALL( SQLFetch, &params )))) update_result_lengths( handle, SQL_PARAM_OUTPUT );
     TRACE("Returning %d\n", ret);
     return ret;
 }
@@ -678,7 +709,7 @@ SQLRETURN WINAPI SQLFetchScroll(SQLHSTMT StatementHandle, SQLSMALLINT FetchOrien
     if (!handle) return SQL_INVALID_HANDLE;
 
     params.StatementHandle = handle->unix_handle;
-    if (SUCCESS(( ret = ODBC_CALL( SQLFetchScroll, &params )))) update_result_lengths( handle );
+    if (SUCCESS(( ret = ODBC_CALL( SQLFetchScroll, &params )))) update_result_lengths( handle, SQL_PARAM_OUTPUT );
     TRACE("Returning %d\n", ret);
     return ret;
 }
@@ -1354,20 +1385,76 @@ static BOOL resize_result_lengths( struct handle *handle, UINT size )
     UINT i;
     for (i = 0; i < handle->bind_col.count; i++)
     {
-        UINT8 *tmp = realloc( handle->bind_col.param[i].len, size * sizeof(UINT64) );
-        if (!tmp) return FALSE;
+        UINT8 *tmp;
+        if (!handle->bind_col.param[i].ptr) continue;
+        if (!(tmp = realloc( handle->bind_col.param[i].len, size * sizeof(UINT64) ))) return FALSE;
+        if (tmp != handle->bind_col.param[i].len)
+        {
+            struct SQLBindCol_params params;
+
+            params.StatementHandle = handle->unix_handle;
+            params.ColumnNumber    = i + 1;
+            params.TargetType      = handle->bind_col.param[i].col.target_type;
+            params.TargetValue     = handle->bind_col.param[i].col.target_value;
+            params.BufferLength    = handle->bind_col.param[i].col.buffer_length;
+            params.StrLen_or_Ind   = tmp;
+            if (!SUCCESS(ODBC_CALL( SQLBindCol, &params )))
+            {
+                free( tmp );
+                return FALSE;
+            }
+        }
         handle->bind_col.param[i].len = tmp;
     }
     for (i = 0; i < handle->bind_param.count; i++)
     {
-        UINT8 *tmp = realloc( handle->bind_param.param[i].len, size * sizeof(UINT64) );
-        if (!tmp) return FALSE;
+        UINT8 *tmp;
+        if (!handle->bind_param.param[i].ptr) continue;
+        if (!(tmp = realloc( handle->bind_param.param[i].len, size * sizeof(UINT64) ))) return FALSE;
+        if (tmp != handle->bind_param.param[i].len)
+        {
+            struct SQLBindParam_params params;
+
+            params.StatementHandle = handle->unix_handle;
+            params.ParameterNumber = i + 1;
+            params.ValueType       = handle->bind_param.param[i].param.value_type;
+            params.ParameterType   = handle->bind_param.param[i].param.parameter_type;
+            params.LengthPrecision = handle->bind_param.param[i].param.length_precision;
+            params.ParameterScale  = handle->bind_param.param[i].param.parameter_scale;
+            params.ParameterValue  = handle->bind_param.param[i].param.parameter_value;
+            params.StrLen_or_Ind   = tmp;
+            if (!SUCCESS(ODBC_CALL( SQLBindParam, &params )))
+            {
+                free( tmp );
+                return FALSE;
+            }
+        }
         handle->bind_param.param[i].len = tmp;
     }
     for (i = 0; i < handle->bind_parameter.count; i++)
     {
-        UINT8 *tmp = realloc( handle->bind_parameter.param[i].len, size * sizeof(UINT64) );
-        if (!tmp) return FALSE;
+        UINT8 *tmp;
+        if (!(tmp = realloc( handle->bind_parameter.param[i].len, size * sizeof(UINT64) ))) return FALSE;
+        if (tmp != handle->bind_parameter.param[i].len)
+        {
+            struct SQLBindParameter_params params;
+
+            params.StatementHandle = handle->unix_handle;
+            params.ParameterNumber = i + 1;
+            params.InputOutputType = handle->bind_parameter.param[i].parameter.input_output_type;
+            params.ValueType       = handle->bind_parameter.param[i].parameter.value_type;
+            params.ParameterType   = handle->bind_parameter.param[i].parameter.parameter_type;
+            params.ColumnSize      = handle->bind_parameter.param[i].parameter.column_size;
+            params.DecimalDigits   = handle->bind_parameter.param[i].parameter.decimal_digits;
+            params.ParameterValue  = handle->bind_parameter.param[i].parameter.parameter_value;
+            params.BufferLength    = handle->bind_parameter.param[i].parameter.buffer_length;
+            params.StrLen_or_Ind   = tmp;
+            if (!SUCCESS(ODBC_CALL( SQLBindParameter, &params )))
+            {
+                free( tmp );
+                return FALSE;
+            }
+        }
         handle->bind_parameter.param[i].len = tmp;
     }
     return TRUE;
@@ -1560,7 +1647,7 @@ SQLRETURN WINAPI SQLBulkOperations(SQLHSTMT StatementHandle, SQLSMALLINT Operati
     if (!handle) return SQL_INVALID_HANDLE;
 
     params.StatementHandle = handle->unix_handle;
-    if (SUCCESS(( ret = ODBC_CALL( SQLBulkOperations, &params )))) update_result_lengths( handle );
+    if (SUCCESS(( ret = ODBC_CALL( SQLBulkOperations, &params )))) update_result_lengths( handle, SQL_PARAM_OUTPUT );
     TRACE("Returning %d\n", ret);
     return ret;
 }
@@ -1876,7 +1963,7 @@ SQLRETURN WINAPI SQLSetPos(SQLHSTMT StatementHandle, SQLSETPOSIROW RowNumber, SQ
 
     params.StatementHandle = handle->unix_handle;
     if (SUCCESS(( ret = ODBC_CALL( SQLSetPos, &params ))) && Operation == SQL_REFRESH)
-        update_result_lengths( handle );
+        update_result_lengths( handle, SQL_PARAM_OUTPUT );
     TRACE("Returning %d\n", ret);
     return ret;
 }
@@ -1961,7 +2048,14 @@ SQLRETURN WINAPI SQLBindParameter(SQLHSTMT StatementHandle, SQLUSMALLINT Paramet
         FIXME( "parameter 0 not handled\n" );
         return SQL_ERROR;
     }
-    if (!alloc_binding( &handle->bind_parameter, ParameterNumber, handle->row_count )) return SQL_ERROR;
+    if (!alloc_binding( &handle->bind_parameter, InputOutputType, ParameterNumber, handle->row_count )) return SQL_ERROR;
+    handle->bind_parameter.param[i].parameter.input_output_type = InputOutputType;
+    handle->bind_parameter.param[i].parameter.value_type        = ValueType;
+    handle->bind_parameter.param[i].parameter.parameter_type    = ParameterType;
+    handle->bind_parameter.param[i].parameter.column_size       = ColumnSize;
+    handle->bind_parameter.param[i].parameter.decimal_digits    = DecimalDigits;
+    handle->bind_parameter.param[i].parameter.parameter_value   = ParameterValue;
+    handle->bind_parameter.param[i].parameter.buffer_length     = BufferLength;
 
     params.StatementHandle = handle->unix_handle;
     params.StrLen_or_Ind   = handle->bind_parameter.param[i].len;
@@ -2277,7 +2371,7 @@ SQLRETURN WINAPI SQLColAttributeW(SQLHSTMT StatementHandle, SQLUSMALLINT ColumnN
 
     params.StatementHandle  = handle->unix_handle;
     params.NumericAttribute = &attr;
-    if (SUCCESS((ret = ODBC_CALL( SQLColAttributeW, &params )))) *NumericAttribute = attr;
+    if (SUCCESS((ret = ODBC_CALL( SQLColAttributeW, &params ))) && NumericAttribute) *NumericAttribute = attr;
 
     if (ret == SQL_SUCCESS && CharacterAttribute != NULL && SQLColAttributes_KnownStringAttribute(FieldIdentifier) &&
         StringLength && *StringLength != wcslen(CharacterAttribute) * 2)

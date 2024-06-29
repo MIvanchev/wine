@@ -29,6 +29,7 @@ typedef unsigned __int64 mem_size_t;
 typedef unsigned __int64 file_pos_t;
 typedef unsigned __int64 client_ptr_t;
 typedef unsigned __int64 affinity_t;
+typedef unsigned __int64 object_id_t;
 typedef client_ptr_t mod_handle_t;
 
 struct request_header
@@ -878,6 +879,47 @@ struct directory_entry
 
 
 };
+
+
+
+
+struct shared_cursor
+{
+    int                  x;
+    int                  y;
+    unsigned int         last_change;
+    rectangle_t          clip;
+};
+
+typedef volatile struct
+{
+    struct shared_cursor cursor;
+    unsigned char        keystate[256];
+} desktop_shm_t;
+
+typedef volatile struct
+{
+    int                  hooks_count[WH_MAX - WH_MIN + 2];
+} queue_shm_t;
+
+typedef volatile union
+{
+    desktop_shm_t        desktop;
+    queue_shm_t          queue;
+} object_shm_t;
+
+typedef volatile struct
+{
+    LONG64               seq;
+    object_id_t          id;
+    object_shm_t         shm;
+} shared_object_t;
+
+typedef struct
+{
+    object_id_t          id;
+    mem_size_t           offset;
+} obj_locator_t;
 
 
 
@@ -2750,6 +2792,20 @@ struct get_atom_information_reply
 
 
 
+struct get_msg_queue_handle_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_msg_queue_handle_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
 struct get_msg_queue_request
 {
     struct request_header __header;
@@ -2758,8 +2814,7 @@ struct get_msg_queue_request
 struct get_msg_queue_reply
 {
     struct reply_header __header;
-    obj_handle_t handle;
-    char __pad_12[4];
+    obj_locator_t  locator;
 };
 
 
@@ -2912,9 +2967,9 @@ struct get_message_reply
     int             x;
     int             y;
     unsigned int    time;
-    unsigned int    active_hooks;
     data_size_t     total;
     /* VARARG(data,message_data); */
+    char __pad_52[4];
 };
 
 
@@ -3016,9 +3071,7 @@ struct get_serial_info_reply
 {
     struct reply_header __header;
     unsigned int eventmask;
-    unsigned int cookie;
     unsigned int pending_write;
-    char __pad_20[4];
 };
 
 
@@ -3035,7 +3088,6 @@ struct set_serial_info_reply
     struct reply_header __header;
 };
 #define SERIALINFO_PENDING_WRITE 0x04
-#define SERIALINFO_PENDING_WAIT  0x08
 
 
 struct cancel_sync_request
@@ -3877,8 +3929,9 @@ struct get_thread_desktop_request
 struct get_thread_desktop_reply
 {
     struct reply_header __header;
-    obj_handle_t handle;
-    char __pad_12[4];
+    obj_locator_t  locator;
+    obj_handle_t   handle;
+    char __pad_28[4];
 };
 
 
@@ -3891,6 +3944,7 @@ struct set_thread_desktop_request
 struct set_thread_desktop_reply
 {
     struct reply_header __header;
+    obj_locator_t  locator;
 };
 
 
@@ -4174,7 +4228,7 @@ struct set_hook_reply
 {
     struct reply_header __header;
     user_handle_t  handle;
-    unsigned int   active_hooks;
+    char __pad_12[4];
 };
 
 
@@ -4190,8 +4244,6 @@ struct remove_hook_request
 struct remove_hook_reply
 {
     struct reply_header __header;
-    unsigned int   active_hooks;
-    char __pad_12[4];
 };
 
 
@@ -4213,9 +4265,7 @@ struct start_hook_chain_reply
     thread_id_t    tid;
     int            unicode;
     client_ptr_t   proc;
-    unsigned int   active_hooks;
     /* VARARG(module,unicode_str); */
-    char __pad_36[4];
 };
 
 
@@ -5774,6 +5824,7 @@ enum request
     REQ_delete_atom,
     REQ_find_atom,
     REQ_get_atom_information,
+    REQ_get_msg_queue_handle,
     REQ_get_msg_queue,
     REQ_set_queue_fd,
     REQ_set_queue_mask,
@@ -6066,6 +6117,7 @@ union generic_request
     struct delete_atom_request delete_atom_request;
     struct find_atom_request find_atom_request;
     struct get_atom_information_request get_atom_information_request;
+    struct get_msg_queue_handle_request get_msg_queue_handle_request;
     struct get_msg_queue_request get_msg_queue_request;
     struct set_queue_fd_request set_queue_fd_request;
     struct set_queue_mask_request set_queue_mask_request;
@@ -6356,6 +6408,7 @@ union generic_reply
     struct delete_atom_reply delete_atom_reply;
     struct find_atom_reply find_atom_reply;
     struct get_atom_information_reply get_atom_information_reply;
+    struct get_msg_queue_handle_reply get_msg_queue_handle_reply;
     struct get_msg_queue_reply get_msg_queue_reply;
     struct set_queue_fd_reply set_queue_fd_reply;
     struct set_queue_mask_reply set_queue_mask_reply;
@@ -6534,7 +6587,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 806
+#define SERVER_PROTOCOL_VERSION 819
 
 /* ### protocol_version end ### */
 

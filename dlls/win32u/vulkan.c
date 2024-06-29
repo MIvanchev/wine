@@ -39,16 +39,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#ifdef HAVE_LIBVULKAN
+void *(*p_vkGetDeviceProcAddr)(VkDevice, const char *) = NULL;
+void *(*p_vkGetInstanceProcAddr)(VkInstance, const char *) = NULL;
 
 static void *vulkan_handle;
-static const struct vulkan_driver_funcs *driver_funcs;
 static struct vulkan_funcs vulkan_funcs;
+
+#ifdef HAVE_LIBVULKAN
+
+static const struct vulkan_driver_funcs *driver_funcs;
 
 static void (*p_vkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 static VkResult (*p_vkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
-static void *(*p_vkGetDeviceProcAddr)(VkDevice, const char *);
-static void *(*p_vkGetInstanceProcAddr)(VkInstance, const char *);
 
 struct surface
 {
@@ -286,7 +288,7 @@ static const struct vulkan_driver_funcs lazydrv_funcs =
 // Defined in win32u/dibdrv/opengl.c for now
 void* get_handle_to_winex11(void);
 
-static void vulkan_init(void)
+static void vulkan_init_once(void)
 {
     if (!(vulkan_handle = get_handle_to_winex11()))
     {
@@ -325,36 +327,37 @@ void vulkan_detach_surfaces( struct list *surfaces )
     }
 }
 
-/***********************************************************************
- *      __wine_get_vulkan_driver  (win32u.so)
- */
-const struct vulkan_funcs *__wine_get_vulkan_driver( UINT version )
-{
-    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
-
-    if (version != WINE_VULKAN_DRIVER_VERSION)
-    {
-        ERR( "version mismatch, vulkan wants %u but win32u has %u\n", version, WINE_VULKAN_DRIVER_VERSION );
-        return NULL;
-    }
-
-    pthread_once( &init_once, vulkan_init );
-    return vulkan_handle ? &vulkan_funcs : NULL;
-}
-
 #else /* HAVE_LIBVULKAN */
 
 void vulkan_detach_surfaces( struct list *surfaces )
 {
 }
 
+static void vulkan_init_once(void)
+{
+    ERR( "Wine was built without Vulkan support.\n" );
+}
+
+#endif /* HAVE_LIBVULKAN */
+
+BOOL vulkan_init(void)
+{
+    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
+    pthread_once( &init_once, vulkan_init_once );
+    return !!vulkan_handle;
+}
+
 /***********************************************************************
  *      __wine_get_vulkan_driver  (win32u.so)
  */
 const struct vulkan_funcs *__wine_get_vulkan_driver( UINT version )
 {
-    ERR("Wine was built without Vulkan support.\n");
-    return NULL;
-}
+    if (version != WINE_VULKAN_DRIVER_VERSION)
+    {
+        ERR( "version mismatch, vulkan wants %u but win32u has %u\n", version, WINE_VULKAN_DRIVER_VERSION );
+        return NULL;
+    }
 
-#endif /* HAVE_LIBVULKAN */
+    if (!vulkan_init()) return NULL;
+    return &vulkan_funcs;
+}
