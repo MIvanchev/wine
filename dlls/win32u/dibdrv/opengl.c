@@ -79,68 +79,32 @@ static void (*pOSMesaPixelStore)( GLint pname, GLint value );
  * there.
  */
 
-#define BYPASS_LIBRARY "winex11.so"
-
-static int try_get_handle_to_winex11( struct dl_phdr_info *info,
-                                      size_t size, void *data )
+void* get_handle_to_mesa(void)
 {
-    const char *filename;
-    char *buf;
+    Dl_info info;
+    char *last_path_sep;
+    size_t path_len;
+    char *winex11_so_path;
     void *handle;
-    size_t dirname_with_sep_len;
-    int ret = 0;
 
-    /* Find out where we loaded the library containing this code and try to
-     * load winex11.so from the same location.
-     */
-
-    filename = strrchr(info->dlpi_name, '/');
-    if (filename == NULL)
-        filename = info->dlpi_name;
-    else
-        filename++;
-
-    if (!strcmp(filename, "win32u.so"))
+    if (!dladdr(get_handle_to_mesa, &info)
+            || !(last_path_sep = strrchr(info.dli_fname, '/')))
     {
-        ret = 1;
-
-        dirname_with_sep_len = strlen(info->dlpi_name) - strlen(filename);
-
-        /* TODO: Check for size_t limits. */
-        buf = malloc(dirname_with_sep_len + strlen(BYPASS_LIBRARY) + 1);
-        if (buf == NULL)
-        {
-            ERR( "Failed to allocate memory for path string.\n" );
-            goto failed_malloc;
-        }
-        /* Using strcpy here causes an error so 2x str(n)cat... */
-        buf[0] = '\0';
-        strncat(buf, info->dlpi_name, dirname_with_sep_len);
-        strcat(buf, BYPASS_LIBRARY);
-        handle = dlopen(buf, RTLD_LAZY | RTLD_LOCAL);
-        free(buf);
-
-        if (handle == NULL)
-        {
-            ERR( "Failed to load winex11.so: %s\n", dlerror() );
-            goto failed_dlopen;
-        }
-
-        *((void**) data) = handle;
+        ERR( "Failed to determine absoltue path to Wine's SO files.\n" );
+        return NULL;
     }
 
-    goto success;
+    path_len = last_path_sep - info.dli_fname + 1;
+    winex11_so_path = alloca(path_len + strlen("winex11.so") + 1);
+    memcpy(winex11_so_path, info.dli_fname, path_len);
+    strcpy(winex11_so_path + path_len, "winex11.so");
 
-failed_malloc:
-failed_dlopen:
-success:
-    return ret;
-}
+    if (!(handle = dlopen(winex11_so_path, RTLD_LAZY | RTLD_LOCAL)))
+    {
+        ERR( "Failed to load %s containing statically linked Mesa: %s\n", winex11_so_path, dlerror() );
+        return NULL;
+    }
 
-void* get_handle_to_winex11(void)
-{
-    void *handle;
-    dl_iterate_phdr(try_get_handle_to_winex11, &handle);
     return handle;
 }
 
@@ -153,7 +117,7 @@ static BOOL init_opengl(void)
     if (init_done) return (osmesa_handle != NULL);
     init_done = TRUE;
 
-    osmesa_handle = get_handle_to_winex11();
+    osmesa_handle = get_handle_to_mesa();
     if (osmesa_handle == NULL)
     {
         return FALSE;
@@ -161,7 +125,7 @@ static BOOL init_opengl(void)
 
 #define LOAD_FUNCPTR(f) do if (!(p##f = dlsym( osmesa_handle, #f ))) \
     { \
-        ERR( "%s not found in %s (%s), disabling.\n", #f, BYPASS_LIBRARY, dlerror() ); \
+        ERR( "%s not found in Mesa (%s), disabling.\n", #f, dlerror() ); \
         goto failed; \
     } while(0)
 
@@ -176,7 +140,7 @@ static BOOL init_opengl(void)
     {
         if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
         {
-            ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], BYPASS_LIBRARY );
+            ERR( "%s not found in Mesa, disabling.\n", opengl_func_names[i] );
             goto failed;
         }
     }

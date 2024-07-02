@@ -286,13 +286,13 @@ static const struct vulkan_driver_funcs lazydrv_funcs =
 };
 
 // Defined in win32u/dibdrv/opengl.c for now
-void* get_handle_to_winex11(void);
+void* get_handle_to_mesa(void);
 
 static void vulkan_init_once(void)
 {
-    if (!(vulkan_handle = get_handle_to_winex11()))
+    if (!(vulkan_handle = get_handle_to_mesa()))
     {
-        ERR( "Failed to load winex11.so\n" );
+        ERR( "Failed to load Mesa\n" );
         return;
     }
 
