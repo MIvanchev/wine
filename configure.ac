@@ -1368,31 +1368,25 @@ if test "x$with_wayland" != "xno"
 then
     WINE_PACKAGE_FLAGS(WAYLAND_CLIENT,[wayland-client],,,,
         [AC_CHECK_HEADER([wayland-client.h],
-           [AC_CHECK_LIB(wayland-client,wl_display_connect,
+           [WINE_CHECK_LIB(wayland-client,wl_display_connect,
               [AC_PATH_PROG(WAYLAND_SCANNER,wayland-scanner,
-                            [`test -n "$PKG_CONFIG" && $PKG_CONFIG --variable=wayland_scanner wayland-scanner 2>/dev/null`])],
-              [WAYLAND_CLIENT_LIBS=""],[$WAYLAND_CLIENT_LIBS])])])
+                            [`test -n "$PKG_CONFIG" && $PKG_CONFIG --variable=wayland_scanner wayland-scanner 2>/dev/null`])])])])
     WINE_PACKAGE_FLAGS(XKBCOMMON,[xkbcommon],,,,
         [AC_CHECK_HEADERS([xkbcommon/xkbcommon.h])
-         AC_CHECK_LIB(xkbcommon,xkb_context_new,[:],[XKBCOMMON_LIBS=""],[$XKBCOMMON_LIBS])])
+         WINE_CHECK_LIB(xkbcommon,xkb_context_new)])
     WINE_PACKAGE_FLAGS(XKBREGISTRY,[xkbregistry],,,,
         [AC_CHECK_HEADERS([xkbcommon/xkbregistry.h])
-         AC_CHECK_LIB(xkbregistry,rxkb_context_new,[:],[XKBREGISTRY_LIBS=""],[$XKBREGISTRY_LIBS])])
+        WINE_CHECK_LIB(xkbregistry,rxkb_context_new)])
     if test "x$with_opengl" != "xno"
     then
         WINE_PACKAGE_FLAGS(EGL,[egl],[-lEGL],,,
             [AC_CHECK_HEADER([EGL/egl.h],
-               [WINE_CHECK_SONAME(EGL,eglGetProcAddress,,,[$EGL_LIBS])])])
+               [WINE_CHECK_LIB(EGL,eglGetProcAddress)])])
         WINE_PACKAGE_FLAGS(WAYLAND_EGL,[wayland-egl],,,,
             [AC_CHECK_HEADER([wayland-egl.h],
-               [AC_CHECK_LIB(wayland-egl,wl_egl_window_create,
-                  [AC_DEFINE(HAVE_LIBWAYLAND_EGL, 1, [Define if we have the wayland-egl development environment])],
-                  [WAYLAND_EGL_LIBS=""],[$WAYLAND_EGL_LIBS])])])
-        if test "x$with_wayland" != "x"
-        then
-            WINE_NOTICE_WITH(opengl, [test -z "$ac_cv_lib_soname_EGL" -o "$ac_cv_lib_wayland_egl_wl_egl_window_create" != yes],
-                [EGL ${notice_platform}development files not found, the Wayland driver won't support OpenGL])
-        fi
+               [WINE_CHECK_LIB(wayland-egl,wl_egl_window_create)])])
+        WINE_NOTICE_WITH(opengl, [test "$ac_cv_lib_EGL_eglGetProcAddress" != yes -o "$ac_cv_lib_wayland_egl_wl_egl_window_create" != yes],
+            [EGL ${notice_platform}development files not found, the Wayland driver won't support OpenGL])
     fi
 fi
 WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS" -o -z "$WAYLAND_SCANNER" -o -z "$XKBCOMMON_LIBS" -o -z "$XKBREGISTRY_LIBS" -o "$ac_cv_header_linux_input_h" = "no"],
