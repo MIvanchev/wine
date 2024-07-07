@@ -5,7 +5,7 @@ DELAYIMPORTS = comctl32 ole32 shell32 imm32
 UNIX_CFLAGS = $(X_CFLAGS)
 UNIX_LIBS = -lwin32u $(X11_LIBS) $(XEXT_LIBS) $(XRENDER_LIBS) $(XRANDR_LIBS) $(XXF86VM_LIBS) \
             $(XINERAMA_LIBS) $(XCURSOR_LIBS) $(XI_LIBS) $(XCOMPOSITE_LIBS) $(VULKAN_LIBS) \
-            $(OSMESA_LIBS) -lm
+            $(OSMESA_LIBS) $(EGL_LIBS) -lm
 
 SOURCES = \
 	bitblt.c \
