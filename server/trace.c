@@ -3523,16 +3523,7 @@ static void dump_get_thread_input_request( const struct get_thread_input_request
 
 static void dump_get_thread_input_reply( const struct get_thread_input_reply *req )
 {
-    fprintf( stderr, " focus=%08x", req->focus );
-    fprintf( stderr, ", capture=%08x", req->capture );
-    fprintf( stderr, ", active=%08x", req->active );
-    fprintf( stderr, ", foreground=%08x", req->foreground );
-    fprintf( stderr, ", menu_owner=%08x", req->menu_owner );
-    fprintf( stderr, ", move_size=%08x", req->move_size );
-    fprintf( stderr, ", caret=%08x", req->caret );
-    fprintf( stderr, ", cursor=%08x", req->cursor );
-    fprintf( stderr, ", show_count=%d", req->show_count );
-    dump_rectangle( ", rect=", &req->rect );
+    dump_obj_locator( " locator=", &req->locator );
 }
 
 static void dump_get_last_input_time_request( const struct get_last_input_time_request *req )

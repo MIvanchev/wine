@@ -893,6 +893,7 @@ struct shared_cursor
 
 typedef volatile struct
 {
+    unsigned int         flags;
     struct shared_cursor cursor;
     unsigned char        keystate[256];
 } desktop_shm_t;
@@ -900,12 +901,31 @@ typedef volatile struct
 typedef volatile struct
 {
     int                  hooks_count[WH_MAX - WH_MIN + 2];
+    unsigned int         wake_mask;
+    unsigned int         wake_bits;
+    unsigned int         changed_mask;
+    unsigned int         changed_bits;
 } queue_shm_t;
+
+typedef volatile struct
+{
+    int                  foreground;
+    user_handle_t        active;
+    user_handle_t        focus;
+    user_handle_t        capture;
+    user_handle_t        menu_owner;
+    user_handle_t        move_size;
+    user_handle_t        caret;
+    rectangle_t          caret_rect;
+    user_handle_t        cursor;
+    int                  cursor_count;
+} input_shm_t;
 
 typedef volatile union
 {
     desktop_shm_t        desktop;
     queue_shm_t          queue;
+    input_shm_t          input;
 } object_shm_t;
 
 typedef volatile struct
@@ -4043,17 +4063,7 @@ struct get_thread_input_request
 struct get_thread_input_reply
 {
     struct reply_header __header;
-    user_handle_t  focus;
-    user_handle_t  capture;
-    user_handle_t  active;
-    user_handle_t  foreground;
-    user_handle_t  menu_owner;
-    user_handle_t  move_size;
-    user_handle_t  caret;
-    user_handle_t  cursor;
-    int            show_count;
-    rectangle_t    rect;
-    char __pad_60[4];
+    obj_locator_t  locator;
 };
 
 
@@ -6587,7 +6597,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 819
+#define SERVER_PROTOCOL_VERSION 830
 
 /* ### protocol_version end ### */
 
