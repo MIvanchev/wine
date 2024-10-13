@@ -38,15 +38,6 @@ static PFN_vkEnumerateInstanceVersion p_vkEnumerateInstanceVersion;
 static PFN_vkEnumerateInstanceExtensionProperties p_vkEnumerateInstanceExtensionProperties;
 
 
-/**********************************************************************
- *       get_win_monitor_dpi
- */
-static UINT get_win_monitor_dpi( HWND hwnd )
-{
-    return NtUserGetSystemDpiForProcess( NULL );  /* FIXME: get monitor dpi */
-}
-
-
 static int window_surface_compare(const void *key, const struct rb_entry *entry)
 {
     const struct wine_surface *surface = RB_ENTRY_VALUE(entry, struct wine_surface, window_entry);
@@ -169,16 +160,47 @@ static uint64_t client_handle_from_host(struct wine_instance *instance, uint64_t
     return result;
 }
 
+struct vk_callback_funcs callback_funcs;
+
+static UINT append_string(const char *name, char *strings, UINT *strings_len)
+{
+    UINT len = name ? strlen(name) + 1 : 0;
+    if (strings && len) memcpy(strings + *strings_len, name, len);
+    *strings_len += len;
+    return len;
+}
+
+static void append_debug_utils_label(const VkDebugUtilsLabelEXT *label, struct debug_utils_label *dst,
+        char *strings, UINT *strings_len)
+{
+    if (label->pNext) FIXME("Unsupported VkDebugUtilsLabelEXT pNext chain\n");
+    memcpy(dst->color, label->color, sizeof(dst->color));
+    dst->label_name_len = append_string(label->pLabelName, strings, strings_len);
+}
+
+static void append_debug_utils_object(const VkDebugUtilsObjectNameInfoEXT *object, struct debug_utils_object *dst,
+        char *strings, UINT *strings_len)
+{
+    if (object->pNext) FIXME("Unsupported VkDebugUtilsObjectNameInfoEXT pNext chain\n");
+    dst->object_type = object->objectType;
+    dst->object_handle = object->objectHandle;
+    dst->object_name_len = append_string(object->pObjectName, strings, strings_len);
+}
+
 static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT message_types,
     const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
     void *user_data)
 {
-    struct wine_vk_debug_utils_params params;
-    VkDebugUtilsObjectNameInfoEXT *object_name_infos;
+    const VkDeviceAddressBindingCallbackDataEXT *address = NULL;
+    struct wine_vk_debug_utils_params *params;
     struct wine_debug_utils_messenger *object;
-    void *ret_ptr;
+    struct debug_utils_object dummy_object, *objects;
+    struct debug_utils_label dummy_label, *labels;
+    UINT size, strings_len;
+    char *ptr, *strings;
     ULONG ret_len;
+    void *ret_ptr;
     unsigned int i;
 
     TRACE("%i, %u, %p, %p\n", severity, message_types, callback_data, user_data);
@@ -191,44 +213,86 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
         return VK_FALSE;
     }
 
-    /* FIXME: we should pack all referenced structs instead of passing pointers */
-    params.user_callback = object->user_callback;
-    params.user_data = object->user_data;
-    params.severity = severity;
-    params.message_types = message_types;
-    params.data = *((VkDebugUtilsMessengerCallbackDataEXT *) callback_data);
-
-    object_name_infos = calloc(params.data.objectCount, sizeof(*object_name_infos));
-
-    for (i = 0; i < params.data.objectCount; i++)
+    if ((address = callback_data->pNext))
     {
-        object_name_infos[i].sType = callback_data->pObjects[i].sType;
-        object_name_infos[i].pNext = callback_data->pObjects[i].pNext;
-        object_name_infos[i].objectType = callback_data->pObjects[i].objectType;
-        object_name_infos[i].pObjectName = callback_data->pObjects[i].pObjectName;
+        if (address->sType != VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) address = NULL;
+        if (!address || address->pNext) FIXME("Unsupported VkDebugUtilsMessengerCallbackDataEXT pNext chain\n");
+    }
 
-        if (wine_vk_is_type_wrapped(callback_data->pObjects[i].objectType))
+    strings_len = 0;
+    append_string(callback_data->pMessageIdName, NULL, &strings_len);
+    append_string(callback_data->pMessage, NULL, &strings_len);
+    for (i = 0; i < callback_data->queueLabelCount; i++)
+        append_debug_utils_label(callback_data->pQueueLabels + i, &dummy_label, NULL, &strings_len);
+    for (i = 0; i < callback_data->cmdBufLabelCount; i++)
+        append_debug_utils_label(callback_data->pCmdBufLabels + i, &dummy_label, NULL, &strings_len);
+    for (i = 0; i < callback_data->objectCount; i++)
+        append_debug_utils_object(callback_data->pObjects + i, &dummy_object, NULL, &strings_len);
+
+    size = sizeof(*params);
+    size += sizeof(*labels) * (callback_data->queueLabelCount + callback_data->cmdBufLabelCount);
+    size += sizeof(*objects) * callback_data->objectCount;
+
+    if (!(params = malloc(size + strings_len))) return VK_FALSE;
+    ptr = (char *)(params + 1);
+    strings = (char *)params + size;
+
+    params->dispatch.callback = callback_funcs.call_vulkan_debug_utils_callback;
+    params->user_callback = object->user_callback;
+    params->user_data = object->user_data;
+    params->severity = severity;
+    params->message_types = message_types;
+    params->flags = callback_data->flags;
+    params->message_id_number = callback_data->messageIdNumber;
+
+    strings_len = 0;
+    params->message_id_name_len = append_string(callback_data->pMessageIdName, strings, &strings_len);
+    params->message_len = append_string(callback_data->pMessage, strings, &strings_len);
+
+    labels = (void *)ptr;
+    for (i = 0; i < callback_data->queueLabelCount; i++)
+        append_debug_utils_label(callback_data->pQueueLabels + i, labels + i, strings, &strings_len);
+    params->queue_label_count = callback_data->queueLabelCount;
+    ptr += callback_data->queueLabelCount * sizeof(*labels);
+
+    labels = (void *)ptr;
+    for (i = 0; i < callback_data->cmdBufLabelCount; i++)
+        append_debug_utils_label(callback_data->pCmdBufLabels + i, labels + i, strings, &strings_len);
+    params->cmd_buf_label_count = callback_data->cmdBufLabelCount;
+    ptr += callback_data->cmdBufLabelCount * sizeof(*labels);
+
+    objects = (void *)ptr;
+    for (i = 0; i < callback_data->objectCount; i++)
+    {
+        append_debug_utils_object(callback_data->pObjects + i, objects + i, strings, &strings_len);
+
+        if (wine_vk_is_type_wrapped(objects[i].object_type))
         {
-            object_name_infos[i].objectHandle = client_handle_from_host(object->instance, callback_data->pObjects[i].objectHandle);
-            if (!object_name_infos[i].objectHandle)
+            objects[i].object_handle = client_handle_from_host(object->instance, objects[i].object_handle);
+            if (!objects[i].object_handle)
             {
                 WARN("handle conversion failed 0x%s\n", wine_dbgstr_longlong(callback_data->pObjects[i].objectHandle));
-                free(object_name_infos);
+                free(params);
                 return VK_FALSE;
             }
         }
-        else
-        {
-            object_name_infos[i].objectHandle = callback_data->pObjects[i].objectHandle;
-        }
+    }
+    params->object_count = callback_data->objectCount;
+    ptr += callback_data->objectCount * sizeof(*objects);
+
+    if (address)
+    {
+        params->has_address_binding = TRUE;
+        params->address_binding.flags = address->flags;
+        params->address_binding.base_address = address->baseAddress;
+        params->address_binding.size = address->size;
+        params->address_binding.binding_type = address->bindingType;
     }
 
-    params.data.pObjects = object_name_infos;
-
     /* applications should always return VK_FALSE */
-    KeUserModeCallback( NtUserCallVulkanDebugUtilsCallback, &params, sizeof(params), &ret_ptr, &ret_len );
+    KeUserDispatchCallback(&params->dispatch, size + strings_len, &ret_ptr, &ret_len);
+    free(params);
 
-    free(object_name_infos);
     if (ret_len == sizeof(VkBool32)) return *(VkBool32 *)ret_ptr;
     return VK_FALSE;
 }
@@ -236,10 +300,12 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
 static VkBool32 debug_report_callback_conversion(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT object_type,
     uint64_t object_handle, size_t location, int32_t code, const char *layer_prefix, const char *message, void *user_data)
 {
-    struct wine_vk_debug_report_params params;
+    struct wine_vk_debug_report_params *params;
     struct wine_debug_report_callback *object;
-    void *ret_ptr;
+    UINT strings_len;
     ULONG ret_len;
+    void *ret_ptr;
+    char *strings;
 
     TRACE("%#x, %#x, 0x%s, 0x%s, %d, %p, %p, %p\n", flags, object_type, wine_dbgstr_longlong(object_handle),
         wine_dbgstr_longlong(location), code, layer_prefix, message, user_data);
@@ -252,21 +318,30 @@ static VkBool32 debug_report_callback_conversion(VkDebugReportFlagsEXT flags, Vk
         return VK_FALSE;
     }
 
-    /* FIXME: we should pack all referenced structs instead of passing pointers */
-    params.user_callback = object->user_callback;
-    params.user_data = object->user_data;
-    params.flags = flags;
-    params.object_type = object_type;
-    params.location = location;
-    params.code = code;
-    params.layer_prefix = layer_prefix;
-    params.message = message;
+    strings_len = 0;
+    append_string(layer_prefix, NULL, &strings_len);
+    append_string(message, NULL, &strings_len);
 
-    params.object_handle = client_handle_from_host(object->instance, object_handle);
-    if (!params.object_handle)
-        params.object_type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+    if (!(params = malloc(sizeof(*params) + strings_len))) return VK_FALSE;
+    strings = (char *)(params + 1);
 
-    KeUserModeCallback( NtUserCallVulkanDebugReportCallback, &params, sizeof(params), &ret_ptr, &ret_len );
+    params->dispatch.callback = callback_funcs.call_vulkan_debug_report_callback;
+    params->user_callback = object->user_callback;
+    params->user_data = object->user_data;
+    params->flags = flags;
+    params->object_type = object_type;
+    params->location = location;
+    params->code = code;
+    params->object_handle = client_handle_from_host(object->instance, object_handle);
+    if (!params->object_handle) params->object_type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+
+    strings_len = 0;
+    params->layer_len = append_string(layer_prefix, strings, &strings_len);
+    params->message_len = append_string(message, strings, &strings_len);
+
+    KeUserDispatchCallback(&params->dispatch, sizeof(*params) + strings_len, &ret_ptr, &ret_len);
+    free(params);
+
     if (ret_len == sizeof(VkBool32)) return *(VkBool32 *)ret_ptr;
     return VK_FALSE;
 }
@@ -551,8 +626,10 @@ static VkResult wine_vk_device_convert_create_info(struct wine_phys_dev *phys_de
     return VK_SUCCESS;
 }
 
-NTSTATUS init_vulkan(void *args)
+NTSTATUS init_vulkan(void *arg)
 {
+    const struct vk_callback_funcs *funcs = arg;
+
     vk_funcs = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
     if (!vk_funcs)
     {
@@ -560,6 +637,7 @@ NTSTATUS init_vulkan(void *args)
         return STATUS_UNSUCCESSFUL;
     }
 
+    callback_funcs = *funcs;
     p_vkCreateInstance = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkCreateInstance");
     p_vkEnumerateInstanceVersion = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
     p_vkEnumerateInstanceExtensionProperties = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceExtensionProperties");
@@ -600,8 +678,8 @@ static VkResult wine_vk_instance_convert_create_info(struct conversion_context *
 
         object->utils_messengers[i].instance = object;
         object->utils_messengers[i].host_debug_messenger = VK_NULL_HANDLE;
-        object->utils_messengers[i].user_callback = debug_utils_messenger->pfnUserCallback;
-        object->utils_messengers[i].user_data = debug_utils_messenger->pUserData;
+        object->utils_messengers[i].user_callback = (UINT_PTR)debug_utils_messenger->pfnUserCallback;
+        object->utils_messengers[i].user_data = (UINT_PTR)debug_utils_messenger->pUserData;
 
         /* convert_VkInstanceCreateInfo_* already copied the chain, so we can modify it in-place. */
         debug_utils_messenger->pfnUserCallback = (void *) &debug_utils_callback_conversion;
@@ -612,8 +690,8 @@ static VkResult wine_vk_instance_convert_create_info(struct conversion_context *
     {
         object->default_callback.instance = object;
         object->default_callback.host_debug_callback = VK_NULL_HANDLE;
-        object->default_callback.user_callback = debug_report_callback->pfnCallback;
-        object->default_callback.user_data = debug_report_callback->pUserData;
+        object->default_callback.user_callback = (UINT_PTR)debug_report_callback->pfnCallback;
+        object->default_callback.user_data = (UINT_PTR)debug_report_callback->pUserData;
 
         debug_report_callback->pfnCallback = (void *) &debug_report_callback_conversion;
         debug_report_callback->pUserData = &object->default_callback;
@@ -1653,7 +1731,7 @@ VkResult wine_vkAcquireNextImage2KHR(VkDevice device_handle, const VkAcquireNext
     acquire_info_host.swapchain = swapchain->host_swapchain;
     res = device->funcs.p_vkAcquireNextImage2KHR(device->host_device, &acquire_info_host, image_index);
 
-    if (res == VK_SUCCESS && NtUserGetClientRect(surface->hwnd, &client_rect, get_win_monitor_dpi(surface->hwnd)) &&
+    if (res == VK_SUCCESS && NtUserGetClientRect(surface->hwnd, &client_rect, NtUserGetDpiForWindow(surface->hwnd)) &&
         !extents_equals(&swapchain->extents, &client_rect))
     {
         WARN("Swapchain size %dx%d does not match client rect %s, returning VK_SUBOPTIMAL_KHR\n",
@@ -1676,7 +1754,7 @@ VkResult wine_vkAcquireNextImageKHR(VkDevice device_handle, VkSwapchainKHR swapc
     res = device->funcs.p_vkAcquireNextImageKHR(device->host_device, swapchain->host_swapchain, timeout,
                                                 semaphore, fence, image_index);
 
-    if (res == VK_SUCCESS && NtUserGetClientRect(surface->hwnd, &client_rect, get_win_monitor_dpi(surface->hwnd)) &&
+    if (res == VK_SUCCESS && NtUserGetClientRect(surface->hwnd, &client_rect, NtUserGetDpiForWindow(surface->hwnd)) &&
         !extents_equals(&swapchain->extents, &client_rect))
     {
         WARN("Swapchain size %dx%d does not match client rect %s, returning VK_SUBOPTIMAL_KHR\n",
@@ -1784,7 +1862,7 @@ VkResult wine_vkQueuePresentKHR(VkQueue queue_handle, const VkPresentInfoKHR *pr
         RECT client_rect;
 
         if (swapchain_res < VK_SUCCESS) continue;
-        if (!NtUserGetClientRect(surface->hwnd, &client_rect, get_win_monitor_dpi(surface->hwnd)))
+        if (!NtUserGetClientRect(surface->hwnd, &client_rect, NtUserGetDpiForWindow(surface->hwnd)))
         {
             WARN("Swapchain window %p is invalid, returning VK_ERROR_OUT_OF_DATE_KHR\n", surface->hwnd);
             if (present_info->pResults) present_info->pResults[i] = VK_ERROR_OUT_OF_DATE_KHR;
@@ -2147,7 +2225,7 @@ static void adjust_surface_capabilities(struct wine_instance *instance, struct w
 
     /* Update the image extents to match what the Win32 WSI would provide. */
     /* FIXME: handle DPI scaling, somehow */
-    NtUserGetClientRect(surface->hwnd, &client_rect, get_win_monitor_dpi(surface->hwnd));
+    NtUserGetClientRect(surface->hwnd, &client_rect, NtUserGetDpiForWindow(surface->hwnd));
     capabilities->minImageExtent.width = client_rect.right - client_rect.left;
     capabilities->minImageExtent.height = client_rect.bottom - client_rect.top;
     capabilities->maxImageExtent.width = client_rect.right - client_rect.left;
@@ -2283,8 +2361,8 @@ VkResult wine_vkCreateDebugUtilsMessengerEXT(VkInstance handle,
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
     object->instance = instance;
-    object->user_callback = create_info->pfnUserCallback;
-    object->user_data = create_info->pUserData;
+    object->user_callback = (UINT_PTR)create_info->pfnUserCallback;
+    object->user_data = (UINT_PTR)create_info->pUserData;
 
     wine_create_info = *create_info;
 
@@ -2338,8 +2416,8 @@ VkResult wine_vkCreateDebugReportCallbackEXT(VkInstance handle,
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
     object->instance = instance;
-    object->user_callback = create_info->pfnCallback;
-    object->user_data = create_info->pUserData;
+    object->user_callback = (UINT_PTR)create_info->pfnCallback;
+    object->user_data = (UINT_PTR)create_info->pUserData;
 
     wine_create_info = *create_info;
 

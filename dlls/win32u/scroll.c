@@ -196,7 +196,7 @@ static BOOL get_scroll_bar_rect( HWND hwnd, int bar, RECT *rect, int *arrow_size
     switch(bar)
     {
     case SB_HORZ:
-        get_window_rects( hwnd, COORDS_WINDOW, NULL, rect, get_thread_dpi() );
+        get_client_rect_rel( hwnd, COORDS_WINDOW, rect, get_thread_dpi() );
         rect->top = rect->bottom;
         rect->bottom += get_system_metrics( SM_CYHSCROLL );
         if (win->dwStyle & WS_VSCROLL) rect->right++;
@@ -204,7 +204,7 @@ static BOOL get_scroll_bar_rect( HWND hwnd, int bar, RECT *rect, int *arrow_size
         break;
 
     case SB_VERT:
-        get_window_rects( hwnd, COORDS_WINDOW, NULL, rect, get_thread_dpi() );
+        get_client_rect_rel( hwnd, COORDS_WINDOW, rect, get_thread_dpi() );
         if (win->dwExStyle & WS_EX_LEFTSCROLLBAR)
         {
             rect->right = rect->left;
@@ -817,7 +817,7 @@ void track_scroll_bar( HWND hwnd, int scrollbar, POINT pt )
 
     if (scrollbar != SB_CTL)
     {
-        get_window_rects( hwnd, COORDS_CLIENT, &rect, NULL, get_thread_dpi() );
+        get_window_rect_rel( hwnd, COORDS_CLIENT, &rect, get_thread_dpi() );
         screen_to_client( hwnd, &pt );
         pt.x -= rect.left;
         pt.y -= rect.top;
@@ -1024,6 +1024,24 @@ done:
             refresh_scroll_bar( hwnd, bar, TRUE, TRUE );
         else if (action & SA_SSI_REPAINT_ARROWS)
             refresh_scroll_bar( hwnd, bar, TRUE, FALSE );
+
+        if (redraw)
+        {
+            switch (bar)
+            {
+                case SB_CTL:
+                    NtUserNotifyWinEvent( EVENT_OBJECT_VALUECHANGE, hwnd, OBJID_CLIENT, 0 );
+                    break;
+                case SB_HORZ:
+                    if (get_window_long( hwnd, GWL_STYLE ) & WS_HSCROLL)
+                        NtUserNotifyWinEvent( EVENT_OBJECT_VALUECHANGE, hwnd, OBJID_HSCROLL, 0 );
+                    break;
+                case SB_VERT:
+                    if (get_window_long( hwnd, GWL_STYLE ) & WS_VSCROLL)
+                        NtUserNotifyWinEvent( EVENT_OBJECT_VALUECHANGE, hwnd, OBJID_VSCROLL, 0 );
+                    break;
+            }
+        }
     }
 
     return ret; /* Return current position */

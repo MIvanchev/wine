@@ -736,6 +736,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     msi_set_property( package->db, L"AdminUser", L"1", -1 );
     msi_set_property( package->db, L"Privileged", L"1", -1 );
     msi_set_property( package->db, L"MsiRunningElevated", L"1", -1 );
+    msi_set_property( package->db, L"MsiTrueAdminUser", L"1", -1 );
 
     /* set the os things */
     OSVersion.dwOSVersionInfoSize = sizeof(OSVersion);
@@ -965,6 +966,7 @@ void msi_adjust_privilege_properties( MSIPACKAGE *package )
     msi_set_property( package->db, L"AdminUser", L"1", -1 );
     msi_set_property( package->db, L"Privileged", L"1", -1 );
     msi_set_property( package->db, L"MsiRunningElevated", L"1", -1 );
+    msi_set_property( package->db, L"MsiTrueAdminUser", L"1", -1 );
 }
 
 MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db )
@@ -1107,13 +1109,8 @@ static UINT parse_suminfo( MSISUMMARYINFO *si, MSIPACKAGE *package )
     TRACE("template: %s\n", debugstr_w(template));
 
     p = wcschr( template, ';' );
-    if (!p)
-    {
-        WARN("invalid template string %s\n", debugstr_w(template));
-        free( template );
-        return ERROR_PATCH_PACKAGE_INVALID;
-    }
-    *p = 0;
+    if (p) *p++ = 0;
+
     platform = template;
     if ((q = wcschr( platform, ',' ))) *q = 0;
     package->platform = parse_platform( platform );
@@ -1129,8 +1126,8 @@ static UINT parse_suminfo( MSISUMMARYINFO *si, MSIPACKAGE *package )
         free( template );
         return ERROR_INSTALL_PLATFORM_UNSUPPORTED;
     }
-    p++;
-    if (!*p)
+
+    if (!p || !*p)
     {
         free( template );
         return ERROR_SUCCESS;

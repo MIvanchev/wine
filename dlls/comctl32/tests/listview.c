@@ -3028,6 +3028,78 @@ static void test_subitem_rect(void)
     DestroyWindow(hwnd);
 }
 
+static INT WINAPI test_CallBackCompareEx(LPARAM first, LPARAM second, LPARAM lParam)
+{
+    HWND list_view = (HWND)lParam;
+    CHAR buffer1[256], buffer2[256];
+    int itm1, itm2;
+
+    ListView_GetItemTextA(list_view, first, 0, buffer1, sizeof(buffer1));
+    ListView_GetItemTextA(list_view, second, 0, buffer2, sizeof(buffer2));
+
+    itm1 = atoi(buffer1);
+    itm2 = atoi(buffer2);
+
+    return (itm1 - itm2);
+}
+
+static void test_custom_sort(void)
+{
+    int prev_value;
+    int sorted;
+    LVITEMA lvi = {0};
+    LV_COLUMNA lvc = {0};
+    CHAR buffer[256];
+    CHAR col_names[][2] = { "1", "2" };
+    HWND list_view = create_listview_control(LVS_REPORT);
+
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+    lvc.pszText = col_names[0];
+    lvc.iSubItem = 0;
+    SendMessageA(list_view, LVM_INSERTCOLUMNA, 0, (LPARAM)&lvc);
+
+    lvc.pszText = col_names[1];
+    lvc.iSubItem = 1;
+    SendMessageA(list_view, LVM_INSERTCOLUMNA, 1, (LPARAM)&lvc);
+
+    srand(1234);
+
+    for (int i = 0; i < 100; i++)
+    {
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = i;
+        lvi.iSubItem = 0;
+        lvi.pszText = buffer;
+        sprintf(buffer, "%d", rand() % 100);
+        SendMessageA(list_view, LVM_INSERTITEMA, 0, (LPARAM)&lvi);
+
+        lvi.iSubItem = 1;
+        sprintf(buffer, "%d", rand() % 100);
+        SendMessageA(list_view, LVM_SETITEMTEXTA, i, (LPARAM)&lvi);
+    }
+
+    SendMessageA(list_view, LVM_SORTITEMSEX, (WPARAM)list_view, (LPARAM)test_CallBackCompareEx);
+
+    for (int i = 1; i < 100; i++)
+    {
+        ListView_GetItemTextA(list_view, i - 1, 0, buffer, sizeof(buffer));
+        prev_value = atoi(buffer);
+
+        ListView_GetItemTextA(list_view, i, 0, buffer, sizeof(buffer));
+
+        if (atoi(buffer) < prev_value)
+        {
+            sorted = 0;
+            break;
+        }
+        sorted = 1;
+    }
+
+    ok(sorted, "ListView not sorted correctly.\n");
+
+    DestroyWindow(list_view);
+}
+
 /* comparison callback for test_sorting */
 static INT WINAPI test_CallBackCompare(LPARAM first, LPARAM second, LPARAM lParam)
 {
@@ -7162,6 +7234,27 @@ static void test_LVM_SETBKIMAGE(BOOL is_v6)
     CoUninitialize();
 }
 
+static void test_LVM_GETNEXTITEM(void)
+{
+    HWND hwnd;
+    LRESULT lr;
+
+    hwnd = create_listview_control(LVS_REPORT);
+    insert_item(hwnd, 0);
+    insert_item(hwnd, 1);
+
+    lr = SendMessageA(hwnd, LVM_GETNEXTITEM, 0, LVNI_ABOVE);
+    expect(-1, lr);
+    lr = SendMessageA(hwnd, LVM_GETNEXTITEM, 0, LVNI_BELOW);
+    expect(1, lr);
+    lr = SendMessageA(hwnd, LVM_GETNEXTITEM, 1, LVNI_ABOVE);
+    expect(0, lr);
+    lr = SendMessageA(hwnd, LVM_GETNEXTITEM, 1, LVNI_BELOW);
+    expect(-1, lr);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     ULONG_PTR ctx_cookie;
@@ -7227,6 +7320,8 @@ START_TEST(listview)
     test_LVM_GETCOUNTPERPAGE();
     test_item_state_change();
     test_LVM_SETBKIMAGE(FALSE);
+    test_custom_sort();
+    test_LVM_GETNEXTITEM();
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {
@@ -7275,6 +7370,7 @@ START_TEST(listview)
     test_item_state_change();
     test_selected_column();
     test_LVM_GETNEXTITEMINDEX();
+    test_LVM_GETNEXTITEM();
     test_LVM_SETBKIMAGE(TRUE);
 
     unload_v6_module(ctx_cookie, hCtx);

@@ -894,7 +894,7 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
         else return STATUS_INVALID_PARAMETER;
 
     case ProcessInstrumentationCallback:   /* PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION */
-        if (len == sizeof(PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION32))
+        if (len >= sizeof(ULONG))
         {
             FIXME( "ProcessInstrumentationCallback stub\n" );
             return STATUS_SUCCESS;
@@ -929,6 +929,9 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
             return status;
         }
         else return STATUS_INFO_LENGTH_MISMATCH;
+
+    case ProcessManageWritesToExecutableMemory: /* MANAGE_WRITES_TO_EXECUTABLE_MEMORY */
+        return STATUS_INVALID_INFO_CLASS;
 
     case ProcessWineMakeProcessSystem:   /* HANDLE* */
         if (len == sizeof(ULONG))
@@ -986,6 +989,7 @@ NTSTATUS WINAPI wow64_NtSetInformationThread( UINT *args )
         else return STATUS_INVALID_PARAMETER;
 
     case ThreadWow64Context:  /* WOW64_CONTEXT* */
+    case ThreadManageWritesToExecutableMemory: /* MANAGE_WRITES_TO_EXECUTABLE_MEMORY */
         return STATUS_INVALID_INFO_CLASS;
 
     case ThreadGroupInformation:   /* GROUP_AFFINITY */

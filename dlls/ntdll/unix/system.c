@@ -196,6 +196,30 @@ struct smbios_boot_info
     BYTE boot_status[10];
 };
 
+struct smbios_processor_specific_block
+{
+    BYTE length;
+    BYTE processor_type;
+    BYTE data[];
+};
+
+struct smbios_processor_additional_info
+{
+    struct smbios_header hdr;
+    WORD ref_handle;
+    struct smbios_processor_specific_block info_block;
+};
+
+struct smbios_wine_core_id_regs_arm64
+{
+    WORD num_regs;
+    struct smbios_wine_id_reg_value_arm64
+    {
+        WORD reg;
+        UINT64 value;
+    } regs[];
+};
+
 #include "poppack.h"
 
 enum smbios_type
@@ -206,6 +230,7 @@ enum smbios_type
     SMBIOS_TYPE_CHASSIS = 3,
     SMBIOS_TYPE_PROCESSOR = 4,
     SMBIOS_TYPE_BOOTINFO = 32,
+    SMBIOS_TYPE_PROCESSOR_ADDITIONAL_INFO = 44,
     SMBIOS_TYPE_END = 127
 };
 
@@ -228,6 +253,7 @@ static SYSTEM_LOGICAL_PROCESSOR_INFORMATION *logical_proc_info;
 static unsigned int logical_proc_info_len, logical_proc_info_alloc_len;
 static SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logical_proc_info_ex;
 static unsigned int logical_proc_info_ex_size, logical_proc_info_ex_alloc_size;
+static ULONG_PTR system_cpu_mask;
 
 static pthread_mutex_t timezone_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -540,6 +566,25 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 
 #elif defined(__arm__) || defined(__aarch64__)
 
+static int has_feature( const char *line, const char *feat )
+{
+    const char *linepos = line;
+    size_t featlen = strlen(feat);
+    while (1)
+    {
+        const char *ptr = strstr(linepos, feat);
+        if (!ptr)
+             return 0;
+        /* Check that the match is surrounded by whitespace, or at the
+           start/end of the string. */
+        if ((ptr == line || isspace(ptr[-1])) &&
+            (isspace(linepos[featlen]) || !linepos[featlen]))
+            return 1;
+        linepos += featlen;
+    }
+    return 0;
+}
+
 static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 {
     ULONGLONG features = 0;
@@ -569,15 +614,29 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             else if (!strcmp( line, "Features" ))
             {
 #ifdef __arm__
-                if (strstr(value, "vfpv3"))   features |= CPU_FEATURE_ARM_VFP_32;
-                if (strstr(value, "neon"))    features |= CPU_FEATURE_ARM_NEON;
+                if (has_feature(value, "vfpv3"))      features |= CPU_FEATURE_ARM_VFP_32;
+                if (has_feature(value, "neon"))       features |= CPU_FEATURE_ARM_NEON;
 #else
-                if (strstr(value, "crc32"))   features |= CPU_FEATURE_ARM_V8_CRC32;
-                if (strstr(value, "aes"))     features |= CPU_FEATURE_ARM_V8_CRYPTO;
-                if (strstr(value, "atomics")) features |= CPU_FEATURE_ARM_V81_ATOMIC;
-                if (strstr(value, "asimddp")) features |= CPU_FEATURE_ARM_V82_DP;
-                if (strstr(value, "jscvt"))   features |= CPU_FEATURE_ARM_V83_JSCVT;
-                if (strstr(value, "lrcpc"))   features |= CPU_FEATURE_ARM_V83_LRCPC;
+                if (has_feature(value, "crc32"))      features |= CPU_FEATURE_ARM_V8_CRC32;
+                if (has_feature(value, "aes"))        features |= CPU_FEATURE_ARM_V8_CRYPTO;
+                if (has_feature(value, "atomics"))    features |= CPU_FEATURE_ARM_V81_ATOMIC;
+                if (has_feature(value, "asimddp"))    features |= CPU_FEATURE_ARM_V82_DP;
+                if (has_feature(value, "jscvt"))      features |= CPU_FEATURE_ARM_V83_JSCVT;
+                if (has_feature(value, "lrcpc"))      features |= CPU_FEATURE_ARM_V83_LRCPC;
+                if (has_feature(value, "sve"))        features |= CPU_FEATURE_ARM_SVE;
+                if (has_feature(value, "sve2"))       features |= CPU_FEATURE_ARM_SVE2;
+                if (has_feature(value, "sve2p1"))     features |= CPU_FEATURE_ARM_SVE2_1;
+                if (has_feature(value, "sveaes"))     features |= CPU_FEATURE_ARM_SVE_AES;
+                if (has_feature(value, "svepmull"))   features |= CPU_FEATURE_ARM_SVE_PMULL128;
+                if (has_feature(value, "svebitperm")) features |= CPU_FEATURE_ARM_SVE_BITPERM;
+                if (has_feature(value, "svebf16"))    features |= CPU_FEATURE_ARM_SVE_BF16;
+                if (has_feature(value, "sveebf16"))   features |= CPU_FEATURE_ARM_SVE_EBF16;
+                if (has_feature(value, "sveb16b16"))  features |= CPU_FEATURE_ARM_SVE_B16B16;
+                if (has_feature(value, "svesha3"))    features |= CPU_FEATURE_ARM_SVE_SHA3;
+                if (has_feature(value, "svesm4"))     features |= CPU_FEATURE_ARM_SVE_SM4;
+                if (has_feature(value, "svei8mm"))    features |= CPU_FEATURE_ARM_SVE_I8MM;
+                if (has_feature(value, "svef32mm"))   features |= CPU_FEATURE_ARM_SVE_F32MM;
+                if (has_feature(value, "svef64mm"))   features |= CPU_FEATURE_ARM_SVE_F64MM;
 #endif
                 continue;
             }
@@ -835,6 +894,7 @@ static BOOL logical_proc_info_add_group( DWORD num_cpus, ULONG_PTR mask )
     dataex->Group.GroupInfo[0].ActiveProcessorMask = mask;
 
     logical_proc_info_ex_size += dataex->Size;
+    system_cpu_mask |= mask;
     return TRUE;
 }
 
@@ -1278,6 +1338,35 @@ static NTSTATUS create_logical_proc_info(void)
 }
 #endif
 
+#ifdef linux
+
+static double tsc_from_jiffies[MAXIMUM_PROCESSORS];
+
+static void init_tsc_frequency(void)
+{
+    unsigned long clk_tck = sysconf( _SC_CLK_TCK );
+    char filename[128];
+    unsigned long val;
+    unsigned int i;
+    FILE *f;
+
+    for (i = 0; i < MAXIMUM_PROCESSORS; ++i)
+    {
+        if (system_cpu_mask && !(system_cpu_mask & ((ULONG_PTR)1 << i))) continue;
+        snprintf( filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/cpufreq/base_frequency", i );
+        if (!(f = fopen( filename, "r" ))) break;
+        if (fscanf( f, "%lu", &val ) == 1) tsc_from_jiffies[i] = 1000.0 * val / clk_tck;
+        fclose( f );
+    }
+}
+#else
+
+static void init_tsc_frequency(void)
+{
+}
+
+#endif
+
 /******************************************************************
  *		init_cpu_info
  *
@@ -1336,6 +1425,7 @@ void init_cpu_info(void)
         logical_proc_info_ex = realloc( logical_proc_info_ex, logical_proc_info_ex_size );
         logical_proc_info_ex_alloc_size = logical_proc_info_ex_size;
     }
+    init_tsc_frequency();
 }
 
 static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
@@ -1598,6 +1688,99 @@ static WORD append_smbios_boot_info( struct smbios_buffer *buf )
     return append_smbios( buf, &boot.hdr, NULL, 0 );
 }
 
+#ifdef __aarch64__
+#ifdef linux
+
+static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs,
+                                     WORD logical_thread_id )
+{
+    static const char midr_el1_path[] = "/sys/devices/system/cpu/cpu%u/regs/identification/midr_el1";
+    char path_buf[0x100];
+    unsigned long value;
+    DWORD regidx = 0;
+    FILE *fp;
+
+    /* MIDR_EL1 can vary across cores, so read it from sysfs. */
+    snprintf( path_buf, sizeof(path_buf), midr_el1_path, logical_thread_id );
+    if ((fp = fopen( path_buf, "r" )))
+    {
+        fscanf( fp, "%lx", &value );
+        fclose( fp );
+        regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x4000, value };
+    }
+
+#define STR(a) #a
+#define READ_ID_REG(reg_id) \
+    /* mrs x0, #reg_id */ \
+    __asm__ __volatile__( ".inst " STR(0xd5300000 | reg_id << 5) "\n\t" \
+                          "mov %0, x0" : "=r"(value) :: "x0" ); \
+    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ reg_id, value };
+
+    /* Linux traps reads to these ID registers and emulates them. They do not vary across cores,
+     * if the kernel doesn't support a specific ID register it will read as zero. */
+    READ_ID_REG( 0x4020 ); /* ID_AA64PFR0_EL1 */
+    READ_ID_REG( 0x4021 ); /* ID_AA64PFR1_EL1 */
+    READ_ID_REG( 0x4024 ); /* ID_AA64ZFR0_EL1 */
+    READ_ID_REG( 0x4025 ); /* ID_AA64SMFR0_EL1 */
+    READ_ID_REG( 0x4028 ); /* ID_AA64DFR0_EL1 */
+    READ_ID_REG( 0x4029 ); /* ID_AA64DFR1_EL1 */
+    READ_ID_REG( 0x402c ); /* ID_AA64AFR0_EL1 */
+    READ_ID_REG( 0x402d ); /* ID_AA64AFR1_EL1 */
+    READ_ID_REG( 0x4030 ); /* ID_AA64ISAR0_EL1 */
+    READ_ID_REG( 0x4031 ); /* ID_AA64ISAR1_EL1 */
+    READ_ID_REG( 0x4032 ); /* ID_AA64ISAR2_EL1 */
+    READ_ID_REG( 0x4038 ); /* ID_AA64MMFR0_EL1 */
+    READ_ID_REG( 0x4039 ); /* ID_AA64MMFR1_EL1 */
+    READ_ID_REG( 0x403a ); /* ID_AA64MMFR2_EL1 */
+    READ_ID_REG( 0x5801 ); /* CTR_EL0 */
+    /* Windows exposes SCTLR_EL1, ACTLR_EL1, TTBR0_EL1 and MAIR_EL1, but these are inaccessible under
+     * linux so leave them unpopulated. */
+
+#undef READ_ID_REG
+#undef STR
+    return regidx;
+}
+
+#else
+
+static DWORD get_core_id_regs_arm64( struct smbios_wine_core_id_regs_arm64 *core_id_regs,
+                                     WORD logical_thread_id )
+{
+    FIXME("stub\n");
+    return 0;
+}
+
+#endif
+
+static WORD append_smbios_wine_core_id_regs_arm64( struct smbios_buffer *buf, WORD ref_handle,
+                                                   WORD logical_thread_id )
+{
+
+    WORD length;
+    BYTE info_buf[0xff];
+    struct smbios_processor_additional_info *proc_additional_info =
+        (struct smbios_processor_additional_info *)info_buf;
+    struct smbios_wine_core_id_regs_arm64 *core_id_regs =
+        (struct smbios_wine_core_id_regs_arm64 *)proc_additional_info->info_block.data;
+
+    proc_additional_info->hdr.type = SMBIOS_TYPE_PROCESSOR_ADDITIONAL_INFO;
+    proc_additional_info->ref_handle = ref_handle;
+    proc_additional_info->info_block.processor_type = 5; /* 64 bit ARM */
+
+    core_id_regs->num_regs = get_core_id_regs_arm64( core_id_regs->regs, logical_thread_id );
+
+    length = sizeof(struct smbios_processor_additional_info) +
+             sizeof(struct smbios_wine_core_id_regs_arm64) +
+             core_id_regs->num_regs * sizeof(struct smbios_wine_id_reg_value_arm64);
+
+    proc_additional_info->hdr.length = length;
+    proc_additional_info->info_block.length = length - 6;
+
+    return append_smbios( buf, &proc_additional_info->hdr, NULL, 0 );
+}
+
+#endif
+
 static void append_smbios_end( struct smbios_buffer *buf )
 {
     struct smbios_header end = { .type = SMBIOS_TYPE_END, .length = sizeof(end) };
@@ -1610,6 +1793,10 @@ static void create_smbios_processors( struct smbios_buffer *buf )
     char socket[20], name[49];
     SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *p = logical_proc_info_ex;
     UINT i, family = 0, core_count = 0, thread_count = 0, pkg_count = 0;
+#ifdef __aarch64__
+    UINT logical_thread_id = 0;
+    WORD proc_handle;
+#endif
 
     strcpy( name, cpu_name );
     for (i = strlen(name); i > 0 && name[i - 1] == ' '; i--) name[i - 1] = 0;
@@ -1621,8 +1808,15 @@ static void create_smbios_processors( struct smbios_buffer *buf )
         case RelationProcessorPackage:
             if (!pkg_count++) break;
             snprintf( socket, sizeof(socket), "Socket #%u", pkg_count - 1 );
+#ifdef __aarch64__
+            proc_handle = append_smbios_processor( buf, core_count, thread_count, family,
+                                                   socket, cpu_vendor, name, "", "" );
+            for (i = 0; i < thread_count; logical_thread_id++, i++)
+                append_smbios_wine_core_id_regs_arm64( buf, proc_handle, logical_thread_id );
+#else
             append_smbios_processor( buf, core_count, thread_count, family,
                                      socket, cpu_vendor, name, "", "" );
+#endif
             core_count = thread_count = 0;
             break;
         case RelationProcessorCore:
@@ -1636,8 +1830,16 @@ static void create_smbios_processors( struct smbios_buffer *buf )
         p = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((char *)p + p->Size);
     }
     snprintf( socket, sizeof(socket), "Socket #%u", pkg_count - 1 );
-    append_smbios_processor( buf, core_count, thread_count, family,
-                             socket, cpu_vendor, name, "", "" );
+#ifdef __aarch64__
+    proc_handle = append_smbios_processor( buf, core_count, thread_count, family,
+                                           socket, cpu_vendor, name, "", "" );
+    /* Create these in order so they can be looked up by indexing all additional processor
+     * info structures by the logical thread id. */
+    for (i = 0; i < thread_count; logical_thread_id++, i++)
+        append_smbios_wine_core_id_regs_arm64( buf, proc_handle, logical_thread_id );
+#else
+    append_smbios_processor( buf, core_count, thread_count, family, socket, cpu_vendor, name, "", "" );
+#endif
 }
 
 #undef ADD_STR
@@ -2072,10 +2274,17 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
             mach_msg_type_number_t count;
 #ifdef HOST_VM_INFO64_COUNT
             vm_statistics64_data_t vm_stat;
+            vm_size_t mac_page_size;
+
+            if (host_page_size(host, &mac_page_size) != KERN_SUCCESS)
+            {
+                WARN("Can't get host's page size, fallback to %lx.\n", page_size);
+                mac_page_size = page_size;
+            }
 
             count = HOST_VM_INFO64_COUNT;
             if (host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm_stat, &count) == KERN_SUCCESS)
-                freeram = (vm_stat.free_count + vm_stat.inactive_count) * (ULONGLONG)page_size;
+                freeram = (vm_stat.free_count + vm_stat.inactive_count) * (ULONGLONG)mac_page_size;
 #endif
             if (!totalram)
             {
@@ -2123,6 +2332,47 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
     info->TotalCommittedPages = (totalram + totalswap - freeram - freeswap) / page_size;
     info->TotalCommitLimit    = (totalram + totalswap) / page_size;
 }
+
+#ifdef linux
+
+static void get_cpu_idle_cycle_times( ULONG64 *times )
+{
+    unsigned int index, host_index, count;
+    char line[256], name[32];
+    unsigned long long idle;
+    FILE *f;
+
+    memset( times, 0, peb->NumberOfProcessors * sizeof(*times) );
+    if (!(f = fopen( "/proc/stat", "r" ))) return;
+
+    /* skip combined cpu statistics line. */
+    fgets( line, sizeof(line), f );
+
+    index = 0;
+    while (fgets( line, sizeof(line), f ) && index < peb->NumberOfProcessors)
+    {
+        count = sscanf(line, "%s %*u %*u %*u %llu", name, &idle);
+
+        if (count < 2 || strncmp( name, "cpu", 3 )) break;
+        host_index = atoi( name + 3 );
+        if (system_cpu_mask && !(system_cpu_mask & ((ULONG_PTR)1 << host_index))) continue;
+        times[index] = idle * tsc_from_jiffies[host_index];
+        ++index;
+    }
+
+    fclose( f );
+}
+#else
+
+static void get_cpu_idle_cycle_times( ULONG64 *times )
+{
+    static int once;
+
+    if (!once++) FIXME( "SystemProcessorIdleCycleTimeInformation stub.\n" );
+    memset( times, 0, peb->NumberOfProcessors * sizeof(*times) );
+}
+
+#endif
 
 
 /* calculate the mday of dst change date, so that for instance Sun 5 Oct 2007
@@ -3258,6 +3508,13 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemProcessorIdleCycleTimeInformation: /* 83 */
+    {
+        ULONG group_id = 0; /* FIXME: should probably be current CPU group id. */
+
+        return NtQuerySystemInformationEx( class, &group_id, sizeof(group_id), info, size, ret_size );
+    }
+
     case SystemProcessIdInformation: /* 88 */
     {
         SYSTEM_PROCESS_ID_INFORMATION *id = info;
@@ -3407,6 +3664,18 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
 
     switch (class)
     {
+    case SystemProcessorIdleCycleTimeInformation:
+        len = peb->NumberOfProcessors * sizeof(ULONG64);
+        if (!query || query_len < sizeof(USHORT) || *(USHORT *)query) return STATUS_INVALID_PARAMETER;
+        if (size < len)
+        {
+            ret = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        get_cpu_idle_cycle_times( info );
+        ret = STATUS_SUCCESS;
+        break;
+
     case SystemLogicalProcessorInformationEx:
     {
         SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *p;

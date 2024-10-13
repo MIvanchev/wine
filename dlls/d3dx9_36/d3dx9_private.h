@@ -33,10 +33,45 @@
 
 #define FOURCC_TX_1 0x54580100
 
+#define D3DX9_FILTER_INVALID_BITS 0xff80fff8
+static inline HRESULT d3dx9_validate_filter(uint32_t filter)
+{
+    if ((filter & D3DX9_FILTER_INVALID_BITS) || !(filter & 0x7) || ((filter & 0x7) > D3DX_FILTER_BOX))
+        return D3DERR_INVALIDCALL;
+
+    return D3D_OK;
+}
+
+static inline HRESULT d3dx9_handle_load_filter(DWORD *filter)
+{
+    if (*filter == D3DX_DEFAULT)
+        *filter = D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
+
+    return d3dx9_validate_filter(*filter);
+}
+
 struct vec4
 {
     float x, y, z, w;
 };
+
+enum range {
+    RANGE_FULL  = 0,
+    RANGE_UNORM = 1,
+    RANGE_SNORM = 2,
+};
+
+struct d3dx_color
+{
+    struct vec4 value;
+    enum range range;
+};
+
+static inline void set_d3dx_color(struct d3dx_color *color, const struct vec4 *value, enum range range)
+{
+    color->value = *value;
+    color->range = range;
+}
 
 struct volume
 {
@@ -57,6 +92,7 @@ enum format_type {
     FORMAT_ARGB,   /* unsigned */
     FORMAT_ARGBF16,/* float 16 */
     FORMAT_ARGBF,  /* float */
+    FORMAT_ARGB_SNORM,
     FORMAT_DXT,
     FORMAT_INDEX,
     FORMAT_UNKNOWN
@@ -106,8 +142,10 @@ struct d3dx_image
 
     struct volume size;
     uint32_t mip_levels;
+    uint32_t layer_count;
 
     BYTE *pixels;
+    uint32_t layer_pitch;
 
     /*
      * image_buf and palette are pointers to allocated memory used to store
@@ -123,7 +161,8 @@ struct d3dx_image
 HRESULT d3dx_image_init(const void *src_data, uint32_t src_data_size, struct d3dx_image *image,
         uint32_t starting_mip_level, uint32_t flags);
 void d3dx_image_cleanup(struct d3dx_image *image);
-HRESULT d3dx_image_get_pixels(struct d3dx_image *image, uint32_t mip_level, struct d3dx_pixels *pixels);
+HRESULT d3dx_image_get_pixels(struct d3dx_image *image, uint32_t layer, uint32_t mip_level,
+        struct d3dx_pixels *pixels);
 void d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image);
 
 struct d3dx_include_from_file
@@ -137,7 +176,7 @@ extern const struct ID3DXIncludeVtbl d3dx_include_from_file_vtbl;
 static inline BOOL is_conversion_from_supported(const struct pixel_format_desc *format)
 {
     if (format->type == FORMAT_ARGB || format->type == FORMAT_ARGBF16
-            || format->type == FORMAT_ARGBF || format->type == FORMAT_DXT)
+            || format->type == FORMAT_ARGBF || format->type == FORMAT_DXT || format->type == FORMAT_ARGB_SNORM)
         return TRUE;
     return !!format->to_rgba;
 }
@@ -145,7 +184,7 @@ static inline BOOL is_conversion_from_supported(const struct pixel_format_desc *
 static inline BOOL is_conversion_to_supported(const struct pixel_format_desc *format)
 {
     if (format->type == FORMAT_ARGB || format->type == FORMAT_ARGBF16
-            || format->type == FORMAT_ARGBF || format->type == FORMAT_DXT)
+            || format->type == FORMAT_ARGBF || format->type == FORMAT_DXT || format->type == FORMAT_ARGB_SNORM)
         return TRUE;
     return !!format->from_rgba;
 }
@@ -158,7 +197,8 @@ HRESULT write_buffer_to_file(const WCHAR *filename, ID3DXBuffer *buffer);
 const struct pixel_format_desc *get_format_info(D3DFORMAT format);
 const struct pixel_format_desc *get_format_info_idx(int idx);
 
-void format_to_vec4(const struct pixel_format_desc *format, const BYTE *src, struct vec4 *dst);
+void format_to_d3dx_color(const struct pixel_format_desc *format, const BYTE *src, struct d3dx_color *dst);
+void format_from_d3dx_color(const struct pixel_format_desc *format, const struct d3dx_color *src, BYTE *dst);
 
 void copy_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pitch,
     BYTE *dst, UINT dst_row_pitch, UINT dst_slice_pitch, const struct volume *size,
@@ -172,8 +212,6 @@ void point_filter_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slic
     BYTE *dst, UINT dst_row_pitch, UINT dst_slice_pitch, const struct volume *dst_size,
     const struct pixel_format_desc *dst_format, D3DCOLOR color_key, const PALETTEENTRY *palette);
 
-HRESULT load_cube_texture_from_dds(IDirect3DCubeTexture9 *cube_texture, const void *src_data,
-    const PALETTEENTRY *palette, DWORD filter, D3DCOLOR color_key, const D3DXIMAGE_INFO *src_info);
 HRESULT lock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect, D3DLOCKED_RECT *lock,
         IDirect3DSurface9 **temp_surface, BOOL write);
 HRESULT unlock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect,

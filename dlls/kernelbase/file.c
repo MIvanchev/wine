@@ -1374,6 +1374,15 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileW( const WCHAR *filename, WIN32_FIN
     return FindFirstFileExW( filename, FindExInfoStandard, data, FindExSearchNameMatch, NULL, 0 );
 }
 
+/******************************************************************************
+ *     FindFirstFileNameW   (kernelbase.@)
+ */
+HANDLE WINAPI FindFirstFileNameW( const WCHAR *file_name, DWORD flags, DWORD *len, WCHAR *link_name )
+{
+    FIXME( "(%s, %lu, %p, %p): stub!\n", debugstr_w(file_name), flags, len, link_name );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return INVALID_HANDLE_VALUE;
+}
 
 /**************************************************************************
  *	FindFirstStreamW   (kernelbase.@)
@@ -2473,6 +2482,28 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetTempPathW( DWORD count, LPWSTR path )
 
     TRACE( "returning %u, %s\n", ret, debugstr_w( path ));
     return ret;
+}
+
+
+/***********************************************************************
+ *	GetTempPath2A   (kernelbase.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetTempPath2A(DWORD count, LPSTR path)
+{
+    /* TODO: Set temp path to C:\Windows\SystemTemp\ when a SYSTEM process calls this function */
+    FIXME("(%lu, %s) semi-stub\n", count, path);
+    return GetTempPathA(count, path);
+}
+
+
+/***********************************************************************
+ *	GetTempPath2W   (kernelbase.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetTempPath2W(DWORD count, LPWSTR path)
+{
+    /* TODO: Set temp path to C:\Windows\SystemTemp\ when a SYSTEM process calls this function */
+    FIXME("(%lu, %s) semi-stub\n", count, debugstr_w(path));
+    return GetTempPathW(count, path);
 }
 
 

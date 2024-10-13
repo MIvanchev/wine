@@ -25,6 +25,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
+#include <dlfcn.h>
 
 #import "cocoa_window.h"
 
@@ -367,6 +368,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 {
     CGRect surfaceRect;
     CGImageRef colorImage;
+    CGImageRef shapeImage;
 
     NSMutableArray* glContexts;
     NSMutableArray* pendingGlContexts;
@@ -413,8 +415,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @property (nonatomic) BOOL shapeChangedSinceLastDraw;
 @property (readonly, nonatomic) BOOL needsTransparency;
 
-@property (nonatomic) BOOL colorKeyed;
-@property (nonatomic) CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
 @property (nonatomic) BOOL usePerPixelAlpha;
 
 @property (assign, nonatomic) void* himc;
@@ -503,6 +503,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         [glContexts release];
         [pendingGlContexts release];
         CGImageRelease(colorImage);
+        CGImageRelease(shapeImage);
         [super dealloc];
     }
 
@@ -519,7 +520,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (void) updateLayer
     {
         WineWindow* window = (WineWindow*)[self window];
-        CGImageRef image;
+        CGImageRef image, maskedImage;
         CGRect imageRect;
         CALayer* layer = [self layer];
 
@@ -535,21 +536,10 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         imageRect.size.width *= layer.contentsScale;
         imageRect.size.height *= layer.contentsScale;
 
-        image = CGImageCreateWithImageInRect(colorImage, imageRect);
-
-        if (window.colorKeyed)
-        {
-            CGImageRef maskedImage;
-            CGFloat components[] = { window.colorKeyRed   - 0.5, window.colorKeyRed   + 0.5,
-                                     window.colorKeyGreen - 0.5, window.colorKeyGreen + 0.5,
-                                     window.colorKeyBlue  - 0.5, window.colorKeyBlue  + 0.5 };
-            maskedImage = CGImageCreateWithMaskingColors(image, components);
-            if (maskedImage)
-            {
-                CGImageRelease(image);
-                image = maskedImage;
-            }
-        }
+        maskedImage = shapeImage ? CGImageCreateWithMask(colorImage, shapeImage)
+                                 : CGImageRetain(colorImage);
+        image = CGImageCreateWithImageInRect(maskedImage, imageRect);
+        CGImageRelease(maskedImage);
 
         if (image)
         {
@@ -561,7 +551,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             // If the window may be transparent, then we have to invalidate the
             // shadow every time we draw.  Also, if this is the first time we've
             // drawn since changing from transparent to opaque.
-            if (window.colorKeyed || window.usePerPixelAlpha || window.shapeChangedSinceLastDraw)
+            if (shapeImage || window.usePerPixelAlpha || window.shapeChangedSinceLastDraw)
             {
                 window.shapeChangedSinceLastDraw = FALSE;
                 [window invalidateShadow];
@@ -578,6 +568,17 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         CGImageRelease(colorImage);
         colorImage = CGImageRetain(image);
+    }
+
+    - (void) setShapeImage:(CGImageRef)image
+    {
+        CGImageRelease(shapeImage);
+        shapeImage = CGImageRetain(image);
+    }
+
+    - (BOOL) hasShapeImage
+    {
+        return !!shapeImage;
     }
 
     - (void) viewWillDraw
@@ -1017,7 +1018,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     @synthesize disabled, noForeground, preventsAppActivation, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
     @synthesize drawnSinceShown;
     @synthesize shapeChangedSinceLastDraw;
-    @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
     @synthesize himc, commandDone;
 
@@ -2071,8 +2071,9 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
     - (BOOL) needsTransparency
     {
-        return self.contentView.layer.mask || self.colorKeyed || self.usePerPixelAlpha ||
-                (gl_surface_mode == GL_SURFACE_BEHIND && [(WineContentView*)self.contentView hasGLDescendant]);
+        WineContentView *view = self.contentView;
+        return self.contentView.layer.mask || [view hasShapeImage] || self.usePerPixelAlpha ||
+                (gl_surface_mode == GL_SURFACE_BEHIND && [view hasGLDescendant]);
     }
 
     - (void) checkTransparency
@@ -2315,6 +2316,20 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         return ([mask isEmptyShaped]);
     }
 
+    - (BOOL) presentsVisibleContent
+    {
+        if (NSWidth(self.frame) > 0 && NSHeight(self.frame) > 0 && ![self isEmptyShaped])
+            return YES;
+
+        for (WineWindow *child in self.childWindows)
+        {
+            if ([child isKindOfClass:[WineWindow class]] && [child presentsVisibleContent])
+                return YES;
+        }
+
+        return NO;
+    }
+
     - (BOOL) canProvideSnapshot
     {
         return (self.windowNumber > 0 && ![self isEmptyShaped]);
@@ -2355,9 +2370,20 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                 return;
         }
 
+        static CGImageRef __nullable (*pCGWindowListCreateImageFromArray)(CGRect, CFArrayRef, CGWindowImageOption);
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            void *h = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY | RTLD_LOCAL);
+            if (h)
+                pCGWindowListCreateImageFromArray = dlsym(h, "CGWindowListCreateImageFromArray");
+        });
+
+        if (!pCGWindowListCreateImageFromArray)
+            return;
+
         const void* windowID = (const void*)(uintptr_t)(CGWindowID)window.windowNumber;
         CFArrayRef windowIDs = CFArrayCreate(NULL, &windowID, 1, NULL);
-        CGImageRef windowImage = CGWindowListCreateImageFromArray(CGRectNull, windowIDs, kCGWindowImageBoundsIgnoreFraming);
+        CGImageRef windowImage = pCGWindowListCreateImageFromArray(CGRectNull, windowIDs, kCGWindowImageBoundsIgnoreFraming);
         CFRelease(windowIDs);
         if (!windowImage)
             return;
@@ -3521,6 +3547,30 @@ void macdrv_window_set_color_image(macdrv_window w, CGImageRef image, CGRect rec
 }
 }
 
+
+/***********************************************************************
+ *              macdrv_window_set_shape_image
+ */
+void macdrv_window_set_shape_image(macdrv_window w, CGImageRef image)
+{
+@autoreleasepool
+{
+    WineWindow* window = (WineWindow*)w;
+
+    CGImageRetain(image);
+
+    OnMainThreadAsync(^{
+        WineContentView *view = [window contentView];
+
+        [view setShapeImage:image];
+        [view setNeedsDisplay:true];
+        [window checkTransparency];
+
+        CGImageRelease(image);
+    });
+}
+}
+
 /***********************************************************************
  *              macdrv_set_window_shape
  *
@@ -3564,42 +3614,6 @@ void macdrv_set_window_alpha(macdrv_window w, CGFloat alpha)
     WineWindow* window = (WineWindow*)w;
 
     [window setAlphaValue:alpha];
-}
-}
-
-/***********************************************************************
- *              macdrv_set_window_color_key
- */
-void macdrv_set_window_color_key(macdrv_window w, CGFloat keyRed, CGFloat keyGreen,
-                                 CGFloat keyBlue)
-{
-@autoreleasepool
-{
-    WineWindow* window = (WineWindow*)w;
-
-    OnMainThread(^{
-        window.colorKeyed       = TRUE;
-        window.colorKeyRed      = keyRed;
-        window.colorKeyGreen    = keyGreen;
-        window.colorKeyBlue     = keyBlue;
-        [window checkTransparency];
-    });
-}
-}
-
-/***********************************************************************
- *              macdrv_clear_window_color_key
- */
-void macdrv_clear_window_color_key(macdrv_window w)
-{
-@autoreleasepool
-{
-    WineWindow* window = (WineWindow*)w;
-
-    OnMainThread(^{
-        window.colorKeyed = FALSE;
-        [window checkTransparency];
-    });
 }
 }
 

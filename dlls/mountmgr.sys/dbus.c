@@ -174,6 +174,7 @@ static void udisks_new_device( const char *udi )
     const char *device = NULL;
     const char *mount_point = NULL;
     const char *type = NULL;
+    const char *label = NULL;
     GUID guid, *guid_ptr = NULL;
     int removable = FALSE;
     enum device_type drive_type = DEVICE_UNKNOWN;
@@ -210,6 +211,8 @@ static void udisks_new_device( const char *udi )
                 p_dbus_message_iter_get_basic( &variant, &removable );
             else if (!strcmp( name, "IdType" ))
                 p_dbus_message_iter_get_basic( &variant, &type );
+            else if (!strcmp( name, "IdLabel" ))
+                p_dbus_message_iter_get_basic( &variant, &label );
             else if (!strcmp( name, "DriveMediaCompatibility" ))
                 drive_type = udisks_parse_media_compatibility( &variant );
             else if (!strcmp( name, "DeviceMountPaths" ))
@@ -228,9 +231,9 @@ static void udisks_new_device( const char *udi )
         }
     }
 
-    TRACE( "udi %s device %s mount point %s uuid %s type %s removable %u\n",
+    TRACE( "udi %s device %s mount point %s uuid %s type %s label %s removable %u\n",
            debugstr_a(udi), debugstr_a(device), debugstr_a(mount_point),
-           debugstr_guid(guid_ptr), debugstr_a(type), removable );
+           debugstr_guid(guid_ptr), debugstr_a(type), debugstr_a(label), removable );
 
     if (type)
     {
@@ -248,8 +251,8 @@ static void udisks_new_device( const char *udi )
 
     if (device)
     {
-        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, NULL, NULL );
-        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, NULL, NULL );
+        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, NULL, label, NULL );
+        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, NULL, label, NULL );
     }
 
     p_dbus_message_unref( reply );
@@ -259,7 +262,7 @@ static void udisks_new_device( const char *udi )
 static void udisks_removed_device( const char *udi )
 {
     TRACE( "removed %s\n", wine_dbgstr_a(udi) );
-    queue_device_op( REMOVE_DEVICE, udi, NULL, NULL, 0, NULL, NULL, NULL );
+    queue_device_op( REMOVE_DEVICE, udi, NULL, NULL, 0, NULL, NULL, NULL, NULL );
 }
 
 /* UDisks callback for changed device */
@@ -349,6 +352,7 @@ static void udisks2_add_device( const char *udi, DBusMessageIter *dict, DBusMess
     const char *type = NULL;
     const char *drive = NULL;
     const char *id = NULL;
+    const char *label = NULL;
     GUID guid, *guid_ptr = NULL;
     const char *iface, *name;
     int removable = FALSE;
@@ -379,6 +383,8 @@ static void udisks2_add_device( const char *udi, DBusMessageIter *dict, DBusMess
                     device = udisks2_string_from_array( &variant );
                 else if (!strcmp( name, "IdType" ))
                     p_dbus_message_iter_get_basic( &variant, &type );
+                else if (!strcmp( name, "IdLabel" ))
+                    p_dbus_message_iter_get_basic( &variant, &label );
                 else if (!strcmp( name, "Drive" ))
                 {
                     p_dbus_message_iter_get_basic( &variant, &drive );
@@ -397,9 +403,9 @@ static void udisks2_add_device( const char *udi, DBusMessageIter *dict, DBusMess
         }
     }
 
-    TRACE( "udi %s device %s mount point %s uuid %s type %s removable %u\n",
+    TRACE( "udi %s device %s mount point %s uuid %s type %s label %s removable %u\n",
            debugstr_a(udi), debugstr_a(device), debugstr_a(mount_point),
-           debugstr_guid(guid_ptr), debugstr_a(type), removable );
+           debugstr_guid(guid_ptr), debugstr_a(type), debugstr_a(label), removable );
 
     if (type)
     {
@@ -416,8 +422,8 @@ static void udisks2_add_device( const char *udi, DBusMessageIter *dict, DBusMess
     }
     if (device)
     {
-        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, id, NULL );
-        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, id, NULL );
+        if (removable) queue_device_op( ADD_DOS_DEVICE, udi, device, mount_point, drive_type, guid_ptr, id, label, NULL );
+        else if (guid_ptr) queue_device_op( ADD_VOLUME, udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr, id, label, NULL );
     }
 }
 

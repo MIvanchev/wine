@@ -120,6 +120,17 @@ typedef struct {
 
 static const style_tbl_entry_t style_tbl[] = {
     {
+        L"-ms-transform",
+        DISPID_IHTMLCSSSTYLEDECLARATION_MSTRANSFORM,
+        DISPID_UNKNOWN
+    },
+    {
+        L"-ms-transition",
+        DISPID_IHTMLCSSSTYLEDECLARATION2_MSTRANSITION,
+        DISPID_UNKNOWN,
+        ATTR_COMPAT_IE10
+    },
+    {
         L"animation",
         DISPID_IHTMLCSSSTYLEDECLARATION2_ANIMATION,
         DISPID_UNKNOWN,
@@ -318,7 +329,7 @@ static const style_tbl_entry_t style_tbl[] = {
         ATTR_FIX_PX
     },
     {
-        L"-moz-box-sizing",
+        L"box-sizing",
         DISPID_IHTMLCSSSTYLEDECLARATION_BOXSIZING,
         DISPID_A_BOXSIZING
     },
@@ -702,6 +713,18 @@ static const style_tbl_entry_t style_tbl[] = {
 
 C_ASSERT(ARRAY_SIZE(style_tbl) == STYLEID_MAX_VALUE);
 
+static const WCHAR *get_style_nsname(const style_tbl_entry_t *style_entry)
+{
+    if(style_entry->name[0] == '-')
+        return style_entry->name + sizeof("-ms-")-1;
+    return style_entry->name;
+}
+
+static const WCHAR *get_style_prop_nsname(const style_tbl_entry_t *style_entry, const WCHAR *orig_name)
+{
+    return style_entry ? get_style_nsname(style_entry) : orig_name;
+}
+
 static const style_tbl_entry_t *lookup_style_tbl(CSSStyle *style, const WCHAR *name)
 {
     int c, i, min = 0, max = ARRAY_SIZE(style_tbl)-1;
@@ -788,7 +811,7 @@ static HRESULT set_nsstyle_property(nsIDOMCSSStyleDeclaration *nsstyle, styleid_
     nsAString str_name, str_empty;
     nsresult nsres;
 
-    nsAString_InitDepend(&str_name, style_tbl[sid].name);
+    nsAString_InitDepend(&str_name, get_style_nsname(&style_tbl[sid]));
     nsAString_InitDepend(&str_empty, L"");
     nsres = nsIDOMCSSStyleDeclaration_SetProperty(nsstyle, &str_name, value, &str_empty);
     nsAString_Finish(&str_name);
@@ -867,7 +890,7 @@ static HRESULT get_nsstyle_attr_nsval(nsIDOMCSSStyleDeclaration *nsstyle, stylei
     nsAString str_name;
     nsresult nsres;
 
-    nsAString_InitDepend(&str_name, style_tbl[sid].name);
+    nsAString_InitDepend(&str_name, get_style_nsname(&style_tbl[sid]));
     nsres = nsIDOMCSSStyleDeclaration_GetPropertyValue(nsstyle, &str_name, value);
     nsAString_Finish(&str_name);
     if(NS_FAILED(nsres))
@@ -2913,12 +2936,15 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
 
     style_entry = lookup_style_tbl(&This->css_style, strAttributeName);
     if(!style_entry) {
+        DWORD fdex = (lFlags & 1) ? fdexNameCaseSensitive : fdexNameCaseInsensitive;
         compat_mode_t compat_mode = dispex_compat_mode(&This->css_style.dispex);
         DISPID dispid;
         unsigned i;
 
-        hres = IWineJSDispatchHost_GetDispID(&This->css_style.dispex.IWineJSDispatchHost_iface, strAttributeName,
-                (lFlags&1) ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &dispid);
+        if(compat_mode < COMPAT_MODE_IE9)
+            hres = IWineJSDispatchHost_GetDispID(&This->css_style.dispex.IWineJSDispatchHost_iface, strAttributeName, fdex, &dispid);
+        else
+            hres = dispex_get_chain_builtin_id(&This->css_style.dispex, strAttributeName, fdex, &dispid);
         if(hres != S_OK) {
             *pfSuccess = VARIANT_FALSE;
             return S_OK;
@@ -2946,7 +2972,7 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
         return S_OK;
     }
 
-    nsAString_InitDepend(&name_str, style_entry->name);
+    nsAString_InitDepend(&name_str, get_style_nsname(style_entry));
     nsAString_Init(&ret_str, NULL);
     nsres = nsIDOMCSSStyleDeclaration_RemoveProperty(This->css_style.nsstyle, &name_str, &ret_str);
     if(NS_SUCCEEDED(nsres)) {
@@ -4443,7 +4469,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_getPropertyValue(IHTMLCSSStyleDecl
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(name), value);
 
     style_entry = lookup_style_tbl(This, name);
-    nsAString_InitDepend(&name_str, style_entry ? style_entry->name : name);
+    nsAString_InitDepend(&name_str, get_style_prop_nsname(style_entry, name));
     nsAString_InitDepend(&value_str, NULL);
     nsres = nsIDOMCSSStyleDeclaration_GetPropertyValue(This->nsstyle, &name_str, &value_str);
     nsAString_Finish(&name_str);
@@ -4467,7 +4493,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_removeProperty(IHTMLCSSStyleDeclar
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(bstrPropertyName), pbstrPropertyValue);
 
     style_entry = lookup_style_tbl(This, bstrPropertyName);
-    nsAString_InitDepend(&name_str, style_entry ? style_entry->name : bstrPropertyName);
+    nsAString_InitDepend(&name_str, get_style_prop_nsname(style_entry, bstrPropertyName));
     nsAString_Init(&ret_str, NULL);
     nsres = nsIDOMCSSStyleDeclaration_RemoveProperty(This->nsstyle, &name_str, &ret_str);
     nsAString_Finish(&name_str);
@@ -4500,7 +4526,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_setProperty(IHTMLCSSStyleDeclarati
         nsAString_InitDepend(&priority_str, NULL);
     }
 
-    nsAString_InitDepend(&name_str, style_entry ? style_entry->name : name);
+    nsAString_InitDepend(&name_str, get_style_prop_nsname(style_entry, name));
     nsres = nsIDOMCSSStyleDeclaration_SetProperty(This->nsstyle, &name_str, &value_str, &priority_str);
     nsAString_Finish(&name_str);
     nsAString_Finish(&value_str);
@@ -7262,15 +7288,19 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_get_boxShadow(IHTMLCSSStyleDeclara
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_msTransform(IHTMLCSSStyleDeclaration *iface, BSTR v)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return set_style_property(This, STYLEID_MSTRANSFORM, v);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_get_msTransform(IHTMLCSSStyleDeclaration *iface, BSTR *p)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_property(This, STYLEID_MSTRANSFORM, p);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_msTransformOrigin(IHTMLCSSStyleDeclaration *iface, BSTR v)
@@ -8760,15 +8790,19 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration2_get_msTransitionDelay(IHTMLCSSSty
 static HRESULT WINAPI HTMLCSSStyleDeclaration2_put_msTransition(IHTMLCSSStyleDeclaration2 *iface, BSTR v)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration2(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return set_style_property(This, STYLEID_MSTRANSITION, v);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration2_get_msTransition(IHTMLCSSStyleDeclaration2 *iface, BSTR *p)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_property(This, STYLEID_MSTRANSITION, p);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration2_put_msTouchAction(IHTMLCSSStyleDeclaration2 *iface, BSTR v)
@@ -9549,7 +9583,7 @@ void CSSStyle_destructor(DispatchEx *dispex)
     free(This);
 }
 
-HRESULT CSSStyle_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
+HRESULT CSSStyle_get_dispid(DispatchEx *dispex, const WCHAR *name, DWORD flags, DISPID *dispid)
 {
     CSSStyle *This = impl_from_DispatchEx(dispex);
     const style_tbl_entry_t *style_entry;
@@ -9621,14 +9655,19 @@ void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
         dispex_info_add_interface(info, IHTMLCSSStyleDeclaration2_tid, NULL);
 }
 
-static const dispex_static_data_vtbl_t HTMLStyle_dispex_vtbl = {
+dispex_static_data_t MSCSSProperties_dispex = {
+    .id           = PROT_MSCSSProperties,
+    .prototype_id = PROT_CSSStyleDeclaration,
+};
+
+static const dispex_static_data_vtbl_t MSStyleCSSProperties_dispex_vtbl = {
     CSSSTYLE_DISPEX_VTBL_ENTRIES,
     .query_interface   = HTMLStyle_query_interface,
     .traverse          = HTMLStyle_traverse,
     .unlink            = HTMLStyle_unlink
 };
 
-static const tid_t HTMLStyle_iface_tids[] = {
+static const tid_t MSStyleCSSProperties_iface_tids[] = {
     IHTMLStyle6_tid,
     IHTMLStyle5_tid,
     IHTMLStyle4_tid,
@@ -9637,12 +9676,13 @@ static const tid_t HTMLStyle_iface_tids[] = {
     IHTMLStyle_tid,
     0
 };
-static dispex_static_data_t HTMLStyle_dispex = {
-    "MSStyleCSSProperties",
-    &HTMLStyle_dispex_vtbl,
-    DispHTMLStyle_tid,
-    HTMLStyle_iface_tids,
-    CSSStyle_init_dispex_info
+dispex_static_data_t MSStyleCSSProperties_dispex = {
+    .id           = PROT_MSStyleCSSProperties,
+    .prototype_id = PROT_MSCSSProperties,
+    .vtbl         = &MSStyleCSSProperties_dispex_vtbl,
+    .disp_tid     = DispHTMLStyle_tid,
+    .iface_tids   = MSStyleCSSProperties_iface_tids,
+    .init_info    = CSSStyle_init_dispex_info,
 };
 
 static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration **ret)
@@ -9683,14 +9723,14 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
     return E_NOTIMPL;
 }
 
-void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, dispex_static_data_t *dispex_info, compat_mode_t compat_mode)
+void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, dispex_static_data_t *dispex_info, DispatchEx *owner)
 {
     style->IHTMLCSSStyleDeclaration_iface.lpVtbl = &HTMLCSSStyleDeclarationVtbl;
     style->IHTMLCSSStyleDeclaration2_iface.lpVtbl = &HTMLCSSStyleDeclaration2Vtbl;
     style->nsstyle = nsstyle;
     nsIDOMCSSStyleDeclaration_AddRef(nsstyle);
 
-    init_dispatch(&style->dispex, dispex_info, NULL, compat_mode);
+    init_dispatch_with_owner(&style->dispex, dispex_info, owner);
 }
 
 HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
@@ -9719,39 +9759,35 @@ HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
     style->elem = elem;
     IHTMLDOMNode_AddRef(&elem->node.IHTMLDOMNode_iface);
 
-    init_css_style(&style->css_style, nsstyle, &HTMLStyle_dispex, dispex_compat_mode(&elem->node.event_target.dispex));
+    init_css_style(&style->css_style, nsstyle, &MSStyleCSSProperties_dispex, &elem->node.event_target.dispex);
     nsIDOMCSSStyleDeclaration_Release(nsstyle);
 
     *ret = style;
     return S_OK;
 }
 
-static const dispex_static_data_vtbl_t HTMLW3CComputedStyle_dispex_vtbl = {
+static const dispex_static_data_vtbl_t CSSStyleDeclaration_dispex_vtbl = {
     CSSSTYLE_DISPEX_VTBL_ENTRIES,
     .query_interface   = CSSStyle_query_interface,
     .traverse          = CSSStyle_traverse,
     .unlink            = CSSStyle_unlink
 };
 
-static const tid_t HTMLW3CComputedStyle_iface_tids[] = {
-    0
-};
-static dispex_static_data_t HTMLW3CComputedStyle_dispex = {
-    "CSSStyleDeclaration",
-    &HTMLW3CComputedStyle_dispex_vtbl,
-    DispHTMLW3CComputedStyle_tid,
-    HTMLW3CComputedStyle_iface_tids,
-    CSSStyle_init_dispex_info
+dispex_static_data_t CSSStyleDeclaration_dispex = {
+    .id        = PROT_CSSStyleDeclaration,
+    .vtbl      = &CSSStyleDeclaration_dispex_vtbl,
+    .disp_tid  = DispHTMLW3CComputedStyle_tid,
+    .init_info = CSSStyle_init_dispex_info,
 };
 
-HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, compat_mode_t compat_mode, IHTMLCSSStyleDeclaration **p)
+HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, DispatchEx *owner, IHTMLCSSStyleDeclaration **p)
 {
     CSSStyle *style;
 
     if(!(style = calloc(1, sizeof(*style))))
         return E_OUTOFMEMORY;
 
-    init_css_style(style, nsstyle, &HTMLW3CComputedStyle_dispex, compat_mode);
+    init_css_style(style, nsstyle, &CSSStyleDeclaration_dispex, owner);
     *p = &style->IHTMLCSSStyleDeclaration_iface;
     return S_OK;
 }

@@ -34,13 +34,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-struct wined3d_matrix_3x3
-{
-    float _11, _12, _13;
-    float _21, _22, _23;
-    float _31, _32, _33;
-};
-
 struct light_transformed
 {
     struct wined3d_color diffuse, specular, ambient;
@@ -54,7 +47,7 @@ struct lights_settings
     struct light_transformed lights[WINED3D_MAX_SOFTWARE_ACTIVE_LIGHTS];
     struct wined3d_color ambient_light;
     struct wined3d_matrix modelview_matrix;
-    struct wined3d_matrix_3x3 normal_matrix;
+    struct wined3d_matrix normal_matrix;
     struct wined3d_vec4 position_transformed;
 
     float fog_start, fog_end, fog_density;
@@ -2894,7 +2887,7 @@ static void wined3d_vec3_normalise(struct wined3d_vec3 *v)
 }
 
 static void wined3d_vec3_transform(struct wined3d_vec3 *dst,
-        const struct wined3d_vec3 *v, const struct wined3d_matrix_3x3 *m)
+        const struct wined3d_vec3 *v, const struct wined3d_matrix *m)
 {
     struct wined3d_vec3 tmp;
 
@@ -2951,7 +2944,7 @@ static void init_transformed_lights(struct lights_settings *ls,
     if (!compute_lighting)
         return;
 
-    compute_normal_matrix(&ls->normal_matrix._11, legacy_lighting, &ls->modelview_matrix);
+    compute_normal_matrix(&ls->normal_matrix, legacy_lighting, &ls->modelview_matrix);
 
     wined3d_color_from_d3dcolor(&ls->ambient_light, state->rs[WINED3D_RS_AMBIENT]);
     ls->legacy_lighting = !!legacy_lighting;
@@ -2999,7 +2992,7 @@ static void init_transformed_lights(struct lights_settings *ls,
             continue;
 
         light = &ls->lights[index];
-        wined3d_vec4_transform(&vec4, &light_info->direction, &state->transforms[WINED3D_TS_VIEW]);
+        wined3d_vec4_transform(&vec4, &light_info->constants.direction, &state->transforms[WINED3D_TS_VIEW]);
         light->direction = *(struct wined3d_vec3 *)&vec4;
         wined3d_vec3_normalise(&light->direction);
 
@@ -3017,7 +3010,7 @@ static void init_transformed_lights(struct lights_settings *ls,
 
         light = &ls->lights[index];
 
-        wined3d_vec4_transform(&light->position, &light_info->position, &state->transforms[WINED3D_TS_VIEW]);
+        wined3d_vec4_transform(&light->position, &light_info->constants.position, &state->transforms[WINED3D_TS_VIEW]);
         light->range = light_info->OriginalParms.range;
         light->c_att = light_info->OriginalParms.attenuation0;
         light->l_att = light_info->OriginalParms.attenuation1;
@@ -3037,8 +3030,8 @@ static void init_transformed_lights(struct lights_settings *ls,
 
         light = &ls->lights[index];
 
-        wined3d_vec4_transform(&light->position, &light_info->position, &state->transforms[WINED3D_TS_VIEW]);
-        wined3d_vec4_transform(&vec4, &light_info->direction, &state->transforms[WINED3D_TS_VIEW]);
+        wined3d_vec4_transform(&light->position, &light_info->constants.position, &state->transforms[WINED3D_TS_VIEW]);
+        wined3d_vec4_transform(&vec4, &light_info->constants.direction, &state->transforms[WINED3D_TS_VIEW]);
         light->direction = *(struct wined3d_vec3 *)&vec4;
         wined3d_vec3_normalise(&light->direction);
         light->range = light_info->OriginalParms.range;
@@ -3063,7 +3056,7 @@ static void init_transformed_lights(struct lights_settings *ls,
 
         light = &ls->lights[index];
 
-        wined3d_vec4_transform(&vec4, &light_info->position, &state->transforms[WINED3D_TS_VIEW]);
+        wined3d_vec4_transform(&vec4, &light_info->constants.position, &state->transforms[WINED3D_TS_VIEW]);
         *(struct wined3d_vec3 *)&light->position = *(struct wined3d_vec3 *)&vec4;
         wined3d_vec3_normalise((struct wined3d_vec3 *)&light->position);
         light->diffuse = light_info->OriginalParms.diffuse;
@@ -5233,6 +5226,8 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     if (reset_state)
     {
         TRACE("Resetting state.\n");
+        if (device->inScene)
+            wined3d_device_end_scene(device);
         wined3d_device_context_emit_reset_state(&device->cs->c, false);
         state_cleanup(state);
 

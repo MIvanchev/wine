@@ -406,6 +406,7 @@
 @ stdcall IoGetDeviceInterfaces(ptr ptr long ptr)
 @ stdcall IoGetDeviceObjectPointer(ptr long ptr ptr)
 @ stdcall IoGetDeviceProperty(ptr long long ptr ptr)
+@ stdcall IoGetDevicePropertyData(ptr ptr long long long ptr ptr ptr)
 @ stub IoGetDeviceToVerify
 @ stub IoGetDiskDeviceObject
 @ stub IoGetDmaAdapter
@@ -464,8 +465,8 @@
 @ stub IoReportHalResourceUsage
 @ stdcall IoReportResourceForDetection(ptr ptr long ptr ptr long ptr)
 @ stdcall IoReportResourceUsage(ptr ptr ptr long ptr ptr long long ptr)
-@ stub IoReportTargetDeviceChange
-@ stub IoReportTargetDeviceChangeAsynchronous
+@ stdcall IoReportTargetDeviceChange(ptr ptr)
+@ stdcall IoReportTargetDeviceChangeAsynchronous(ptr ptr ptr ptr)
 @ stub IoRequestDeviceEject
 @ stdcall IoReuseIrp(ptr long)
 @ stub IoSetCompletionRoutineEx

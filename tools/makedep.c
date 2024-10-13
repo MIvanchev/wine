@@ -151,8 +151,6 @@ static const char *fontforge;
 static const char *convert;
 static const char *flex;
 static const char *bison;
-static const char *ar;
-static const char *ranlib;
 static const char *rsvg;
 static const char *icotool;
 static const char *msgfmt;
@@ -3258,13 +3256,12 @@ static void output_source_one_arch( struct makefile *make, struct incl_file *sou
             if (!unix_lib_supported && make->module && is_crt_module( make->module ))
                 strarray_add( &cflags, "-fno-builtin" );
         }
+        strarray_addall( &cflags, cpp_flags );
     }
     else
     {
         if (make->module && is_crt_module( make->module )) strarray_add( &cflags, "-fno-builtin" );
     }
-
-    strarray_addall( &cflags, cpp_flags );
 
     output( "%s: %s\n", obj_dir_path( make, obj_name ), source->filename );
     output( "\t%s%s -c -o $@ %s", cmd_prefix( "CC" ), var_cc, source->filename );
@@ -3300,13 +3297,15 @@ static void output_source_one_arch( struct makefile *make, struct incl_file *sou
 
         if ((source->file->flags & FLAG_ARM64EC_X64) && !strcmp( archs.str[arch], "arm64ec" ))
         {
+            char *cflags = get_expanded_make_variable( make, "x86_64_CFLAGS" );
             cmd->cmd = get_expanded_make_variable( make, "x86_64_CC" );
-            strarray_add( &cmd->args, get_expanded_make_variable( make, "x86_64_CFLAGS" ));
+            if (cflags) strarray_add( &cmd->args, cflags );
         }
         else
         {
+            char *cflags = get_expanded_arch_var( make, "CFLAGS", arch );
             cmd->cmd = get_expanded_arch_var( make, "CC", arch );
-            strarray_add( &cmd->args, get_expanded_arch_var( make, "CFLAGS", arch ));
+            if (cflags) strarray_add( &cmd->args, cflags );
         }
         list_add_tail( &compile_commands, &cmd->entry );
     }
@@ -4569,8 +4568,6 @@ int main( int argc, char *argv[] )
     convert            = get_expanded_make_variable( top_makefile, "CONVERT" );
     flex               = get_expanded_make_variable( top_makefile, "FLEX" );
     bison              = get_expanded_make_variable( top_makefile, "BISON" );
-    ar                 = get_expanded_make_variable( top_makefile, "AR" );
-    ranlib             = get_expanded_make_variable( top_makefile, "RANLIB" );
     rsvg               = get_expanded_make_variable( top_makefile, "RSVG" );
     icotool            = get_expanded_make_variable( top_makefile, "ICOTOOL" );
     msgfmt             = get_expanded_make_variable( top_makefile, "MSGFMT" );

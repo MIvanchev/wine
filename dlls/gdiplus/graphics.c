@@ -5826,22 +5826,35 @@ struct measure_string_args {
 static GpStatus measure_string_callback(struct gdip_format_string_info *info)
 {
     struct measure_string_args *args = info->user_data;
+    RectF *bounds = args->bounds;
     REAL new_width, new_height;
 
     new_width = info->bounds->Width / args->rel_width;
-    new_height = (info->bounds->Height + info->bounds->Y) / args->rel_height - args->bounds->Y;
+    new_height = (info->bounds->Height + info->bounds->Y) / args->rel_height - bounds->Y;
 
-    if (new_width > args->bounds->Width)
-        args->bounds->Width = new_width;
+    if (new_width > bounds->Width)
+        bounds->Width = new_width;
 
-    if (new_height > args->bounds->Height)
-        args->bounds->Height = new_height;
+    if (new_height > bounds->Height)
+        bounds->Height = new_height;
 
     if (args->codepointsfitted)
         *args->codepointsfitted = info->index + info->length;
 
     if (args->linesfilled)
         (*args->linesfilled)++;
+
+    switch (info->format ? info->format->align : StringAlignmentNear)
+    {
+    case StringAlignmentCenter:
+        bounds->X = bounds->X + (info->rect->Width/2) - (bounds->Width/2);
+        break;
+    case StringAlignmentFar:
+        bounds->X = bounds->X + info->rect->Width - bounds->Width;
+        break;
+    default:
+        break;
+    }
 
     return Ok;
 }
@@ -5899,7 +5912,8 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     if (scaled_rect.Width >= 0.5)
     {
         scaled_rect.Width -= margin_x * 2.0 * args.rel_width;
-        if (scaled_rect.Width < 0.5) return Ok; /* doesn't fit */
+        if (scaled_rect.Width < 0.5) /* doesn't fit */
+            goto end;
     }
 
     if (scaled_rect.Width >= 1 << 23) scaled_rect.Width = 1 << 23;
@@ -5930,7 +5944,7 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
 
     SelectObject(hdc, oldfont);
     DeleteObject(gdifont);
-
+end:
     if (temp_hdc)
         DeleteDC(temp_hdc);
     else
@@ -6025,6 +6039,9 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     if(!graphics || !string || !font || !brush || !rect)
         return InvalidParameter;
 
+    if(graphics->busy)
+        return ObjectBusy;
+
     if(has_gdi_dc(graphics))
     {
         status = gdi_dc_acquire(graphics, &hdc);
@@ -6078,7 +6095,8 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     if (scaled_rect.Width >= 0.5)
     {
         scaled_rect.Width -= margin_x * 2.0 * rel_width;
-        if (scaled_rect.Width < 0.5) return Ok; /* doesn't fit */
+        if (scaled_rect.Width < 0.5) /* doesn't fit */
+            goto end;
     }
 
     if (scaled_rect.Width >= 1 << 23) scaled_rect.Width = 1 << 23;
@@ -6116,7 +6134,7 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
 
     DeleteObject(rgn);
     DeleteObject(gdifont);
-
+end:
     RestoreDC(hdc, save_state);
 
     if (temp_hdc)

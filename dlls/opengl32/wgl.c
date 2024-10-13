@@ -520,6 +520,7 @@ static enum attrib_match wgl_attrib_match_criteria( int attrib )
     case WGL_DOUBLE_BUFFER_ARB:
     case WGL_STEREO_ARB:
     case WGL_PIXEL_TYPE_ARB:
+    case WGL_DRAW_TO_PBUFFER_ARB:
     case WGL_BIND_TO_TEXTURE_RGB_ARB:
     case WGL_BIND_TO_TEXTURE_RGBA_ARB:
     case WGL_BIND_TO_TEXTURE_RECTANGLE_RGB_NV:
@@ -1875,11 +1876,15 @@ GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
     return gl_unmap_named_buffer( unix_glUnmapNamedBufferEXT, buffer );
 }
 
-static NTSTATUS WINAPI call_opengl_debug_message_callback( void *args, ULONG size )
+typedef void (WINAPI *gl_debug_message)(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar *, const void *);
+
+static NTSTATUS WINAPI call_gl_debug_message_callback( void *args, ULONG size )
 {
-    struct wine_gl_debug_message_params *params = args;
-    params->user_callback( params->source, params->type, params->id, params->severity,
-                           params->length, params->message, params->user_data );
+    struct gl_debug_message_callback_params *params = args;
+    gl_debug_message callback = (void *)(UINT_PTR)params->debug_callback;
+    const void *user = (void *)(UINT_PTR)params->debug_user;
+    callback( params->source, params->type, params->id, params->severity,
+              params->length, params->message, user );
     return STATUS_SUCCESS;
 }
 
@@ -1888,20 +1893,22 @@ static NTSTATUS WINAPI call_opengl_debug_message_callback( void *args, ULONG siz
  */
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
-    KERNEL_CALLBACK_PROC *kernel_callback_table;
+    struct process_attach_params params =
+    {
+        .call_gl_debug_message_callback = (UINT_PTR)call_gl_debug_message_callback,
+    };
     NTSTATUS status;
 
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
-        if ((status = __wine_init_unix_call()))
+        if ((status = __wine_init_unix_call()) ||
+            (status = UNIX_CALL( process_attach, &params )))
         {
             ERR( "Failed to load unixlib, status %#lx\n", status );
             return FALSE;
         }
 
-        kernel_callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
-        kernel_callback_table[NtUserCallOpenGLDebugMessageCallback] = call_opengl_debug_message_callback;
         /* fallthrough */
     case DLL_THREAD_ATTACH:
         if ((status = UNIX_CALL( thread_attach, NtCurrentTeb() )))

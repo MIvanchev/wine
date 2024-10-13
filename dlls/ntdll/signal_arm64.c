@@ -311,10 +311,10 @@ __ASM_GLOBAL_FUNC( KiUserExceptionDispatcher,
                    "adrp x16, pWow64PrepareForException\n\t"
                    "ldr x16, [x16, #:lo12:pWow64PrepareForException]\n\t"
                    "cbz x16, 1f\n\t"
-                   "add x0, sp, #0x390\n\t"     /* rec (context + 1) */
+                   "add x0, sp, #0x3b0\n\t"     /* rec */
                    "mov x1, sp\n\t"             /* context */
                    "blr x16\n"
-                   "1:\tadd x0, sp, #0x390\n\t" /* rec (context + 1) */
+                   "1:\tadd x0, sp, #0x3b0\n\t" /* rec */
                    "mov x1, sp\n\t"             /* context */
                    "bl dispatch_exception\n\t"
                    "brk #1" )
@@ -623,7 +623,21 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
         (1ull << PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE) |
         (1ull << PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE) |
         (1ull << PF_ARM_V83_JSCVT_INSTRUCTIONS_AVAILABLE) |
-        (1ull << PF_ARM_V83_LRCPC_INSTRUCTIONS_AVAILABLE);
+        (1ull << PF_ARM_V83_LRCPC_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE2_1_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_AES_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_PMULL128_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_BITPERM_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_BF16_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_EBF16_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_B16B16_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_SHA3_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_SM4_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_I8MM_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_F32MM_INSTRUCTIONS_AVAILABLE) |
+        (1ull << PF_ARM_SVE_F64MM_INSTRUCTIONS_AVAILABLE);
 
     return (feature < PROCESSOR_FEATURE_MAX && (arm64_features & (1ull << feature)) &&
             user_shared_data->ProcessorFeatures[feature]);

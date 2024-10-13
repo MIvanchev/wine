@@ -36,6 +36,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+typedef struct {
+    DispatchEx dispex;
+    IHTMLXMLHttpRequestFactory IHTMLXMLHttpRequestFactory_iface;
+
+    HTMLInnerWindow *window;
+} HTMLXMLHttpRequestFactory;
+
 static HRESULT bstr_to_nsacstr(BSTR bstr, nsACString *str)
 {
     char *cstr = strdupWtoU(bstr);
@@ -262,10 +269,12 @@ static nsresult sync_xhr_send(HTMLXMLHttpRequest *xhr, nsIVariant *nsbody)
     thread_data_t *thread_data = get_thread_data(TRUE);
     HTMLXMLHttpRequest *prev_blocking_xhr;
     HTMLInnerWindow *window = xhr->window;
+    unsigned prev_tasks_locked;
     nsresult nsres;
 
     if(!thread_data)
         return NS_ERROR_OUT_OF_MEMORY;
+    prev_tasks_locked = thread_data->tasks_locked;
     prev_blocking_xhr = thread_data->blocking_xhr;
 
     /* Note: Starting with Gecko 30.0 (Firefox 30.0 / Thunderbird 30.0 / SeaMonkey 2.27),
@@ -290,15 +299,25 @@ static nsresult sync_xhr_send(HTMLXMLHttpRequest *xhr, nsIVariant *nsbody)
      * to figure out a way to handle it...
      *
      * For details (and bunch of problems to consider) see: https://bugzil.la/697151
+     *
+     * FIXME: Since Gecko uses a message loop to implement sync XHR, and it requires that
+     * all the async tasks are executed (or else it hangs indefinitely waiting for them),
+     * we have to enable processing of all tasks, even if we're coming from a nested loop
+     * that wouldn't otherwise process tasks. This isn't correct but it's niche enough.
      */
+    if(thread_data->tasks_locked) {
+        thread_data->tasks_locked = 0;
+        unblock_tasks_and_timers(thread_data);
+    }
     window->base.outer_window->readystate_locked++;
     window->blocking_depth++;
     thread_data->blocking_xhr = xhr;
     nsres = nsIXMLHttpRequest_Send(xhr->nsxhr, nsbody);
     thread_data->blocking_xhr = prev_blocking_xhr;
+    thread_data->tasks_locked = prev_tasks_locked;
     window->base.outer_window->readystate_locked--;
 
-    if(!--window->blocking_depth)
+    if(!--window->blocking_depth && !thread_data->tasks_locked)
         unblock_tasks_and_timers(thread_data);
 
     /* Process any pending events now since they were part of the blocked send() above */
@@ -398,7 +417,7 @@ static nsresult NSAPI XMLHttpReqEventListener_HandleEvent(nsIDOMEventListener *i
         blocking_xhr = thread_data->blocking_xhr;
 
     compat_mode = dispex_compat_mode(&This->xhr->event_target.dispex);
-    hres = create_event_from_nsevent(nsevent, compat_mode, &event);
+    hres = create_event_from_nsevent(nsevent, This->xhr->window, compat_mode, &event);
     if(FAILED(hres)) {
         if(!blocking_xhr || This->xhr == blocking_xhr)
             This->xhr->ready_state = ready_state;
@@ -1474,12 +1493,13 @@ static const tid_t HTMLXMLHttpRequest_iface_tids[] = {
     IHTMLXMLHttpRequest2_tid,
     0
 };
-static dispex_static_data_t HTMLXMLHttpRequest_dispex = {
-    "XMLHttpRequest",
-    &HTMLXMLHttpRequest_event_target_vtbl.dispex_vtbl,
-    DispHTMLXMLHttpRequest_tid,
-    HTMLXMLHttpRequest_iface_tids,
-    HTMLXMLHttpRequest_init_dispex_info
+dispex_static_data_t XMLHttpRequest_dispex = {
+    .id               = PROT_XMLHttpRequest,
+    .init_constructor = HTMLXMLHttpRequestFactory_Create,
+    .vtbl             = &HTMLXMLHttpRequest_event_target_vtbl.dispex_vtbl,
+    .disp_tid         = DispHTMLXMLHttpRequest_tid,
+    .iface_tids       = HTMLXMLHttpRequest_iface_tids,
+    .init_info        = HTMLXMLHttpRequest_init_dispex_info,
 };
 
 
@@ -1530,7 +1550,7 @@ static HRESULT WINAPI HTMLXMLHttpRequestFactory_create(IHTMLXMLHttpRequestFactor
     ret->IHTMLXMLHttpRequest2_iface.lpVtbl = &HTMLXMLHttpRequest2Vtbl;
     ret->IWineXMLHttpRequestPrivate_iface.lpVtbl = &WineXMLHttpRequestPrivateVtbl;
     ret->IProvideClassInfo2_iface.lpVtbl = &ProvideClassInfo2Vtbl;
-    EventTarget_Init(&ret->event_target, &HTMLXMLHttpRequest_dispex, This->window->doc->document_mode);
+    init_event_target(&ret->event_target, &XMLHttpRequest_dispex, This->window);
 
     /* Always register the handlers because we need them to track state */
     event_listener->nsIDOMEventListener_iface.lpVtbl = &XMLHttpReqEventListenerVtbl;
@@ -1647,13 +1667,14 @@ static const tid_t HTMLXMLHttpRequestFactory_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLXMLHttpRequestFactory_dispex = {
-    "Function",
-    &HTMLXMLHttpRequestFactory_dispex_vtbl,
-    IHTMLXMLHttpRequestFactory_tid,
-    HTMLXMLHttpRequestFactory_iface_tids
+    .name           = "Function",
+    .constructor_id = PROT_XMLHttpRequest,
+    .vtbl           = &HTMLXMLHttpRequestFactory_dispex_vtbl,
+    .disp_tid       = IHTMLXMLHttpRequestFactory_tid,
+    .iface_tids     = HTMLXMLHttpRequestFactory_iface_tids,
 };
 
-HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow* window, HTMLXMLHttpRequestFactory **ret_ptr)
+HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow* window, DispatchEx **ret_ptr)
 {
     HTMLXMLHttpRequestFactory *ret;
 
@@ -1665,9 +1686,9 @@ HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow* window, HTMLXMLHttpReq
     ret->window = window;
     IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
 
-    init_dispatch(&ret->dispex, &HTMLXMLHttpRequestFactory_dispex, NULL,
+    init_dispatch(&ret->dispex, &HTMLXMLHttpRequestFactory_dispex, window,
                   dispex_compat_mode(&window->event_target.dispex));
 
-    *ret_ptr = ret;
+    *ret_ptr = &ret->dispex;
     return S_OK;
 }

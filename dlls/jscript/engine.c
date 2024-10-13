@@ -2027,7 +2027,7 @@ static HRESULT interp_instanceof(script_ctx_t *ctx)
         return E_FAIL;
     }
 
-    if(is_class(obj, JSCLASS_FUNCTION)) {
+    if(obj->is_constructor) {
         hres = jsdisp_propget_name(obj, L"prototype", &prot);
     }else {
         hres = JS_E_FUNCTION_EXPECTED;
@@ -3461,7 +3461,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
             return hres;
     }
 
-    if((flags & EXEC_EVAL) && ctx->call_ctx) {
+    if((flags & EXEC_EVAL) && scope) {
         variable_obj = jsdisp_addref(ctx->call_ctx->variable_obj);
     }else if(!(flags & (EXEC_GLOBAL | EXEC_EVAL))) {
         hres = create_dispex(ctx, NULL, NULL, &variable_obj);
@@ -3516,7 +3516,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
             this_obj = NULL;
     }
 
-    if(ctx->call_ctx && (flags & EXEC_EVAL)) {
+    if(scope && (flags & EXEC_EVAL)) {
         hres = detach_variable_object(ctx, ctx->call_ctx, FALSE);
         if(FAILED(hres))
             goto fail;

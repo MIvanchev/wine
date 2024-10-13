@@ -44,6 +44,7 @@ static void     (WINAPI *pBTCpu64FlushInstructionCache)(const void*,SIZE_T);
 static BOOLEAN  (WINAPI *pBTCpu64IsProcessorFeaturePresent)(UINT);
 static void     (WINAPI *pBTCpu64NotifyMemoryDirty)(void*,SIZE_T);
 static void     (WINAPI *pBTCpu64NotifyReadFile)(HANDLE,void*,SIZE_T,BOOL,NTSTATUS);
+static void     (WINAPI *pBeginSimulation)(void);
 static void     (WINAPI *pFlushInstructionCacheHeavy)(const void*,SIZE_T);
 static NTSTATUS (WINAPI *pNotifyMapViewOfSection)(void*,void*,void*,SIZE_T,ULONG,ULONG);
 static void     (WINAPI *pNotifyMemoryAlloc)(void*,SIZE_T,ULONG,ULONG,BOOL,NTSTATUS);
@@ -52,11 +53,14 @@ static void     (WINAPI *pNotifyMemoryProtect)(void*,SIZE_T,ULONG,BOOL,NTSTATUS)
 static void     (WINAPI *pNotifyUnmapViewOfSection)(void*,BOOL,NTSTATUS);
 static NTSTATUS (WINAPI *pProcessInit)(void);
 static void     (WINAPI *pProcessTerm)(HANDLE,BOOL,NTSTATUS);
+static void     (WINAPI *pResetToConsistentState)(EXCEPTION_RECORD*,CONTEXT*,ARM64_NT_CONTEXT*);
 static NTSTATUS (WINAPI *pThreadInit)(void);
 static void     (WINAPI *pThreadTerm)(HANDLE,LONG);
 static void     (WINAPI *pUpdateProcessorInformation)(SYSTEM_CPU_INFORMATION*);
 
 static BOOLEAN emulated_processor_features[PROCESSOR_FEATURE_MAX];
+static BYTE KiUserExceptionDispatcher_orig[16]; /* to detect patching */
+extern void KiUserExceptionDispatcher_thunk(void) asm("EXP+#KiUserExceptionDispatcher");
 
 static inline CHPE_V2_CPU_AREA_INFO *get_arm64ec_cpu_area(void)
 {
@@ -71,11 +75,22 @@ static inline BOOL is_valid_arm64ec_frame( ULONG_PTR frame )
             frame <= get_arm64ec_cpu_area()->EmulatorStackBase);
 }
 
+static inline BOOL enter_syscall_callback(void)
+{
+    if (get_arm64ec_cpu_area()->InSyscallCallback) return FALSE;
+    get_arm64ec_cpu_area()->InSyscallCallback = 1;
+    return TRUE;
+}
+
+static inline void leave_syscall_callback(void)
+{
+    get_arm64ec_cpu_area()->InSyscallCallback = 0;
+}
 
 /**********************************************************************
  *           create_cross_process_work_list
  */
-static NTSTATUS create_cross_process_work_list( struct arm64ec_shared_info *info )
+static NTSTATUS create_cross_process_work_list( CHPEV2_PROCESS_INFO *info )
 {
     SIZE_T map_size = 0x4000;
     LARGE_INTEGER size;
@@ -146,7 +161,7 @@ static BOOL send_cross_process_notification( HANDLE process, UINT id, const void
 NTSTATUS arm64ec_process_init( HMODULE module )
 {
     NTSTATUS status = STATUS_SUCCESS;
-    struct arm64ec_shared_info *info = (struct arm64ec_shared_info *)(RtlGetCurrentPeb() + 1);
+    CHPEV2_PROCESS_INFO *info = (CHPEV2_PROCESS_INFO *)(RtlGetCurrentPeb() + 1);
 
     __os_arm64x_dispatch_call_no_redirect = RtlFindExportedRoutineByName( module, "ExitToX64" );
     __os_arm64x_dispatch_fptr = RtlFindExportedRoutineByName( module, "DispatchJump" );
@@ -157,6 +172,7 @@ NTSTATUS arm64ec_process_init( HMODULE module )
     GET_PTR( BTCpu64IsProcessorFeaturePresent );
     GET_PTR( BTCpu64NotifyMemoryDirty );
     GET_PTR( BTCpu64NotifyReadFile );
+    GET_PTR( BeginSimulation );
     GET_PTR( FlushInstructionCacheHeavy );
     GET_PTR( NotifyMapViewOfSection );
     GET_PTR( NotifyMemoryAlloc );
@@ -165,14 +181,18 @@ NTSTATUS arm64ec_process_init( HMODULE module )
     GET_PTR( NotifyUnmapViewOfSection );
     GET_PTR( ProcessInit );
     GET_PTR( ProcessTerm );
+    GET_PTR( ResetToConsistentState );
     GET_PTR( ThreadInit );
     GET_PTR( ThreadTerm );
     GET_PTR( UpdateProcessorInformation );
 #undef GET_PTR
 
+    RtlGetCurrentPeb()->ChpeV2ProcessInfo = info;
     info->NativeMachineType = IMAGE_FILE_MACHINE_ARM64;
     info->EmulatedMachineType = IMAGE_FILE_MACHINE_AMD64;
+    memcpy( KiUserExceptionDispatcher_orig, KiUserExceptionDispatcher_thunk, sizeof(KiUserExceptionDispatcher_orig) );
 
+    enter_syscall_callback();
     if (pProcessInit) status = pProcessInit();
     if (!status)
     {
@@ -180,7 +200,8 @@ NTSTATUS arm64ec_process_init( HMODULE module )
             emulated_processor_features[i] = pBTCpu64IsProcessorFeaturePresent( i );
         status = create_cross_process_work_list( info );
     }
-    if (!status) status = arm64ec_thread_init();
+    if (!status && pThreadInit) status = pThreadInit();
+    leave_syscall_callback();
     return status;
 }
 
@@ -192,7 +213,9 @@ NTSTATUS arm64ec_thread_init(void)
 {
     NTSTATUS status = STATUS_SUCCESS;
 
+    enter_syscall_callback();
     if (pThreadInit) status = pThreadInit();
+    leave_syscall_callback();
     return status;
 }
 
@@ -209,14 +232,14 @@ ALL_SYSCALLS64
 };
 
 #define DEFINE_SYSCALL_(ret,name,args) \
-    ret __attribute__((naked)) name args { __ASM_SYSCALL_FUNC( __id_##name, name ); }
+    ret __attribute__((naked, hybrid_patchable)) name args { __ASM_SYSCALL_FUNC( __id_##name, name ); }
 
 #define DEFINE_SYSCALL(name,args) DEFINE_SYSCALL_(NTSTATUS,name,args)
 
 #define DEFINE_WRAPPED_SYSCALL(name,args) \
     static NTSTATUS __attribute__((naked)) syscall_##name args { __ASM_SYSCALL_FUNC( __id_##name, syscall_##name ); }
 
-#define SYSCALL_API WINAPI
+#define SYSCALL_API __attribute__((hybrid_patchable))
 
 DEFINE_SYSCALL(NtAcceptConnectPort, (HANDLE *handle, ULONG id, LPC_MESSAGE *msg, BOOLEAN accept, LPC_SECTION_WRITE *write, LPC_SECTION_READ *read))
 DEFINE_SYSCALL(NtAccessCheck, (PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_MASK access, GENERIC_MAPPING *mapping, PRIVILEGE_SET *privs, ULONG *retlen, ULONG *access_granted, NTSTATUS *access_status))
@@ -462,6 +485,9 @@ NTSTATUS SYSCALL_API NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
 
+    if (!enter_syscall_callback())
+        return syscall_NtAllocateVirtualMemory( process, ret, zero_bits, size_ptr, type, protect );
+
     if (!*ret && (type & MEM_COMMIT)) type |= MEM_RESERVE;
 
     if (!is_current) send_cross_process_notification( process, CrossProcessPreVirtualAlloc,
@@ -474,6 +500,7 @@ NTSTATUS SYSCALL_API NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_
                                                       *ret, *size_ptr, 3, type, protect, status );
     else if (pNotifyMemoryAlloc) pNotifyMemoryAlloc( *ret, *size_ptr, type, protect, TRUE, status );
 
+    leave_syscall_callback();
     return status;
 }
 
@@ -482,6 +509,9 @@ NTSTATUS SYSCALL_API NtAllocateVirtualMemoryEx( HANDLE process, PVOID *ret, SIZE
 {
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
+
+    if (!enter_syscall_callback())
+        return syscall_NtAllocateVirtualMemoryEx( process, ret, size_ptr, type, protect, parameters, count );
 
     if (!*ret && (type & MEM_COMMIT)) type |= MEM_RESERVE;
 
@@ -495,6 +525,7 @@ NTSTATUS SYSCALL_API NtAllocateVirtualMemoryEx( HANDLE process, PVOID *ret, SIZE
                                                       *ret, *size_ptr, 3, type, protect, status );
     else if (pNotifyMemoryAlloc) pNotifyMemoryAlloc( *ret, *size_ptr, type, protect, TRUE, status );
 
+    leave_syscall_callback();
     return status;
 }
 
@@ -510,12 +541,13 @@ NTSTATUS SYSCALL_API NtFlushInstructionCache( HANDLE process, const void *addr, 
 {
     NTSTATUS status = syscall_NtFlushInstructionCache( process, addr, size );
 
-    if (!status)
+    if (!status && enter_syscall_callback())
     {
         if (!RtlIsCurrentProcess( process ))
             send_cross_process_notification( process, CrossProcessFlushCache, addr, size, 0 );
         else if (pBTCpu64FlushInstructionCache)
             pBTCpu64FlushInstructionCache( addr, size );
+        leave_syscall_callback();
     }
     return status;
 }
@@ -524,6 +556,9 @@ NTSTATUS SYSCALL_API NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_
 {
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
+
+    if (!enter_syscall_callback())
+        return syscall_NtFreeVirtualMemory( process, addr_ptr, size_ptr, type );
 
     if (!is_current) send_cross_process_notification( process, CrossProcessPreVirtualFree,
                                                       *addr_ptr, *size_ptr, 2, type, 0 );
@@ -535,6 +570,7 @@ NTSTATUS SYSCALL_API NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_
                                                       *addr_ptr, *size_ptr, 2, type, status );
     else if (pNotifyMemoryFree) pNotifyMemoryFree( *addr_ptr, *size_ptr, type, TRUE, status );
 
+    leave_syscall_callback();
     return status;
 }
 
@@ -570,8 +606,11 @@ NTSTATUS SYSCALL_API NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *a
     NTSTATUS status = syscall_NtMapViewOfSection( handle, process, addr_ptr, zero_bits, commit_size,
                                                   offset, size_ptr, inherit, alloc_type, protect );
 
-    if (NT_SUCCESS(status) && RtlIsCurrentProcess( process ))
+    if (NT_SUCCESS(status) && RtlIsCurrentProcess( process ) && enter_syscall_callback())
+    {
         notify_map_view_of_section( handle, *addr_ptr, *size_ptr, alloc_type, protect, &status );
+        leave_syscall_callback();
+    }
     return status;
 }
 
@@ -582,8 +621,11 @@ NTSTATUS SYSCALL_API NtMapViewOfSectionEx( HANDLE handle, HANDLE process, PVOID 
     NTSTATUS status = syscall_NtMapViewOfSectionEx( handle, process, addr_ptr, offset, size_ptr,
                                                     alloc_type, protect, parameters, count );
 
-    if (NT_SUCCESS(status) && RtlIsCurrentProcess( process ))
+    if (NT_SUCCESS(status) && RtlIsCurrentProcess( process ) && enter_syscall_callback())
+    {
         notify_map_view_of_section( handle, *addr_ptr, *size_ptr, alloc_type, protect, &status );
+        leave_syscall_callback();
+    }
     return status;
 }
 
@@ -592,6 +634,9 @@ NTSTATUS SYSCALL_API NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SI
 {
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
+
+    if (!enter_syscall_callback())
+        return syscall_NtProtectVirtualMemory( process, addr_ptr, size_ptr, new_prot, old_prot );
 
     if (!is_current) send_cross_process_notification( process, CrossProcessPreVirtualProtect,
                                                       *addr_ptr, *size_ptr, 2, new_prot, 0 );
@@ -603,6 +648,7 @@ NTSTATUS SYSCALL_API NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SI
                                                       *addr_ptr, *size_ptr, 2, new_prot, status );
     else if (pNotifyMemoryProtect) pNotifyMemoryProtect( *addr_ptr, *size_ptr, new_prot, TRUE, status );
 
+    leave_syscall_callback();
     return status;
 }
 
@@ -628,10 +674,15 @@ NTSTATUS SYSCALL_API NtReadFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE ap
 {
     NTSTATUS status;
 
-    if (pBTCpu64NotifyReadFile) pBTCpu64NotifyReadFile( handle, buffer, length, FALSE, 0 );
-    status = syscall_NtReadFile( handle, event, apc, apc_user, io, buffer, length, offset, key );
-    if (pBTCpu64NotifyReadFile) pBTCpu64NotifyReadFile( handle, buffer, length, TRUE, status );
-    return status;
+    if (pBTCpu64NotifyReadFile && enter_syscall_callback())
+    {
+        pBTCpu64NotifyReadFile( handle, buffer, length, FALSE, 0 );
+        status = syscall_NtReadFile( handle, event, apc, apc_user, io, buffer, length, offset, key );
+        if (pBTCpu64NotifyReadFile) pBTCpu64NotifyReadFile( handle, buffer, length, TRUE, status );
+        leave_syscall_callback();
+        return status;
+    }
+    return syscall_NtReadFile( handle, event, apc, apc_user, io, buffer, length, offset, key );
 }
 
 NTSTATUS SYSCALL_API NtSetContextThread( HANDLE handle, const CONTEXT *context )
@@ -646,11 +697,12 @@ NTSTATUS SYSCALL_API NtTerminateProcess( HANDLE handle, LONG exit_code )
 {
     NTSTATUS status;
 
-    if (!handle && pProcessTerm)
+    if (!handle && pProcessTerm && enter_syscall_callback())
     {
         pProcessTerm( handle, FALSE, 0 );
         status = syscall_NtTerminateProcess( handle, exit_code );
         pProcessTerm( handle, TRUE, status );
+        leave_syscall_callback();
         return status;
     }
     return syscall_NtTerminateProcess( handle, exit_code );
@@ -658,7 +710,15 @@ NTSTATUS SYSCALL_API NtTerminateProcess( HANDLE handle, LONG exit_code )
 
 NTSTATUS SYSCALL_API NtTerminateThread( HANDLE handle, LONG exit_code )
 {
-    if (pThreadTerm) pThreadTerm( handle, exit_code );
+    NTSTATUS status;
+
+    if (pThreadTerm && enter_syscall_callback())
+    {
+        pThreadTerm( handle, exit_code );
+        status = syscall_NtTerminateThread( handle, exit_code );
+        leave_syscall_callback();
+        return status;
+    }
     return syscall_NtTerminateThread( handle, exit_code );
 }
 
@@ -667,10 +727,15 @@ NTSTATUS SYSCALL_API NtUnmapViewOfSection( HANDLE process, void *addr )
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
 
-    if (is_current && pNotifyUnmapViewOfSection) pNotifyUnmapViewOfSection( addr, FALSE, 0 );
-    status = syscall_NtUnmapViewOfSection( process, addr );
-    if (is_current && pNotifyUnmapViewOfSection) pNotifyUnmapViewOfSection( addr, TRUE, status );
-    return status;
+    if (is_current && pNotifyUnmapViewOfSection && enter_syscall_callback())
+    {
+        pNotifyUnmapViewOfSection( addr, FALSE, 0 );
+        status = syscall_NtUnmapViewOfSection( process, addr );
+        pNotifyUnmapViewOfSection( addr, TRUE, status );
+        leave_syscall_callback();
+        return status;
+    }
+    return syscall_NtUnmapViewOfSection( process, addr );
 }
 
 NTSTATUS SYSCALL_API NtUnmapViewOfSectionEx( HANDLE process, void *addr, ULONG flags )
@@ -678,19 +743,26 @@ NTSTATUS SYSCALL_API NtUnmapViewOfSectionEx( HANDLE process, void *addr, ULONG f
     BOOL is_current = RtlIsCurrentProcess( process );
     NTSTATUS status;
 
-    if (is_current && pNotifyUnmapViewOfSection) pNotifyUnmapViewOfSection( addr, FALSE, 0 );
-    status = syscall_NtUnmapViewOfSectionEx( process, addr, flags );
-    if (is_current && pNotifyUnmapViewOfSection) pNotifyUnmapViewOfSection( addr, TRUE, status );
-    return status;
+    if (is_current && pNotifyUnmapViewOfSection && enter_syscall_callback())
+    {
+        pNotifyUnmapViewOfSection( addr, FALSE, 0 );
+        status = syscall_NtUnmapViewOfSectionEx( process, addr, flags );
+        pNotifyUnmapViewOfSection( addr, TRUE, status );
+        leave_syscall_callback();
+        return status;
+    }
+    return syscall_NtUnmapViewOfSectionEx( process, addr, flags );
 }
 
 
-void * const arm64ec_syscalls[] =
-{
-#define SYSCALL_ENTRY(id,name,args) name,
-    ALL_SYSCALLS64
+asm( ".section .rdata, \"dr\"\n\t"
+     ".balign 8\n\t"
+     ".globl arm64ec_syscalls\n"
+     "arm64ec_syscalls:\n\t"
+#define SYSCALL_ENTRY(id,name,args) ".quad \"#" #name "$hp_target\"\n\t"
+     ALL_SYSCALLS64
 #undef SYSCALL_ENTRY
-};
+     ".text" );
 
 
 /***********************************************************************
@@ -742,7 +814,7 @@ static NTSTATUS WINAPI LdrpSetX64Information( ULONG type, ULONG_PTR input, void 
  */
 void WINAPI ProcessPendingCrossProcessEmulatorWork(void)
 {
-    struct arm64ec_shared_info *info = (struct arm64ec_shared_info *)(RtlGetCurrentPeb() + 1);
+    CHPEV2_PROCESS_INFO *info = RtlGetCurrentPeb()->ChpeV2ProcessInfo;
     CROSS_PROCESS_WORK_LIST *list = (void *)info->CrossProcessWorkList;
     CROSS_PROCESS_WORK_ENTRY *entry;
     BOOLEAN flush = FALSE;
@@ -1031,22 +1103,78 @@ NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 
 
 /*******************************************************************
- *		KiUserExceptionDispatcher (NTDLL.@)
+ *		KiUserEmulationDispatcher (NTDLL.@)
  */
-static NTSTATUS __attribute__((used)) dispatch_exception_arm64ec( EXCEPTION_RECORD *rec, ARM64_NT_CONTEXT *arm_ctx )
+void dispatch_emulation( ARM64_NT_CONTEXT *arm_ctx )
 {
-    ARM64EC_NT_CONTEXT context;
-
-    context_arm_to_x64( &context, arm_ctx );
-    return dispatch_exception( rec, &context.AMD64_Context );
+    context_arm_to_x64( get_arm64ec_cpu_area()->ContextAmd64, arm_ctx );
+    get_arm64ec_cpu_area()->InSimulation = 1;
+    pBeginSimulation();
 }
-__ASM_GLOBAL_FUNC( "#KiUserExceptionDispatcher",
+__ASM_GLOBAL_FUNC( "#KiUserEmulationDispatcher",
                    ".seh_context\n\t"
                    ".seh_endprologue\n\t"
-                   "add x0, sp, #0x390\n\t"       /* rec (context + 1) */
-                   "mov x1, sp\n\t"               /* context */
-                   "bl \"#dispatch_exception_arm64ec\"\n\t"
+                   "mov x0, sp\n\t"   /* context */
+                   "bl dispatch_emulation\n\t"
                    "brk #1" )
+
+
+/*******************************************************************
+ *		dispatch_syscall
+ */
+static void dispatch_syscall( ARM64_NT_CONTEXT *context )
+{
+    if (context->X8 < __nb_syscalls)  /* syscall number in rax */
+    {
+        context->X0 = context->X4;  /* get first param from r10 */
+        context->X4 = context->Pc;  /* and save return address to syscall thunk */
+        context->Pc = (ULONG_PTR)invoke_arm64ec_syscall;
+    }
+    else context->X8 = STATUS_INVALID_PARAMETER;  /* set return value in rax */
+
+    /* return to x64 code so that the syscall entry thunk is invoked properly */
+    dispatch_emulation( context );
+}
+
+
+static void * __attribute__((used)) prepare_exception_arm64ec( EXCEPTION_RECORD *rec, ARM64EC_NT_CONTEXT *context, ARM64_NT_CONTEXT *arm_ctx )
+{
+    if (rec->ExceptionCode == STATUS_EMULATION_SYSCALL) dispatch_syscall( arm_ctx );
+    context_arm_to_x64( context, arm_ctx );
+    if (pResetToConsistentState) pResetToConsistentState( rec, &context->AMD64_Context, arm_ctx );
+    /* call x64 dispatcher if the thunk or the function pointer was modified */
+    if (pWow64PrepareForException || memcmp( KiUserExceptionDispatcher_thunk, KiUserExceptionDispatcher_orig,
+                                             sizeof(KiUserExceptionDispatcher_orig) ))
+        return KiUserExceptionDispatcher_thunk;
+    return NULL;
+}
+
+/*******************************************************************
+ *		KiUserExceptionDispatcher (NTDLL.@)
+ */
+void __attribute__((naked)) KiUserExceptionDispatcher( EXCEPTION_RECORD *rec, CONTEXT *context )
+{
+    asm( ".seh_proc \"#KiUserExceptionDispatcher\"\n\t"
+         ".seh_context\n\t"
+         "sub sp, sp, #0x4d0\n\t"       /* sizeof(ARM64EC_NT_CONTEXT) */
+         ".seh_stackalloc 0x4d0\n\t"
+         ".seh_endprologue\n\t"
+         "add x0, sp, #0x3b0+0x4d0\n\t" /* rec */
+         "mov x1, sp\n\t"               /* context */
+         "add x2, sp, #0x4d0\n\t"       /* arm_ctx (context + 1) */
+         "bl \"#prepare_exception_arm64ec\"\n\t"
+         "cbz x0, 1f\n\t"
+         /* bypass exit thunk to avoid messing up the stack */
+         "adrp x16, __os_arm64x_dispatch_call_no_redirect\n\t"
+         "ldr x16, [x16, #:lo12:__os_arm64x_dispatch_call_no_redirect]\n\t"
+         "mov x9, x0\n\t"
+         "blr x16\n"
+         "1:\tadd x0, sp, #0x3b0+0x4d0\n\t" /* rec */
+         "mov x1, sp\n\t"                   /* context */
+         "bl #dispatch_exception\n\t"
+         "brk #1\n\t"
+         ".seh_endproc" );
+}
 
 
 /*******************************************************************

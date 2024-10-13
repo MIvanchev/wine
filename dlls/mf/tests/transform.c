@@ -46,6 +46,7 @@
 #include "initguid.h"
 
 #include "codecapi.h"
+#include "icodecapi.h"
 
 #include "d3d11_4.h"
 
@@ -265,12 +266,41 @@ static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOO
     ok_ (file, line)((val).member == (exp).member, "Got " #member " " fmt ", expected " fmt ".\n", (val).member, (exp).member)
 #define check_member(val, exp, fmt, member) check_member_(__FILE__, __LINE__, val, exp, fmt, member)
 
+const char *debugstr_propvariant(const PROPVARIANT *propvar, BOOL ratio)
+{
+    char buffer[1024] = {0}, *ptr = buffer;
+    UINT i;
+
+    switch (propvar->vt)
+    {
+        default:
+            return wine_dbg_sprintf("??");
+        case VT_CLSID:
+            return wine_dbg_sprintf("%s", debugstr_guid(propvar->puuid));
+        case VT_UI4:
+            return wine_dbg_sprintf("%lu", propvar->ulVal);
+        case VT_UI8:
+            if (ratio)
+                return wine_dbg_sprintf("%lu:%lu", propvar->uhVal.HighPart, propvar->uhVal.LowPart);
+            else
+                return wine_dbg_sprintf("%I64u", propvar->uhVal.QuadPart);
+        case VT_VECTOR | VT_UI1:
+            ptr += sprintf(ptr, "size %lu, data {", propvar->caub.cElems);
+            for (i = 0; i < 128 && i < propvar->caub.cElems; ++i)
+                ptr += sprintf(ptr, "0x%02x,", propvar->caub.pElems[i]);
+            if (propvar->caub.cElems > 128)
+                ptr += sprintf(ptr, "...}");
+            else
+                ptr += sprintf(ptr - (i ? 1 : 0), "}");
+            return wine_dbg_sprintf("%s", buffer);
+    }
+}
+
 void check_attributes_(const char *file, int line, IMFAttributes *attributes,
         const struct attribute_desc *desc, ULONG limit)
 {
-    char buffer[1024], *buf = buffer;
     PROPVARIANT value;
-    int i, j, ret;
+    int i, ret;
     HRESULT hr;
 
     for (i = 0; i < limit && desc[i].key; ++i)
@@ -280,32 +310,10 @@ void check_attributes_(const char *file, int line, IMFAttributes *attributes,
         ok_(file, line)(hr == S_OK, "%s missing, hr %#lx\n", debugstr_a(desc[i].name), hr);
         if (hr != S_OK) continue;
 
-        switch (value.vt)
-        {
-        default: sprintf(buffer, "??"); break;
-        case VT_CLSID: sprintf(buffer, "%s", debugstr_guid(value.puuid)); break;
-        case VT_UI4: sprintf(buffer, "%lu", value.ulVal); break;
-        case VT_UI8:
-            if (desc[i].ratio)
-                sprintf(buffer, "%lu:%lu", value.uhVal.HighPart, value.uhVal.LowPart);
-            else
-                sprintf(buffer, "%I64u", value.uhVal.QuadPart);
-            break;
-        case VT_VECTOR | VT_UI1:
-            buf += sprintf(buf, "size %lu, data {", value.caub.cElems);
-            for (j = 0; j < 128 && j < value.caub.cElems; ++j)
-                buf += sprintf(buf, "0x%02x,", value.caub.pElems[j]);
-            if (value.caub.cElems > 128)
-                buf += sprintf(buf, "...}");
-            else
-                buf += sprintf(buf - (j ? 1 : 0), "}");
-            break;
-        }
-
         ret = PropVariantCompareEx(&value, &desc[i].value, 0, 0);
         todo_wine_if(desc[i].todo_value)
         ok_(file, line)(ret == 0, "%s mismatch, type %u, value %s\n",
-                debugstr_a(desc[i].name), value.vt, buffer);
+                debugstr_a(desc[i].name), value.vt, debugstr_propvariant(&value, desc[i].ratio));
         PropVariantClear(&value);
     }
 }
@@ -1196,18 +1204,13 @@ static void enum_mf_samples(IMFCollection *samples, const struct sample_desc *co
     ok(hr == E_INVALIDARG, "GetElement returned %#lx\n", hr);
 }
 
-static void dump_mf_media_buffer(IMFMediaBuffer *buffer, const struct buffer_desc *buffer_desc, HANDLE output)
+static void dump_buffer_data(const struct buffer_desc *buffer_desc, void *data, DWORD length, HANDLE output)
 {
-    DWORD length, written;
-    HRESULT hr;
-    BYTE *data;
-    BOOL ret;
-
-    hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
-    ok(hr == S_OK, "Lock returned %#lx\n", hr);
+    SIZE size = buffer_desc->size;
+    DWORD ret, written;
 
     if (buffer_desc->dump)
-        buffer_desc->dump(data, length, &buffer_desc->size, output);
+        buffer_desc->dump(data, length, &size, output);
     else
     {
         if (buffer_desc->length == -1)
@@ -1221,7 +1224,36 @@ static void dump_mf_media_buffer(IMFMediaBuffer *buffer, const struct buffer_des
         ok(ret, "WriteFile failed, error %lu\n", GetLastError());
         ok(written == length, "written %lu bytes\n", written);
     }
+}
 
+static void dump_mf_2d_buffer(IMFMediaBuffer *buffer, const struct buffer_desc *buffer_desc, HANDLE output)
+{
+    IMF2DBuffer2 *buffer2d;
+    DWORD length;
+    LONG stride;
+    BYTE *scanline;
+    HRESULT hr;
+    BYTE *data;
+
+    hr = IMFMediaBuffer_QueryInterface(buffer, &IID_IMF2DBuffer2, (void **)&buffer2d);
+    ok(hr == S_OK, "QueryInterface IMF2DBuffer2 returned %#lx\n", hr);
+    hr = IMF2DBuffer2_Lock2DSize(buffer2d, MF2DBuffer_LockFlags_Read, &scanline, &stride, &data, &length);
+    ok(hr == S_OK, "Lock2DSize returned %#lx\n", hr);
+    dump_buffer_data(buffer_desc, data, length, output);
+    hr = IMF2DBuffer2_Unlock2D(buffer2d);
+    ok(hr == S_OK, "Unlock2D returned %#lx\n", hr);
+    IMF2DBuffer2_Release(buffer2d);
+}
+
+static void dump_mf_media_buffer(IMFMediaBuffer *buffer, const struct buffer_desc *buffer_desc, HANDLE output)
+{
+    DWORD length;
+    HRESULT hr;
+    BYTE *data;
+
+    hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
+    ok(hr == S_OK, "Lock returned %#lx\n", hr);
+    dump_buffer_data(buffer_desc, data, length, output);
     hr = IMFMediaBuffer_Unlock(buffer);
     ok(hr == S_OK, "Unlock returned %#lx\n", hr);
 }
@@ -1231,8 +1263,13 @@ static void dump_mf_sample(IMFSample *sample, const struct sample_desc *sample_d
     enum_mf_media_buffers(sample, sample_desc, dump_mf_media_buffer, output);
 }
 
+static void dump_mf_sample_2d(IMFSample *sample, const struct sample_desc *sample_desc, HANDLE output)
+{
+    enum_mf_media_buffers(sample, sample_desc, dump_mf_2d_buffer, output);
+}
+
 static void dump_mf_sample_collection(IMFCollection *samples, const struct sample_desc *collection_desc,
-        const WCHAR *output_filename)
+        const WCHAR *output_filename, BOOL use_2d_buffer)
 {
     WCHAR path[MAX_PATH];
     HANDLE output;
@@ -1243,10 +1280,45 @@ static void dump_mf_sample_collection(IMFCollection *samples, const struct sampl
     output = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
     ok(output != INVALID_HANDLE_VALUE, "CreateFileW failed, error %lu\n", GetLastError());
 
-    enum_mf_samples(samples, collection_desc, dump_mf_sample, output);
+    enum_mf_samples(samples, collection_desc, use_2d_buffer ? dump_mf_sample_2d : dump_mf_sample, output);
 
     trace("created %s\n", debugstr_w(path));
     CloseHandle(output);
+}
+
+#define check_mf_2d_buffer(a, b, c) check_mf_2d_buffer_(__FILE__, __LINE__, a, b, c)
+static DWORD check_mf_2d_buffer_(const char *file, int line, IMF2DBuffer2 *buffer, const struct buffer_desc *expect,
+        const BYTE **expect_data, DWORD *expect_data_len)
+{
+    DWORD length, diff = 0, expect_length = expect->length;
+    BYTE *scanline;
+    LONG stride;
+    HRESULT hr;
+    BYTE *data;
+
+    hr = IMF2DBuffer2_Lock2DSize(buffer, MF2DBuffer_LockFlags_Read, &scanline, &stride, &data, &length);
+    ok_(file, line)(hr == S_OK, "Lock2DSize returned %#lx\n", hr);
+    todo_wine_if(expect->todo_length)
+    ok_(file, line)(length == expect_length, "got length %ld, expected %ld\n", length, expect_length);
+
+    if (*expect_data)
+    {
+        if (*expect_data_len < length)
+            todo_wine_if(expect->todo_length)
+            ok_(file, line)(0, "missing %#lx bytes\n", length - *expect_data_len);
+        else if (!expect->compare)
+            diff = compare_bytes(data, &length, NULL, NULL, *expect_data);
+        else
+            diff = expect->compare(data, &length, &expect->size, &expect->compare_rect, *expect_data);
+    }
+
+    hr = IMF2DBuffer2_Unlock2D(buffer);
+    ok_(file, line)(hr == S_OK, "Unlock2D returned %#lx\n", hr);
+
+    *expect_data = *expect_data + min(length, *expect_data_len);
+    *expect_data_len = *expect_data_len - min(length, *expect_data_len);
+
+    return diff;
 }
 
 #define check_mf_media_buffer(a, b, c) check_mf_media_buffer_(__FILE__, __LINE__, a, b, c)
@@ -1267,7 +1339,7 @@ static DWORD check_mf_media_buffer_(const char *file, int line, IMFMediaBuffer *
     hr = IMFMediaBuffer_Lock(buffer, &data, NULL, &length);
     ok_(file, line)(hr == S_OK, "Lock returned %#lx\n", hr);
     todo_wine_if(expect->todo_length)
-    ok_(file, line)(length == expect_length, "got length %#lx\n", length);
+    ok_(file, line)(length == expect_length, "got length %ld, expected %ld\n", length, expect_length);
 
     if (*expect_data)
     {
@@ -1312,7 +1384,7 @@ static DWORD check_mf_sample_(const char *file, int line, IMFSample *sample, con
         const BYTE **expect_data, DWORD *expect_data_len)
 {
     struct check_mf_sample_context ctx = {.data = *expect_data, .data_len = *expect_data_len, .file = file, .line = line};
-    DWORD buffer_count, total_length, sample_flags;
+    DWORD buffer_count, total_length, sample_flags, expect_length;
     LONGLONG timestamp;
     HRESULT hr;
 
@@ -1346,15 +1418,19 @@ static DWORD check_mf_sample_(const char *file, int line, IMFSample *sample, con
             "got sample duration %I64d\n", timestamp);
 
     enum_mf_media_buffers(sample, expect, check_mf_sample_buffer, &ctx);
+    if (expect->total_length)
+        expect_length = expect->total_length;
+    else
+        expect_length = ctx.total_length;
 
     total_length = 0xdeadbeef;
     hr = IMFSample_GetTotalLength(sample, &total_length);
     ok_(file, line)(hr == S_OK, "GetTotalLength returned %#lx\n", hr);
     todo_wine_if(expect->todo_length)
-    ok_(file, line)(total_length == ctx.total_length,
+    ok_(file, line)(total_length == expect_length,
             "got total length %#lx\n", total_length);
-    ok_(file, line)(!*expect_data || *expect_data_len >= ctx.total_length,
-            "missing %#lx data\n", ctx.total_length - *expect_data_len);
+    ok_(file, line)(!*expect_data || *expect_data_len >= expect_length,
+            "missing %#lx data\n", expect_length - *expect_data_len);
 
     *expect_data = ctx.data;
     *expect_data_len = ctx.data_len;
@@ -1368,17 +1444,58 @@ static void check_mf_sample_collection_enum(IMFSample *sample, const struct samp
     ctx->diff += check_mf_sample_(ctx->file, ctx->line, sample, expect, &ctx->data, &ctx->data_len);
 }
 
+static void check_mf_sample_2d_buffer(IMFMediaBuffer *buffer, const struct buffer_desc *expect, void *context)
+{
+    struct check_mf_sample_context *ctx = context;
+    IMF2DBuffer2 *buffer2d;
+    HRESULT hr;
+
+    hr = IMFMediaBuffer_QueryInterface(buffer, &IID_IMF2DBuffer2, (void **)&buffer2d);
+    ok(hr == S_OK, "QueryInterface IMF2DBuffer2 returned %#lx\n", hr);
+    ctx->diff += check_mf_2d_buffer_(ctx->file, ctx->line, buffer2d, expect, &ctx->data, &ctx->data_len);
+    IMF2DBuffer2_Release(buffer2d);
+}
+
+#define check_mf_sample_2d(a, b, c, d) check_mf_sample_2d_(__FILE__, __LINE__, a, b, c, d)
+static DWORD check_mf_sample_2d_(const char *file, int line, IMFSample *sample, const struct sample_desc *expect,
+        const BYTE **expect_data, DWORD *expect_data_len)
+{
+    struct check_mf_sample_context ctx = {.data = *expect_data, .data_len = *expect_data_len, .file = file, .line = line};
+    DWORD buffer_count;
+    HRESULT hr;
+
+    buffer_count = 0xdeadbeef;
+    hr = IMFSample_GetBufferCount(sample, &buffer_count);
+    ok_(file, line)(hr == S_OK, "GetBufferCount returned %#lx\n", hr);
+    ok_(file, line)(buffer_count == expect->buffer_count,
+            "got %lu buffers\n", buffer_count);
+
+    enum_mf_media_buffers(sample, expect, check_mf_sample_2d_buffer, &ctx);
+
+    *expect_data = ctx.data;
+    *expect_data_len = ctx.data_len;
+
+    return ctx.diff / buffer_count;
+}
+
+static void check_mf_sample_collection_2d_enum(IMFSample *sample, const struct sample_desc *expect, void *context)
+{
+    struct check_mf_sample_context *ctx = context;
+    ctx->diff += check_mf_sample_2d_(ctx->file, ctx->line, sample, expect, &ctx->data, &ctx->data_len);
+}
+
+#define check_2d_mf_sample_collection(a, b, c) check_mf_sample_collection_(__FILE__, __LINE__, a, b, c, TRUE)
 DWORD check_mf_sample_collection_(const char *file, int line, IMFCollection *samples,
-        const struct sample_desc *expect_samples, const WCHAR *expect_data_filename)
+        const struct sample_desc *expect_samples, const WCHAR *expect_data_filename, BOOL use_2d_buffer)
 {
     struct check_mf_sample_context ctx = {.file = file, .line = line};
     DWORD count;
     HRESULT hr;
 
     if (expect_data_filename) load_resource(expect_data_filename, &ctx.data, &ctx.data_len);
-    enum_mf_samples(samples, expect_samples, check_mf_sample_collection_enum, &ctx);
+    enum_mf_samples(samples, expect_samples, use_2d_buffer ? check_mf_sample_collection_2d_enum : check_mf_sample_collection_enum, &ctx);
 
-    if (expect_data_filename) dump_mf_sample_collection(samples, expect_samples, expect_data_filename);
+    if (expect_data_filename) dump_mf_sample_collection(samples, expect_samples, expect_data_filename, use_2d_buffer);
 
     hr = IMFCollection_GetElementCount(samples, &count);
     ok_(file, line)(hr == S_OK, "GetElementCount returned %#lx\n", hr);
@@ -1538,8 +1655,7 @@ static void check_dmo_get_output_size_info_video_(int line, IMediaObject *dmo,
 
     init_dmo_media_type_video(type, output_subtype, width, height, 0);
     hr = IMediaObject_SetOutputType(dmo, 0, type, 0);
-    todo_wine_if(IsEqualGUID(output_subtype, &MEDIASUBTYPE_NV11)
-            || IsEqualGUID(output_subtype, &MEDIASUBTYPE_IYUV))
+    todo_wine_if(IsEqualGUID(output_subtype, &MEDIASUBTYPE_NV11))
     ok_(__FILE__, line)(hr == S_OK, "SetOutputType returned %#lx.\n", hr);
     if (hr != S_OK)
         return;
@@ -2017,26 +2133,56 @@ static void test_sample_copier_output_processing(void)
     ok(ref == 0, "Release returned %ld\n", ref);
 }
 
-static IMFSample *create_sample(const BYTE *data, ULONG size)
+#define create_sample(a, b) create_sample_(a, b, NULL)
+static IMFSample *create_sample_(const BYTE *data, ULONG size, const struct attribute_desc *desc)
 {
     IMFMediaBuffer *media_buffer;
+    IMFMediaType *media_type;
+    IMF2DBuffer2 *buffer2d2;
+    BYTE *buffer, *scanline;
     IMFSample *sample;
     DWORD length;
-    BYTE *buffer;
+    LONG stride;
     HRESULT hr;
     ULONG ret;
 
     hr = MFCreateSample(&sample);
     ok(hr == S_OK, "MFCreateSample returned %#lx\n", hr);
-    hr = MFCreateMemoryBuffer(size, &media_buffer);
-    ok(hr == S_OK, "MFCreateMemoryBuffer returned %#lx\n", hr);
+
+    if (!desc)
+    {
+        hr = MFCreateMemoryBuffer(size, &media_buffer);
+        ok(hr == S_OK, "MFCreateMemoryBuffer returned %#lx\n", hr);
+    }
+    else
+    {
+        hr = MFCreateMediaType(&media_type);
+        ok(hr == S_OK, "Failed to create media type, hr %#lx.\n", hr);
+        init_media_type(media_type, desc, -1);
+        hr = pMFCreateMediaBufferFromMediaType(media_type, 0, 0, 0, &media_buffer);
+        ok(hr == S_OK, "MFCreateMediaBufferFromMediaType returned %#lx\n", hr);
+        IMFMediaType_Release(media_type);
+    }
+
     hr = IMFMediaBuffer_Lock(media_buffer, &buffer, NULL, &length);
     ok(hr == S_OK, "Lock returned %#lx\n", hr);
-    ok(length == 0, "got length %lu\n", length);
+    if (!desc) ok(length == 0, "got length %lu\n", length);
     if (!data) memset(buffer, 0xcd, size);
     else memcpy(buffer, data, size);
     hr = IMFMediaBuffer_Unlock(media_buffer);
     ok(hr == S_OK, "Unlock returned %#lx\n", hr);
+
+    if (SUCCEEDED(hr = IMFMediaBuffer_QueryInterface(media_buffer, &IID_IMF2DBuffer2, (void**)&buffer2d2)))
+    {
+        ok(hr == S_OK, "QueryInterface IMF2DBuffer2 returned %#lx\n", hr);
+        hr = IMF2DBuffer2_Lock2DSize(buffer2d2, MF2DBuffer_LockFlags_Write, &scanline, &stride, &buffer, &length);
+        ok(hr == S_OK, "Lock2D returned %#lx\n", hr);
+        if (!data) memset(buffer, 0xcd, length);
+        hr = IMF2DBuffer2_Unlock2D(buffer2d2);
+        ok(hr == S_OK, "Unlock2D returned %#lx\n", hr);
+        IMF2DBuffer2_Release(buffer2d2);
+    }
+
     hr = IMFMediaBuffer_SetCurrentLength(media_buffer, data ? size : 0);
     ok(hr == S_OK, "SetCurrentLength returned %#lx\n", hr);
     hr = IMFSample_AddBuffer(sample, media_buffer);
@@ -3915,11 +4061,49 @@ static void test_h264_encoder(void)
         ATTR_UINT32(test_attr_guid, 0),
         {0},
     };
+    const struct attribute_desc expect_codec_api_attributes[] =
+    {
+        ATTR_UINT32(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR, .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncCommonQuality,           65,     .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncCommonBufferSize,        72577,  .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncCommonMaxBitRate,        0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncCommonMeanBitRate,       193540, .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncCommonQualityVsSpeed,    33,     .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncH264CABACEnable,         0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncH264PPSID,               0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncH264SPSID,               0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncMPVGOPSize,              0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncMPVDefaultBPictureCount, 1,      .todo = TRUE),
+        ATTR_UINT64(CODECAPI_AVEncVideoEncodeQP,           26,     .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncVideoMaxQP,              51,     .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncVideoMinQP,              0,      .todo = TRUE),
+        ATTR_UINT32(CODECAPI_AVEncVideoMaxNumRefFrame,     2,      .todo = TRUE),
+        {0},
+    };
+    const struct attribute_desc output_sample_attributes_key[] =
+    {
+        ATTR_UINT32(MFSampleExtension_CleanPoint, 1),
+        {0},
+    };
+    const struct buffer_desc output_buffer_desc = {.length = -1 /* Variable. */};
+    const struct sample_desc output_sample_desc =
+    {
+        .attributes = output_sample_attributes_key,
+        .sample_time = 333333, .sample_duration = 333333,
+        .buffer_count = 1, .buffers = &output_buffer_desc,
+    };
     MFT_OUTPUT_STREAM_INFO output_info, expect_output_info[] = {{.cbSize = 0x8000}, {.cbSize = 0x3bc400}};
     MFT_REGISTER_TYPE_INFO output_type = {MFMediaType_Video, MFVideoFormat_H264};
     MFT_REGISTER_TYPE_INFO input_type = {MFMediaType_Video, MFVideoFormat_NV12};
+    IMFSample *input_sample, *output_sample;
+    IMFCollection *output_sample_collection;
+    const struct attribute_desc *desc;
+    ULONG nv12frame_data_size, size;
+    const BYTE *nv12frame_data;
     IMFMediaType *media_type;
     IMFTransform *transform;
+    ICodecAPI *codec_api;
+    DWORD output_status;
     HRESULT hr;
     ULONG ret;
     DWORD i;
@@ -3943,6 +4127,7 @@ static void test_h264_encoder(void)
     ok(hr == S_OK, "CoCreateInstance returned %#lx.\n", hr);
 
     check_interface(transform, &IID_IMFTransform, TRUE);
+    check_interface(transform, &IID_ICodecAPI, TRUE);
     check_interface(transform, &IID_IMediaObject, FALSE);
     check_interface(transform, &IID_IPropertyStore, FALSE);
     check_interface(transform, &IID_IPropertyBag, FALSE);
@@ -4046,6 +4231,89 @@ static void test_h264_encoder(void)
         winetest_pop_context();
     }
 
+    hr = IMFTransform_QueryInterface(transform, &IID_ICodecAPI, (void **)&codec_api);
+    ok(hr == S_OK, "QueryInterface returned %#lx.\n", hr);
+    for (desc = &expect_codec_api_attributes[0]; desc->key; ++desc)
+    {
+        PROPVARIANT propvar;
+        VARIANT var;
+
+        hr = ICodecAPI_GetValue(codec_api, desc->key, &var);
+        todo_wine_if(desc->todo)
+        ok(hr == S_OK, "%s is missing.\n", debugstr_a(desc->name));
+        if (hr != S_OK)
+            continue;
+        hr = VariantToPropVariant(&var, &propvar);
+        ok(hr == S_OK, "VariantToPropVariant returned %#lx.\n", hr);
+        ret = PropVariantCompareEx(&propvar, &desc->value, 0, 0);
+        todo_wine_if(desc->todo_value)
+        ok(ret == 0, "%s mismatch, type %u, value %s.\n",
+                debugstr_a(desc->name), propvar.vt, debugstr_propvariant(&propvar, desc->ratio));
+
+        PropVariantClear(&propvar);
+        VariantClear(&var);
+    }
+    ICodecAPI_Release(codec_api);
+
+    check_mft_set_output_type(transform, output_type_desc, S_OK);
+    check_mft_set_input_type(transform, input_type_desc, S_OK);
+
+    /* Load input frame. */
+    load_resource(L"nv12frame.bmp", &nv12frame_data, &nv12frame_data_size);
+    /* Skip BMP header and RGB data from the dump. */
+    size = *(DWORD *)(nv12frame_data + 2);
+    nv12frame_data_size -= size;
+    nv12frame_data += size;
+    ok(nv12frame_data_size == 13824, "Got NV12 frame size %lu.\n", nv12frame_data_size);
+
+    /* Process input samples. */
+    for (i = 0; i < 16; ++i)
+    {
+        input_sample = create_sample(nv12frame_data, nv12frame_data_size);
+        hr = IMFSample_SetSampleTime(input_sample, i * 333333);
+        ok(hr == S_OK, "SetSampleTime returned %#lx.\n", hr);
+        hr = IMFSample_SetSampleDuration(input_sample, 333333);
+        ok(hr == S_OK, "SetSampleDuration returned %#lx.\n", hr);
+        hr = IMFTransform_ProcessInput(transform, 0, input_sample, 0);
+        ok(hr == S_OK || hr == MF_E_NOTACCEPTING, "ProcessInput returned %#lx.\n", hr);
+        ret = IMFSample_Release(input_sample);
+        todo_wine
+        ok(ret == 0, "Release returned %ld.\n", ret);
+        if (hr != S_OK)
+            break;
+    }
+    todo_wine
+    ok(hr == MF_E_NOTACCEPTING, "ProcessInput returned %#lx.\n", hr);
+    ok(i >= 4, "Processed %ld input samples.\n", i);
+
+    /* Check output sample. */
+    hr = MFCreateCollection(&output_sample_collection);
+    ok(hr == S_OK, "MFCreateCollection returned %#lx\n", hr);
+
+    output_sample = create_sample(NULL, expect_output_info[0].cbSize);
+    hr = check_mft_process_output(transform, output_sample, &output_status);
+    todo_wine
+    ok(hr == S_OK, "ProcessOutput returned %#lx.\n", hr);
+    if (hr != S_OK)
+    {
+        IMFSample_Release(output_sample);
+        goto failed;
+    }
+    hr = IMFCollection_AddElement(output_sample_collection, (IUnknown *)output_sample);
+    ok(hr == S_OK, "AddElement returned %#lx.\n", hr);
+    ret = IMFSample_Release(output_sample);
+    ok(ret == 1, "Release returned %ld\n", ret);
+
+    output_sample = create_sample(NULL, expect_output_info[0].cbSize);
+    hr = check_mft_process_output(transform, output_sample, &output_status);
+    ok(hr == MF_E_TRANSFORM_NEED_MORE_INPUT, "ProcessOutput returned %#lx.\n", hr);
+    ret = IMFSample_Release(output_sample);
+    ok(ret == 0, "Release returned %ld\n", ret);
+
+    ret = check_mf_sample_collection(output_sample_collection, &output_sample_desc, L"h264encdata.bin");
+    ok(ret == 0, "Got %lu%% diff\n", ret);
+    IMFCollection_Release(output_sample_collection);
+
     IMFMediaType_Release(media_type);
     ret = IMFTransform_Release(transform);
     ok(ret == 0, "Release returned %lu\n", ret);
@@ -4094,7 +4362,7 @@ static void test_h264_decoder(void)
         ATTR_UINT32(MF_SA_D3D11_AWARE, 1),
         ATTR_UINT32(MFT_DECODER_EXPOSE_OUTPUT_TYPES_IN_NATIVE_ORDER, 0),
         /* more H264 decoder specific attributes from CODECAPI */
-        ATTR_UINT32(AVDecVideoAcceleration_H264, 1),
+        ATTR_UINT32(CODECAPI_AVDecVideoAcceleration_H264, 1),
         {0},
     };
     static const DWORD input_width = 120, input_height = 248;
@@ -7379,7 +7647,7 @@ failed:
     CoUninitialize();
 }
 
-static void test_video_processor(void)
+static void test_video_processor(BOOL use_2d_buffer)
 {
     const GUID *const class_id = &CLSID_VideoProcessorMFT;
     const struct transform_info expect_mft_info =
@@ -7511,13 +7779,24 @@ static void test_video_processor(void)
     };
 
     static const MFVideoArea actual_aperture = {.Area={82,84}};
-    static const DWORD actual_width = 96, actual_height = 96;
+    static const DWORD actual_width = 96, actual_height = 96, nv12_aligned_width = 128;
+    static const DWORD extra_width = actual_width + 0x30;
+    static const DWORD nv12_aligned_extra_width = 192;
     const struct attribute_desc rgb32_with_aperture[] =
     {
         ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
         ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32, .required = TRUE),
         ATTR_RATIO(MF_MT_FRAME_SIZE, actual_width, actual_height, .required = TRUE),
         ATTR_BLOB(MF_MT_MINIMUM_DISPLAY_APERTURE, &actual_aperture, 16),
+        {0},
+    };
+    const struct attribute_desc rgb32_with_aperture_negative_stride[] =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32, .required = TRUE),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, actual_width, actual_height, .required = TRUE),
+        ATTR_BLOB(MF_MT_MINIMUM_DISPLAY_APERTURE, &actual_aperture, 16),
+        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, -actual_width * 4),
         {0},
     };
     const struct attribute_desc rgb32_with_aperture_positive_stride[] =
@@ -7536,11 +7815,26 @@ static void test_video_processor(void)
         ATTR_RATIO(MF_MT_FRAME_SIZE, actual_width, actual_height, .required = TRUE),
         {0},
     };
+    const struct attribute_desc nv12_extra_width[] =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_NV12, .required = TRUE),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, extra_width, actual_height, .required = TRUE),
+        {0},
+    };
     const struct attribute_desc rgb32_default_stride[] =
     {
         ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
         ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32, .required = TRUE),
         ATTR_RATIO(MF_MT_FRAME_SIZE, actual_width, actual_height, .required = TRUE),
+        {0},
+    };
+    const struct attribute_desc rgb32_extra_width[] =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32, .required = TRUE),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, extra_width, actual_height, .required = TRUE),
+        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, extra_width * 4),
         {0},
     };
     const struct attribute_desc rgb32_negative_stride[] =
@@ -7606,6 +7900,15 @@ static void test_video_processor(void)
         ATTR_RATIO(MF_MT_FRAME_SIZE, 82, 84, .required = TRUE),
         {0},
     };
+    const struct attribute_desc rgb32_no_aperture_negative_stride[] =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video, .required = TRUE),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32, .required = TRUE),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, 82, 84, .required = TRUE),
+        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, -82 * 4),
+        {0},
+    };
+
     const MFT_OUTPUT_STREAM_INFO initial_output_info = {0};
     const MFT_INPUT_STREAM_INFO initial_input_info = {0};
     MFT_OUTPUT_STREAM_INFO output_info = {0};
@@ -7641,6 +7944,31 @@ static void test_video_processor(void)
         .sample_time = 0, .sample_duration = 10000000,
         .buffer_count = 1, .buffers = &rgb32_crop_buffer_desc,
     };
+    const struct buffer_desc rgb32_crop_buffer_2d_desc =
+    {
+        .length = actual_width * actual_aperture.Area.cy * 4,
+        .compare = compare_rgb32, .compare_rect = {.right = actual_aperture.Area.cx, .bottom = actual_aperture.Area.cy},
+        .dump = dump_rgb32, .size = {.cx = actual_width, .cy = actual_aperture.Area.cy},
+    };
+    const struct sample_desc rgb32_crop_sample_2d_desc =
+    {
+        .attributes = output_sample_attributes,
+        .sample_time = 0, .sample_duration = 10000000,
+        .buffer_count = 1, .buffers = &rgb32_crop_buffer_2d_desc,
+    };
+    const struct buffer_desc rgb32_extra_width_buffer_desc =
+    {
+        .length = extra_width * actual_height * 4,
+        .compare = compare_rgb32, .compare_rect = {.top = 12, .right = 82, .bottom = 96},
+        .dump = dump_rgb32, .size = {.cx = extra_width, .cy = actual_height},
+    };
+    const struct sample_desc rgb32_extra_width_sample_desc =
+    {
+        .attributes = output_sample_attributes,
+        .sample_time = 0, .sample_duration = 10000000,
+        .total_length = actual_width * actual_height * 4,
+        .buffer_count = 1, .buffers = &rgb32_extra_width_buffer_desc,
+    };
 
     const struct buffer_desc rgb555_buffer_desc =
     {
@@ -7667,113 +7995,264 @@ static void test_video_processor(void)
         .sample_time = 0, .sample_duration = 10000000,
         .buffer_count = 1, .buffers = &nv12_buffer_desc,
     };
+    const struct buffer_desc nv12_buffer_2d_desc =
+    {
+        .length = nv12_aligned_width * actual_height * 3 / 2,
+        .compare = compare_nv12, .compare_rect = {.top = 12, .right = 82, .bottom = 96},
+        .dump = dump_nv12, .size = {.cx = nv12_aligned_width, .cy = actual_height},
+    };
+    const struct sample_desc nv12_sample_2d_desc =
+    {
+        .attributes = output_sample_attributes,
+        .sample_time = 0, .sample_duration = 10000000,
+        .buffer_count = 1, .buffers = &nv12_buffer_2d_desc,
+    };
+
+    const struct buffer_desc nv12_extra_width_buffer_desc =
+    {
+        .length = extra_width * actual_height * 3 / 2,
+        .compare = compare_nv12, .compare_rect = {.top = 12, .right = 82, .bottom = 96},
+        .dump = dump_nv12, .size = {.cx = extra_width, .cy = actual_height},
+    };
+    const struct sample_desc nv12_extra_width_sample_desc =
+    {
+        .attributes = output_sample_attributes,
+        .sample_time = 0, .sample_duration = 10000000,
+        .total_length = actual_width * actual_height * 3 / 2,
+        .buffer_count = 1, .buffers = &nv12_extra_width_buffer_desc,
+    };
+    const struct buffer_desc nv12_extra_width_buffer_2d_desc =
+    {
+        .length = nv12_aligned_extra_width * actual_height * 3 / 2,
+        .compare = compare_nv12, .compare_rect = {.top = 12, .right = 82, .bottom = 96},
+        .dump = dump_nv12, .size = {.cx = nv12_aligned_extra_width, .cy = actual_height},
+    };
+    const struct sample_desc nv12_extra_width_sample_2d_desc =
+    {
+        .attributes = output_sample_attributes,
+        .sample_time = 0, .sample_duration = 10000000,
+        .buffer_count = 1, .buffers = &nv12_extra_width_buffer_2d_desc,
+    };
 
     const struct transform_desc
     {
         const struct attribute_desc *input_type_desc;
+        const struct attribute_desc *input_buffer_desc;
         const WCHAR *input_bitmap;
         const struct attribute_desc *output_type_desc;
+        const struct attribute_desc *output_buffer_desc;
         const struct sample_desc *output_sample_desc;
+        const struct sample_desc *output_sample_2d_desc;
         const WCHAR *output_bitmap;
+        const WCHAR *output_bitmap_1d;
+        const WCHAR *output_bitmap_2d;
         ULONG delta;
         BOOL broken;
+        BOOL todo;
     }
     video_processor_tests[] =
     {
-        {
+        { /* Test 0 */
             .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
             .output_type_desc = rgb32_default_stride, .output_bitmap = L"rgb32frame-flip.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .delta = 2, /* Windows returns 0, Wine needs 2 */
+            .output_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 2, /* Windows returns 0, Wine needs 2 */
         },
-        {
+        { /* Test 1 */
             .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
             .output_type_desc = rgb32_negative_stride, .output_bitmap = L"rgb32frame-flip.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .delta = 2, /* Windows returns 0, Wine needs 2 */
+            .output_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 2, /* Windows returns 0, Wine needs 2 */
         },
-        {
+        { /* Test 2 */
             .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
             .output_type_desc = rgb32_positive_stride, .output_bitmap = L"rgb32frame.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .delta = 6,
+            .output_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 6,
         },
-        {
+        { /* Test 3 */
             .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame.bmp",
-            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame-flip.bmp",
-            .output_sample_desc = &nv12_sample_desc, .delta = 2, /* Windows returns 0, Wine needs 2 */
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame-flip.bmp", .output_bitmap_2d = L"nv12frame-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
+            .output_sample_desc = &nv12_sample_desc, .output_sample_2d_desc = &nv12_sample_2d_desc,
+            .delta = 2, /* Windows returns 0, Wine needs 2 */
         },
-        {
+        { /* Test 4 */
             .input_type_desc = rgb32_negative_stride, .input_bitmap = L"rgb32frame.bmp",
-            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame-flip.bmp",
-            .output_sample_desc = &nv12_sample_desc, .delta = 2, /* Windows returns 0, Wine needs 2 */
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame-flip.bmp", .output_bitmap_2d = L"nv12frame-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
+            .output_sample_desc = &nv12_sample_desc, .output_sample_2d_desc = &nv12_sample_2d_desc,
+            .delta = 2, /* Windows returns 0, Wine needs 2 */
         },
-        {
+        { /* Test 5 */
             .input_type_desc = rgb32_positive_stride, .input_bitmap = L"rgb32frame.bmp",
-            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame.bmp",
-            .output_sample_desc = &nv12_sample_desc, .delta = 2, /* Windows returns 1, Wine needs 2 */
+            .input_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
+            .output_type_desc = nv12_default_stride, .output_bitmap = L"nv12frame.bmp", .output_bitmap_2d = L"nv12frame-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
+            .output_sample_desc = &nv12_sample_desc, .output_sample_2d_desc = &nv12_sample_2d_desc,
+            .delta = 2, /* Windows returns 1, Wine needs 2 */
         },
-        {
+        { /* Test 6 */
             .input_type_desc = rgb32_negative_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
             .output_type_desc = rgb32_negative_stride, .output_bitmap = L"rgb32frame.bmp",
-            .output_sample_desc = &rgb32_sample_desc,
+            .output_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
         },
-        {
+        { /* Test 7 */
             .input_type_desc = rgb32_negative_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
             .output_type_desc = rgb32_positive_stride, .output_bitmap = L"rgb32frame-flip.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .delta = 3, /* Windows returns 3 */
+            .output_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 3, /* Windows returns 3 */
         },
-        {
+        { /* Test 8 */
             .input_type_desc = rgb32_positive_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
             .output_type_desc = rgb32_negative_stride, .output_bitmap = L"rgb32frame-flip.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .delta = 3, /* Windows returns 3 */
+            .output_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 3, /* Windows returns 3 */
         },
-        {
+        { /* Test 9 */
             .input_type_desc = rgb32_positive_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
             .output_type_desc = rgb32_positive_stride, .output_bitmap = L"rgb32frame.bmp",
-            .output_sample_desc = &rgb32_sample_desc,
+            .output_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
         },
-        {
+        { /* Test 10 */
             .input_type_desc = rgb32_with_aperture, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_with_aperture : NULL,
             .output_type_desc = rgb32_with_aperture, .output_bitmap = L"rgb32frame.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .broken = TRUE /* old Windows version incorrectly rescale */
+            .output_buffer_desc = use_2d_buffer ? rgb32_with_aperture : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .broken = TRUE, /* old Windows version incorrectly rescale */
         },
-        {
+        { /* Test 11 */
             .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
             .output_type_desc = rgb555_default_stride, .output_bitmap = L"rgb555frame.bmp",
-            .output_sample_desc = &rgb555_sample_desc,
+            .output_buffer_desc = use_2d_buffer ? rgb555_negative_stride : NULL,
+            .output_sample_desc = &rgb555_sample_desc, .output_sample_2d_desc = &rgb555_sample_desc,
+            .delta = 5, /* Windows returns 0, Wine needs 5 */
         },
-        {
+        { /* Test 12 */
             .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
             .output_type_desc = rgb555_negative_stride, .output_bitmap = L"rgb555frame.bmp",
-            .output_sample_desc = &rgb555_sample_desc,
+            .output_buffer_desc = use_2d_buffer ? rgb555_negative_stride : NULL,
+            .output_sample_desc = &rgb555_sample_desc, .output_sample_2d_desc = &rgb555_sample_desc,
+            .delta = 5, /* Windows returns 0, Wine needs 5 */
         },
-        {
+        { /* Test 13 */
             .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb32_negative_stride : NULL,
             .output_type_desc = rgb555_positive_stride, .output_bitmap = L"rgb555frame-flip.bmp",
-            .output_sample_desc = &rgb555_sample_desc, .delta = 3, /* Windows returns 0, Wine needs 3 */
+            .output_buffer_desc = use_2d_buffer ? rgb555_positive_stride : NULL,
+            .output_sample_desc = &rgb555_sample_desc, .output_sample_2d_desc = &rgb555_sample_desc,
+            .delta = 3, /* Windows returns 0, Wine needs 3 */
         },
-        {
+        { /* Test 14 */
             .input_type_desc = rgb555_default_stride, .input_bitmap = L"rgb555frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? rgb555_negative_stride : NULL,
             .output_type_desc = rgb555_positive_stride, .output_bitmap = L"rgb555frame-flip.bmp",
-            .output_sample_desc = &rgb555_sample_desc, .delta = 4, /* Windows returns 0, Wine needs 4 */
+            .output_buffer_desc = use_2d_buffer ? rgb555_positive_stride : NULL,
+            .output_sample_desc = &rgb555_sample_desc, .output_sample_2d_desc = &rgb555_sample_desc,
+            .delta = 4, /* Windows returns 0, Wine needs 4 */
         },
-        {
+        { /* Test 15 */
             .input_type_desc = nv12_with_aperture, .input_bitmap = L"nv12frame.bmp",
-            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp",
-            .output_sample_desc = &rgb32_crop_sample_desc, .delta = 2, /* Windows returns 0, Wine needs 2 */
+            .input_buffer_desc = use_2d_buffer ? nv12_with_aperture : NULL,
+            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp", .output_bitmap_2d = L"rgb32frame-crop-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_no_aperture_negative_stride : NULL,
+            .output_sample_desc = &rgb32_crop_sample_desc, .output_sample_2d_desc = &rgb32_crop_sample_2d_desc,
+            .delta = 3, /* Windows returns 3 with 2D buffer */
         },
-        {
+        { /* Test 16 */
             .input_type_desc = rgb32_no_aperture, .input_bitmap = L"rgb32frame-crop-flip.bmp",
-            .output_type_desc = rgb32_with_aperture, .output_bitmap = L"rgb32frame-flip.bmp",
-            .output_sample_desc = &rgb32_sample_desc, .broken = TRUE /* old Windows version incorrectly rescale */
+            .input_buffer_desc = use_2d_buffer ? rgb32_no_aperture : NULL,
+            .output_type_desc = rgb32_with_aperture, .output_bitmap = L"rgb32frame-flip.bmp", .output_bitmap_1d = L"rgb32frame-flip-2d.bmp", .output_bitmap_2d = L"rgb32frame-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_with_aperture : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .broken = TRUE, /* old Windows version incorrectly rescale */
+            .todo = use_2d_buffer,
         },
-        {
+        { /* Test 17 */
             .input_type_desc = rgb32_with_aperture, .input_bitmap = L"rgb32frame-flip.bmp",
-            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp",
-            .output_sample_desc = &rgb32_crop_sample_desc,
+            .input_buffer_desc = use_2d_buffer ? rgb32_with_aperture_negative_stride : NULL,
+            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp", .output_bitmap_2d = L"rgb32frame-crop-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_no_aperture_negative_stride : NULL,
+            .output_sample_desc = &rgb32_crop_sample_desc, .output_sample_2d_desc = &rgb32_crop_sample_2d_desc,
+            .delta = 3, /* Windows returns 3 with 2D buffer */
         },
-        {
+        { /* Test 18 */
             .input_type_desc = rgb32_with_aperture_positive_stride, .input_bitmap = L"rgb32frame.bmp",
-            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp",
-            .output_sample_desc = &rgb32_crop_sample_desc, .delta = 3, /* Windows returns 3 */
+            .input_buffer_desc = use_2d_buffer ? rgb32_with_aperture_positive_stride : NULL,
+            .output_type_desc = rgb32_no_aperture, .output_bitmap = L"rgb32frame-crop-flip.bmp", .output_bitmap_2d = L"rgb32frame-crop-flip-2d.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_no_aperture_negative_stride : NULL,
+            .output_sample_desc = &rgb32_crop_sample_desc, .output_sample_2d_desc = &rgb32_crop_sample_2d_desc,
+            .delta = 3, /* Windows returns 3 */
+        },
+        { /* Test 19 */
+            .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
+            .output_type_desc = rgb32_default_stride, .output_bitmap = L"rgb32frame-flip.bmp", .output_bitmap_2d = L"rgb32frame.bmp", .output_bitmap_1d = L"rgb32frame.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_default_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 3, /* Windows returns 3 with 2D buffer */
+            .todo = use_2d_buffer,
+        },
+        { /* Test 20 */
+            .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = use_2d_buffer ? nv12_default_stride : NULL,
+            .output_type_desc = rgb32_default_stride, .output_bitmap = L"rgb32frame-flip.bmp", .output_bitmap_2d = L"rgb32frame.bmp", .output_bitmap_1d = L"rgb32frame.bmp",
+            .output_buffer_desc = use_2d_buffer ? rgb32_positive_stride : NULL,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .delta = 3, /* Windows returns 3 with 2D buffer */
+            .todo = use_2d_buffer,
+        },
+
+        { /* Test 21, 2D only */
+            .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame.bmp",
+            .input_buffer_desc = nv12_default_stride,
+            .output_type_desc = rgb32_default_stride, .output_bitmap = L"rgb32frame-extra-width.bmp",
+            .output_buffer_desc = rgb32_extra_width,
+            .output_sample_desc = &rgb32_extra_width_sample_desc, .output_sample_2d_desc = &rgb32_extra_width_sample_desc,
+            .todo = TRUE,
+        },
+        { /* Test 22, 2D only */
+            .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame-extra-width.bmp",
+            .input_buffer_desc = rgb32_extra_width,
+            .output_type_desc = nv12_default_stride, .output_bitmap_1d = L"nv12frame.bmp", .output_bitmap_2d = L"nv12frame-2d.bmp",
+            .output_buffer_desc = nv12_default_stride,
+            .output_sample_desc = &nv12_sample_desc, .output_sample_2d_desc = &nv12_sample_2d_desc,
+            .delta = 2, /* Windows returns 2 with 1D buffer */ .todo = TRUE,
+        },
+        { /* Test 23, 2D only */
+            .input_type_desc = rgb32_default_stride, .input_bitmap = L"rgb32frame-extra-width.bmp",
+            .input_buffer_desc = rgb32_extra_width,
+            .output_type_desc = nv12_default_stride, .output_bitmap_1d = L"nv12frame-extra-width.bmp", .output_bitmap_2d = L"nv12frame-extra-width-2d.bmp",
+            .output_buffer_desc = nv12_extra_width,
+            .output_sample_desc = &nv12_extra_width_sample_desc, .output_sample_2d_desc = &nv12_extra_width_sample_2d_desc,
+            .todo = TRUE,
+        },
+        { /* Test 24, 2D only */
+            .input_type_desc = nv12_default_stride, .input_bitmap = L"nv12frame-extra-width.bmp",
+            .input_buffer_desc = nv12_extra_width,
+            .output_type_desc = rgb32_default_stride, .output_bitmap_1d = L"rgb32frame.bmp", .output_bitmap_2d = L"rgb32frame.bmp",
+            .output_buffer_desc = rgb32_default_stride,
+            .output_sample_desc = &rgb32_sample_desc, .output_sample_2d_desc = &rgb32_sample_desc,
+            .todo = TRUE,
         },
     };
 
@@ -7784,6 +8263,7 @@ static void test_video_processor(void)
     IMFSample *input_sample, *output_sample;
     IMFMediaType *media_type, *media_type2;
     IMFCollection *output_samples;
+    const WCHAR *output_bitmap;
     IMFTransform *transform;
     IMFMediaBuffer *buffer;
     const BYTE *input_data;
@@ -7794,10 +8274,16 @@ static void test_video_processor(void)
     GUID guid;
     LONG ref;
 
+    if (use_2d_buffer && !pMFCreateMediaBufferFromMediaType)
+    {
+        win_skip("MFCreateMediaBufferFromMediaType() is unsupported.\n");
+        return;
+    }
+
     hr = CoInitialize(NULL);
     ok(hr == S_OK, "Failed to initialize, hr %#lx.\n", hr);
 
-    winetest_push_context("videoproc");
+    winetest_push_context("videoproc %s", use_2d_buffer ? "2d" : "1d");
 
     if (!check_mft_enum(MFT_CATEGORY_VIDEO_PROCESSOR, &input_type, &output_type, class_id))
         goto failed;
@@ -8108,6 +8594,10 @@ static void test_video_processor(void)
     {
         const struct transform_desc *test = video_processor_tests + i;
 
+        /* skip tests which require 2D buffers when not testing them */
+        if (!use_2d_buffer && test->input_buffer_desc)
+            continue;
+
         winetest_push_context("transform #%lu", i);
 
         check_mft_set_input_type_required(transform, test->input_type_desc);
@@ -8118,7 +8608,8 @@ static void test_video_processor(void)
         check_mft_set_output_type(transform, test->output_type_desc, S_OK);
         check_mft_get_output_current_type(transform, test->output_type_desc);
 
-        if (test->output_sample_desc == &nv12_sample_desc)
+        if (test->output_sample_desc == &nv12_sample_desc
+                || test->output_sample_desc == &nv12_extra_width_sample_desc)
         {
             output_info.cbSize = actual_width * actual_height * 3 / 2;
             check_mft_get_output_stream_info(transform, S_OK, &output_info);
@@ -8173,10 +8664,10 @@ static void test_video_processor(void)
             length = *(DWORD *)(input_data + 2 + 2 * sizeof(DWORD));
             input_data_len -= length;
         }
-        ok(input_data_len == input_info.cbSize, "got length %lu\n", input_data_len);
+        if (!test->input_buffer_desc) ok(input_data_len == input_info.cbSize, "got length %lu\n", input_data_len);
         input_data += length;
 
-        input_sample = create_sample(input_data, input_data_len);
+        input_sample = create_sample_(input_data, input_data_len, test->input_buffer_desc);
         hr = IMFSample_SetSampleTime(input_sample, 0);
         ok(hr == S_OK, "SetSampleTime returned %#lx\n", hr);
         hr = IMFSample_SetSampleDuration(input_sample, 10000000);
@@ -8193,7 +8684,7 @@ static void test_video_processor(void)
         hr = MFCreateCollection(&output_samples);
         ok(hr == S_OK, "MFCreateCollection returned %#lx\n", hr);
 
-        output_sample = create_sample(NULL, output_info.cbSize);
+        output_sample = create_sample_(NULL, output_info.cbSize, test->output_buffer_desc);
         hr = check_mft_process_output(transform, output_sample, &output_status);
 
         ok(hr == S_OK || broken(hr == MF_E_SHUTDOWN) /* w8 */, "ProcessOutput returned %#lx\n", hr);
@@ -8210,11 +8701,22 @@ static void test_video_processor(void)
             ref = IMFSample_Release(output_sample);
             ok(ref == 1, "Release returned %ld\n", ref);
 
-            ret = check_mf_sample_collection(output_samples, test->output_sample_desc, test->output_bitmap);
-            ok(ret <= test->delta || broken(test->broken), "got %lu%% diff\n", ret);
+            output_bitmap = use_2d_buffer && test->output_bitmap_1d ? test->output_bitmap_1d : test->output_bitmap;
+            ret = check_mf_sample_collection(output_samples, test->output_sample_desc, output_bitmap);
+            todo_wine_if(test->todo)
+            ok(ret <= test->delta || broken(test->broken), "1d got %lu%% diff\n", ret);
+
+            if (use_2d_buffer)
+            {
+                output_bitmap = test->output_bitmap_2d ? test->output_bitmap_2d : test->output_bitmap;
+                ret = check_2d_mf_sample_collection(output_samples, test->output_sample_2d_desc, output_bitmap);
+                todo_wine_if(test->todo)
+                ok(ret <= test->delta || broken(test->broken), "2d got %lu%% diff\n", ret);
+            }
+
             IMFCollection_Release(output_samples);
 
-            output_sample = create_sample(NULL, output_info.cbSize);
+            output_sample = create_sample_(NULL, output_info.cbSize, test->output_buffer_desc);
             hr = check_mft_process_output(transform, output_sample, &output_status);
             ok(hr == MF_E_TRANSFORM_NEED_MORE_INPUT, "ProcessOutput returned %#lx\n", hr);
             ok(output_status == 0, "got output[0].dwStatus %#lx\n", output_status);
@@ -9747,7 +10249,8 @@ START_TEST(transform)
     test_wmv_decoder_media_object();
     test_audio_convert();
     test_color_convert();
-    test_video_processor();
+    test_video_processor(FALSE);
+    test_video_processor(TRUE);
     test_mp3_decoder();
     test_iv50_encoder();
     test_iv50_decoder();

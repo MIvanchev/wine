@@ -2099,8 +2099,13 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         if (is_desktop_window( hwnd )) return 0;
         return set_window_style( hwnd, wparam, lparam );
     case WM_WINE_SETACTIVEWINDOW:
+    {
+        HWND prev;
+
         if (!wparam && NtUserGetForegroundWindow() == hwnd) return 0;
-        return (LRESULT)NtUserSetActiveWindow( (HWND)wparam );
+        if (!set_active_window( (HWND)wparam, &prev, FALSE, TRUE, lparam )) return 0;
+        return (LRESULT)prev;
+    }
     case WM_WINE_KEYBOARD_LL_HOOK:
     case WM_WINE_MOUSE_LL_HOOK:
     {
@@ -3049,15 +3054,17 @@ static inline LARGE_INTEGER *get_nt_timeout( LARGE_INTEGER *time, DWORD timeout 
 /* wait for message or signaled handle */
 static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DWORD mask, DWORD flags )
 {
+    struct thunk_lock_params params = {.dispatch.callback = thunk_lock_callback};
     LARGE_INTEGER time;
-    DWORD ret, lock = 0;
+    DWORD ret;
     void *ret_ptr;
     ULONG ret_len;
 
-    if (enable_thunk_lock)
+    if (!KeUserDispatchCallback( &params.dispatch, sizeof(params), &ret_ptr, &ret_len ) &&
+        ret_len == sizeof(params.locks))
     {
-        if (!KeUserModeCallback( NtUserThunkLock, NULL, 0, &ret_ptr, &ret_len ) && ret_len == sizeof(lock))
-            lock = *(DWORD *)ret_ptr;
+        params.locks = *(DWORD *)ret_ptr;
+        params.restore = TRUE;
     }
 
     if (user_driver->pProcessEvents( mask )) ret = count - 1;
@@ -3076,8 +3083,7 @@ static DWORD wait_message( DWORD count, const HANDLE *handles, DWORD timeout, DW
     if (ret == WAIT_TIMEOUT && !count && !timeout) NtYieldExecution();
     if (ret == count - 1) get_user_thread_info()->last_driver_time = NtGetTickCount();
 
-    if (enable_thunk_lock)
-        KeUserModeCallback( NtUserThunkLock, &lock, sizeof(lock), &ret_ptr, &ret_len );
+    KeUserDispatchCallback( &params.dispatch, sizeof(params), &ret_ptr, &ret_len );
 
     return ret;
 }

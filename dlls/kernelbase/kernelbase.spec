@@ -363,7 +363,7 @@
 @ stdcall FindFirstFileA(str ptr)
 @ stdcall FindFirstFileExA(str long ptr long ptr long)
 @ stdcall FindFirstFileExW(wstr long ptr long ptr long)
-# @ stub FindFirstFileNameW
+@ stdcall FindFirstFileNameW(wstr long ptr ptr)
 @ stdcall FindFirstFileW(wstr ptr)
 @ stdcall FindFirstFreeAce(ptr ptr)
 @ stdcall FindFirstStreamW(wstr long ptr long)
@@ -739,6 +739,8 @@
 # @ stub GetTargetPlatformContext
 @ stdcall GetTempFileNameA(str str long ptr)
 @ stdcall GetTempFileNameW(wstr wstr long ptr)
+@ stdcall GetTempPath2W(long ptr)
+@ stdcall GetTempPath2A(long ptr)
 @ stdcall GetTempPathA(long ptr)
 @ stdcall GetTempPathW(long ptr)
 @ stdcall GetThreadContext(long ptr)
@@ -1233,8 +1235,8 @@
 @ stdcall QueryFullProcessImageNameA(ptr long ptr ptr)
 @ stdcall QueryFullProcessImageNameW(ptr long ptr ptr)
 @ stdcall QueryIoRingCapabilities(ptr)
-# @ stub QueryIdleProcessorCycleTime
-# @ stub QueryIdleProcessorCycleTimeEx
+@ stdcall QueryIdleProcessorCycleTime(ptr ptr)
+@ stdcall QueryIdleProcessorCycleTimeEx(long ptr ptr)
 @ stdcall QueryInterruptTime(ptr)
 @ stdcall QueryInterruptTimePrecise(ptr)
 @ stdcall QueryMemoryResourceNotification(ptr ptr)

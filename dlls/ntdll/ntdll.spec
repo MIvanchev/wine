@@ -71,6 +71,7 @@
 @ stdcall -norelay KiUserApcDispatcher(ptr long long long ptr)
 @ stdcall -norelay KiUserCallbackDispatcher(long ptr long)
 @ stdcall -norelay -arch=arm,arm64,arm64ec KiUserCallbackDispatcherReturn()
+@ stdcall -norelay -arch=arm64ec KiUserEmulationDispatcher(ptr)
 @ stdcall -norelay KiUserExceptionDispatcher(ptr ptr)
 # @ stub LdrAccessOutOfProcessResource
 @ stdcall LdrAccessResource(long ptr ptr ptr)
@@ -541,6 +542,7 @@
 # @ stub RtlComputeImportTableHash
 # @ stub RtlComputePrivatizedDllName_U
 @ stub RtlConsoleMultiByteToUnicodeN
+@ stdcall RtlConvertDeviceFamilyInfoToString(ptr ptr ptr ptr)
 @ stub RtlConvertExclusiveToShared
 @ stdcall -arch=win32 -ret64 RtlConvertLongToLargeInteger(long)
 # @ stub RtlConvertPropertyToVariant
@@ -950,6 +952,8 @@
 @ stdcall RtlRaiseStatus(long)
 @ stdcall RtlRandom(ptr)
 @ stdcall RtlRandomEx(ptr)
+@ stdcall RtlRbInsertNodeEx(ptr ptr long ptr)
+@ stdcall RtlRbRemoveNode(ptr ptr)
 @ stdcall RtlReAllocateHeap(long long ptr long)
 @ stub RtlReadMemoryStream
 @ stub RtlReadOutOfProcessMemoryStream

@@ -725,7 +725,7 @@ static const struct message WmDestroyOverlappedSeq[] = {
     { WM_KILLFOCUS, sent|optional|wparam, 0 },
     { WM_IME_SETCONTEXT, sent|wparam|optional, 0 },
     { WM_IME_NOTIFY, sent|wparam|optional|defwinproc, 1 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -1644,7 +1644,7 @@ static const struct message WmDestroyChildSeq[] = {
     { WM_IME_SETCONTEXT, sent|wparam|parent|optional, 1 },
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|parent },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_DESTROY, sent|optional }, /* some other (IME?) window */
     { WM_NCDESTROY, sent|optional }, /* some other (IME?) window */
@@ -1664,7 +1664,7 @@ static const struct message WmDestroyInvisibleChildSeq[] = {
     { 0x0090, sent|optional },
     { WM_PARENTNOTIFY, sent|parent|wparam, WM_DESTROY },
     { WM_SHOWWINDOW, sent|wparam, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -1873,7 +1873,7 @@ static const struct message WmModalDialogSeq[] = {
     { WM_IME_SETCONTEXT, sent|parent|wparam|defwinproc|optional, 1 },
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|parent|defwinproc },
-    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_DESTROYWND, hook },
     { 0x0090, sent|optional },
     { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
@@ -1902,7 +1902,7 @@ static const struct message WmModalDialogSeq_2[] = {
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam|optional, 0, 0 },
     { WM_CHANGEUISTATE, sent|optional },
     { WM_UPDATEUISTATE, sent|optional },
-    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_DESTROYWND, hook },
     { 0x0090, sent|optional },
     { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
@@ -2009,7 +2009,7 @@ static const struct message WmSetRedrawTrueSeq[] =
 static const struct message WmEnableWindowSeq_1[] =
 {
     { WM_CANCELMODE, sent|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_SETFOCUS, hook|optional },
     { WM_KILLFOCUS, sent|optional },
     { WM_ENABLE, sent|wparam|lparam, FALSE, 0 },
@@ -2025,7 +2025,7 @@ static const struct message WmEnableWindowSeq_2[] =
 
 static const struct message WmEnableWindowSeq_3[] =
 {
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_ENABLE, sent|wparam|lparam, TRUE, 0 },
     { 0 }
 };
@@ -2057,12 +2057,12 @@ static const struct message WmSetScrollRangeSeq[] =
 /* SetScrollRange for a window without a non-client area */
 static const struct message WmSetScrollRangeHSeq_empty[] =
 {
-    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_HSCROLL, 0 },
+    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam, OBJID_HSCROLL, 0 },
     { 0 }
 };
 static const struct message WmSetScrollRangeVSeq_empty[] =
 {
-    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_VSCROLL, 0 },
+    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam, OBJID_VSCROLL, 0 },
     { 0 }
 };
 static const struct message WmSetScrollRangeHVSeq[] =
@@ -3017,7 +3017,7 @@ static const struct message WmDestroyMDIframeSeq[] = {
     { WM_ACTIVATE, sent|wparam|optional, 0 }, /* Win9x */
     { WM_ACTIVATEAPP, sent|wparam|optional, 0 }, /* Win9x */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam|msg_todo, OBJID_CARET, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -3066,7 +3066,7 @@ static const struct message WmDestroyMDIclientSeq[] = {
     { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -3268,7 +3268,7 @@ static const struct message WmDestroyMDIchildInvisibleSeq[] = {
      */
     { 0x0090, sent|optional },
     { WM_PARENTNOTIFY, sent /*|wparam, WM_DESTROY*/ }, /* in MDI client */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -6463,7 +6463,7 @@ static const struct message WmKillFocusOwnerdrawSeq[] =
 static const struct message WmLButtonDownSeq[] =
 {
     { WM_LBUTTONDOWN, sent|wparam|lparam, 0, 0 },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_SETFOCUS, hook },
     { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
@@ -6472,13 +6472,13 @@ static const struct message WmLButtonDownSeq[] =
     { WM_CTLCOLORBTN, sent|defwinproc },
     { BM_SETSTATE, sent|wparam|defwinproc, TRUE },
     { WM_CTLCOLORBTN, sent|defwinproc },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { 0 }
 };
 static const struct message WmLButtonDownStaticSeq[] =
 {
     { WM_LBUTTONDOWN, sent|wparam|lparam, 0, 0 },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_SETFOCUS, hook },
     { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
@@ -6487,7 +6487,7 @@ static const struct message WmLButtonDownStaticSeq[] =
     { WM_CTLCOLORSTATIC, sent|defwinproc },
     { BM_SETSTATE, sent|wparam|defwinproc, TRUE },
     { WM_CTLCOLORSTATIC, sent|defwinproc },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { 0 }
 };
 static const struct message WmLButtonUpSeq[] =
@@ -6495,8 +6495,8 @@ static const struct message WmLButtonUpSeq[] =
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
     { BM_SETSTATE, sent|wparam|defwinproc, FALSE },
     { WM_CTLCOLORBTN, sent|defwinproc },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|wparam|defwinproc, 0 },
     { 0 }
 };
@@ -6505,8 +6505,8 @@ static const struct message WmLButtonUpStaticSeq[] =
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
     { BM_SETSTATE, sent|wparam|defwinproc, FALSE },
     { WM_CTLCOLORSTATIC, sent|defwinproc },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|wparam|defwinproc, 0 },
     { 0 }
 };
@@ -6515,12 +6515,12 @@ static const struct message WmLButtonUpAutoSeq[] =
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
     { BM_SETSTATE, sent|wparam|defwinproc, FALSE },
     { WM_CTLCOLORSTATIC, sent|defwinproc },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|optional, 0, 0 },
     { BM_SETCHECK, sent|defwinproc },
     { WM_CTLCOLORSTATIC, sent|defwinproc|optional, 0, 0 }, /* Sent here on Win7. */
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CTLCOLORSTATIC, sent|defwinproc|optional, 0, 0 }, /* Sent here on Win8+. */
     { WM_CAPTURECHANGED, sent|wparam|defwinproc, 0 },
     { 0 }
@@ -6591,7 +6591,7 @@ static const struct message WmSetTextInvisibleSeq[] =
 static const struct message WmSetStyleButtonSeq[] =
 {
     { BM_SETSTYLE, sent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
     { WM_ERASEBKGND, sent|defwinproc|optional }, /* Win9x doesn't send it */
@@ -6601,7 +6601,7 @@ static const struct message WmSetStyleButtonSeq[] =
 static const struct message WmSetStyleStaticSeq[] =
 {
     { BM_SETSTYLE, sent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
     { WM_ERASEBKGND, sent|defwinproc|optional }, /* Win9x doesn't send it */
@@ -6611,7 +6611,7 @@ static const struct message WmSetStyleStaticSeq[] =
 static const struct message WmSetStyleUserSeq[] =
 {
     { BM_SETSTYLE, sent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
     { WM_NCPAINT, sent|defwinproc|wine_only }, /* FIXME: Wine sends it */
@@ -6623,7 +6623,7 @@ static const struct message WmSetStyleUserSeq[] =
 static const struct message WmSetStyleOwnerdrawSeq[] =
 {
     { BM_SETSTYLE, sent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
     { WM_ERASEBKGND, sent|defwinproc|optional }, /* Win9x doesn't send it */
@@ -6636,7 +6636,7 @@ static const struct message WmSetStateButtonSeq[] =
 {
     { BM_SETSTATE, sent },
     { WM_CTLCOLORBTN, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
@@ -6644,7 +6644,7 @@ static const struct message WmSetStateStaticSeq[] =
 {
     { BM_SETSTATE, sent },
     { WM_CTLCOLORSTATIC, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
@@ -6653,7 +6653,7 @@ static const struct message WmSetStateUserSeq[] =
     { BM_SETSTATE, sent },
     { WM_CTLCOLORBTN, sent|parent },
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_BUTTON, BN_HILITE) },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
@@ -6662,7 +6662,7 @@ static const struct message WmSetStateOwnerdrawSeq[] =
     { BM_SETSTATE, sent },
     { WM_CTLCOLORBTN, sent|parent },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_BUTTON, 0x000120e4 },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
@@ -6671,26 +6671,26 @@ static const struct message WmClearStateButtonSeq[] =
     { BM_SETSTATE, sent },
     { WM_CTLCOLORBTN, sent|parent },
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_BUTTON, BN_UNHILITE) },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 static const struct message WmDisableButtonSeq[] =
 {
     { WM_LBUTTONDOWN, sent },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { BM_SETSTATE, sent|defwinproc },
     { WM_CTLCOLORSTATIC, sent|defwinproc|optional },
     { WM_CTLCOLORBTN, sent|optional },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_LBUTTONUP, sent },
     { BM_SETSTATE, sent|defwinproc },
     { WM_CTLCOLORBTN, sent|defwinproc|optional },
     { WM_CTLCOLORSTATIC, sent|defwinproc|optional },
     { BM_SETCHECK, sent|defwinproc|optional },
     { WM_CTLCOLORBTN, sent|optional },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CTLCOLORSTATIC, sent|defwinproc|optional },
     { WM_CAPTURECHANGED, sent|defwinproc },
     { WM_COMMAND, sent },
@@ -6701,7 +6701,7 @@ static const struct message WmClearStateOwnerdrawSeq[] =
     { BM_SETSTATE, sent },
     { WM_CTLCOLORBTN, sent|parent },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_BUTTON, 0x000020e4 },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
@@ -7247,26 +7247,26 @@ static const struct message auto_radio_button_BM_CLICK[] =
 {
     { BM_CLICK, sent|wparam|lparam, 0, 0 },
     { WM_LBUTTONDOWN, sent|wparam|lparam|defwinproc, 0, 0 },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { BM_SETSTATE, sent|wparam|lparam|defwinproc, BST_CHECKED, ID_RADIO2 },
     { WM_CTLCOLORSTATIC, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_LBUTTONUP, sent|wparam|lparam|defwinproc, 0, 0 },
     { BM_SETSTATE, sent|wparam|lparam|defwinproc, BST_UNCHECKED, ID_RADIO2 },
     { WM_CTLCOLORSTATIC, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETDLGCODE, sent|wparam|lparam|defwinproc, ID_RADIO2, 0 },
     { BM_SETCHECK, sent|wparam|lparam|defwinproc, BST_CHECKED, ID_RADIO2 },
     { WM_GETDLGCODE, sent|wparam|lparam|defwinproc, ID_RADIO1, 0 },
     { BM_SETCHECK, sent|wparam|lparam|defwinproc, 0, ID_RADIO1 },
     { WM_CTLCOLORSTATIC, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETDLGCODE, sent|wparam|lparam|defwinproc, ID_RADIO3, 0 },
     { BM_SETCHECK, sent|wparam|lparam|defwinproc, 0, ID_RADIO3 },
     { WM_CTLCOLORSTATIC, sent|parent },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETDLGCODE, sent|wparam|lparam|defwinproc, ID_TEXT, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|wparam|lparam|defwinproc, 0, 0 },
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_RADIO2, BN_CLICKED) },
     { WM_NCHITTEST, sent|optional, 0, 0 },
@@ -10256,7 +10256,8 @@ static const struct message WmAltVkN[] = {
     { WM_INITMENU, sent|defwinproc },
     { EVENT_SYSTEM_MENUSTART, winevent_hook|wparam|lparam|msg_todo, OBJID_SYSMENU, 0 },
     { WM_MENUCHAR, sent|defwinproc|wparam, MAKEWPARAM('n',MF_SYSMENU) },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|wine_only, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|defwinproc },
     { WM_MENUSELECT, sent|defwinproc|wparam, MAKEWPARAM(0,0xffff) },
     { EVENT_SYSTEM_MENUEND, winevent_hook|wparam|lparam|msg_todo, OBJID_SYSMENU, 0 },
@@ -12797,16 +12798,17 @@ static void test_scrollwindowex(void)
 }
 
 static const struct message destroy_window_with_children[] = {
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 }, /* popup */
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 }, /* popup */
     { HCBT_DESTROYWND, hook|lparam, 0, WND_PARENT_ID }, /* parent */
     { 0x0090, sent|optional },
     { HCBT_DESTROYWND, hook|lparam, 0, WND_POPUP_ID }, /* popup */
     { 0x0090, sent|optional },
     { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 }, /* popup */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|wine_only, 0, 0 }, /* popup */
     { WM_CAPTURECHANGED, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
     { WM_NCDESTROY, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 }, /* parent */
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 }, /* parent */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_PARENT_ID }, /* parent */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_CHILD_ID + 2 }, /* child2 */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_CHILD_ID + 1 }, /* child1 */
@@ -13214,12 +13216,13 @@ static const struct message sl_edit_killfocus[] =
 static const struct message sl_edit_lbutton_dblclk[] =
 {
     { WM_LBUTTONDBLCLK, sent },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { 0 }
 };
 static const struct message sl_edit_lbutton_down[] =
 {
     { WM_LBUTTONDOWN, sent|wparam|lparam, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|wine_only, 0, 0 },
     { HCBT_SETFOCUS, hook },
     { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
@@ -13244,7 +13247,7 @@ static const struct message sl_edit_lbutton_down[] =
 static const struct message ml_edit_lbutton_down[] =
 {
     { WM_LBUTTONDOWN, sent|wparam|lparam, 0, 0 },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_SETFOCUS, hook },
     { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
@@ -13262,7 +13265,7 @@ static const struct message sl_edit_lbutton_up[] =
 {
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam|msg_todo, OBJID_CARET, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|defwinproc },
     { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam|msg_todo, OBJID_CARET, 0 },
     { 0 }
@@ -13270,7 +13273,7 @@ static const struct message sl_edit_lbutton_up[] =
 static const struct message ml_edit_lbutton_up[] =
 {
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|defwinproc },
     { 0 }
 };
@@ -14490,10 +14493,10 @@ static const struct message WmQuitDialogSeq[] = {
     { WM_SETFONT, sent },
     { WM_INITDIALOG, sent },
     { WM_CHANGEUISTATE, sent|optional },
-    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_DESTROYWND, hook },
     { 0x0090, sent|optional }, /* Vista */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -15991,7 +15994,7 @@ static void test_dialog_messages(void)
 static void test_enddialog_seq(HWND dialog, HWND owner)
 {
     const struct message seq[] = {
-        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
         { WM_ENABLE, sent },
         { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
         { HCBT_ACTIVATE, hook|wparam, (WPARAM)owner },
@@ -16019,7 +16022,7 @@ static void test_enddialog_seq(HWND dialog, HWND owner)
 static void test_enddialog_seq2(HWND dialog, HWND owner)
 {
     const struct message seq[] = {
-        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
         { WM_ENABLE, parent|sent },
         { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
         { HCBT_ACTIVATE, hook|wparam, (WPARAM)owner },
@@ -16802,8 +16805,8 @@ static const struct message wm_lb_setcursel_0[] =
     { LB_SETCURSEL, sent|wparam|lparam, 0, 0 },
     { WM_CTLCOLORLISTBOX, sent|parent },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000120f2 },
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
-    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { 0 }
 };
 static const struct message wm_lb_setcursel_1[] =
@@ -16813,8 +16816,8 @@ static const struct message wm_lb_setcursel_1[] =
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000020f2 },
     { WM_CTLCOLORLISTBOX, sent|parent },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000121f2 },
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 2 },
-    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 2 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 2 },
+    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam, OBJID_CLIENT, 2 },
     { 0 }
 };
 static const struct message wm_lb_setcursel_2[] =
@@ -16824,8 +16827,8 @@ static const struct message wm_lb_setcursel_2[] =
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000021f2 },
     { WM_CTLCOLORLISTBOX, sent|parent },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000122f2 },
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 3 },
-    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 3 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 3 },
+    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam, OBJID_CLIENT, 3 },
     { 0 }
 };
 static const struct message wm_lb_click_0[] =
@@ -16840,9 +16843,9 @@ static const struct message wm_lb_click_0[] =
 
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x001142f2 },
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_LISTBOX, LBN_SETFOCUS) },
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 3 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 3 },
     { WM_LBTRACKPOINT, sent|wparam|lparam|parent, 0, MAKELPARAM(1,1) },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
 
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000142f2 },
     { WM_CTLCOLORLISTBOX, sent|parent },
@@ -16851,11 +16854,11 @@ static const struct message wm_lb_click_0[] =
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x000120f2 },
     { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x001140f2 },
 
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
-    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_SELECTION, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
 
     { WM_LBUTTONUP, sent|wparam|lparam, 0, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent|wparam|lparam|defwinproc, 0, 0 },
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_LISTBOX, LBN_SELCHANGE) },
     { 0 }
@@ -16863,7 +16866,7 @@ static const struct message wm_lb_click_0[] =
 static const struct message wm_lb_deletestring[] =
 {
     { LB_DELETESTRING, sent|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { WM_DELETEITEM, sent|wparam|parent|optional, ID_LISTBOX, 0 },
     { WM_DRAWITEM, sent|wparam|parent|optional, ID_LISTBOX },
     { WM_DRAWITEM, sent|wparam|parent|optional, ID_LISTBOX },
@@ -16872,7 +16875,7 @@ static const struct message wm_lb_deletestring[] =
 static const struct message wm_lb_deletestring_reset[] =
 {
     { LB_DELETESTRING, sent|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { LB_RESETCONTENT, sent|wparam|lparam|defwinproc|optional, 0, 0 },
     { WM_DELETEITEM, sent|wparam|parent|optional, ID_LISTBOX, 0 },
     { WM_DRAWITEM, sent|wparam|parent|optional, ID_LISTBOX },
@@ -16882,41 +16885,41 @@ static const struct message wm_lb_deletestring_reset[] =
 static const struct message wm_lb_addstring[] =
 {
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ef },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ed },
     /* Child ID changes each test, don't test lparam. */
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam, OBJID_CLIENT, 0 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ee },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|msg_todo, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam, OBJID_CLIENT, 0 },
     { 0 }
 };
 static const struct message wm_lb_addstring_ownerdraw[] =
 {
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ed },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf0f2, 0xf30604ed },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ee },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf1f2, 0xf30604ee },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 2 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 2 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ef },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf2f2, 0xf30604ef },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 3 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 3 },
     { 0 }
 };
 static const struct message wm_lb_addstring_sort_ownerdraw[] =
 {
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ed },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf0f2, 0xf30604ed },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 1 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 1 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ee },
     { WM_COMPAREITEM, sent|wparam|lparam|parent, 0xf30604ed, 0xf30604ee },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf1f2, 0xf30604ee },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 2 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 2 },
     { LB_ADDSTRING, sent|wparam|lparam, 0, 0xf30604ef },
     { WM_COMPAREITEM, sent|wparam|lparam|parent, 0xf30604ed, 0xf30604ef },
     { WM_COMPAREITEM, sent|wparam|lparam|parent, 0xf30604ee, 0xf30604ef },
     { WM_MEASUREITEM, sent|wparam|lparam|parent, 0xf2f2, 0xf30604ef },
-    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 3 },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CLIENT, 3 },
     { 0 }
 };
 static const struct message wm_lb_dblclick_0[] =
@@ -17245,7 +17248,7 @@ static const struct message wm_popup_menu_1[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't create a window */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },
@@ -17295,12 +17298,12 @@ static const struct message wm_popup_menu_2[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't send it */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },
@@ -17350,12 +17353,12 @@ static const struct message wm_popup_menu_3[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|msg_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't send it */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },
@@ -17633,8 +17636,8 @@ static void test_paintingloop(void)
 
 static const struct message NCRBUTTONDOWNSeq[] =
 {
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent },
     { WM_CONTEXTMENU, sent, /*hwnd*/0, -1 },
     { 0 }
@@ -20222,9 +20225,9 @@ static void test_InSendMessage(void)
 
 static const struct message DoubleSetCaptureSeq[] =
 {
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
-    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
-    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam|msg_todo, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
+    { EVENT_SYSTEM_CAPTUREEND, winevent_hook|wparam|lparam, 0, 0 },
+    { EVENT_SYSTEM_CAPTURESTART, winevent_hook|wparam|lparam, 0, 0 },
     { WM_CAPTURECHANGED, sent },
     { 0 }
 };

@@ -28,6 +28,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "mshtmdid.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -202,7 +203,7 @@ static void HTMLDOMImplementation_destructor(DispatchEx *dispex)
     free(This);
 }
 
-static const dispex_static_data_vtbl_t HTMLDOMImplementation_dispex_vtbl = {
+static const dispex_static_data_vtbl_t DOMImplementation_dispex_vtbl = {
     .query_interface  = HTMLDOMImplementation_query_interface,
     .destructor       = HTMLDOMImplementation_destructor,
     .traverse         = HTMLDOMImplementation_traverse,
@@ -219,12 +220,12 @@ static const tid_t HTMLDOMImplementation_iface_tids[] = {
     IHTMLDOMImplementation_tid,
     0
 };
-static dispex_static_data_t HTMLDOMImplementation_dispex = {
-    "DOMImplementation",
-    &HTMLDOMImplementation_dispex_vtbl,
-    DispHTMLDOMImplementation_tid,
-    HTMLDOMImplementation_iface_tids,
-    HTMLDOMImplementation_init_dispex_info
+dispex_static_data_t DOMImplementation_dispex = {
+    .id         = PROT_DOMImplementation,
+    .vtbl       = &DOMImplementation_dispex_vtbl,
+    .disp_tid   = DispHTMLDOMImplementation_tid,
+    .iface_tids = HTMLDOMImplementation_iface_tids,
+    .init_info  = HTMLDOMImplementation_init_dispex_info,
 };
 
 HRESULT create_dom_implementation(HTMLDocumentNode *doc_node, IHTMLDOMImplementation **ret)
@@ -243,7 +244,7 @@ HRESULT create_dom_implementation(HTMLDocumentNode *doc_node, IHTMLDOMImplementa
     dom_implementation->IHTMLDOMImplementation2_iface.lpVtbl = &HTMLDOMImplementation2Vtbl;
     dom_implementation->doc = doc_node;
 
-    init_dispatch(&dom_implementation->dispex, &HTMLDOMImplementation_dispex, doc_node->script_global, doc_node->document_mode);
+    init_dispatch(&dom_implementation->dispex, &DOMImplementation_dispex, doc_node->script_global, doc_node->document_mode);
 
     nsres = nsIDOMDocument_GetImplementation(doc_node->dom_document, &dom_implementation->implementation);
     if(NS_FAILED(nsres)) {
@@ -415,15 +416,15 @@ static const dispex_static_data_vtbl_t HTMLScreen_dispex_vtbl = {
     .destructor       = HTMLScreen_destructor,
 };
 
-static const tid_t HTMLScreen_iface_tids[] = {
+static const tid_t Screen_iface_tids[] = {
     IHTMLScreen_tid,
     0
 };
-static dispex_static_data_t HTMLScreen_dispex = {
-    "Screen",
-    &HTMLScreen_dispex_vtbl,
-    DispHTMLScreen_tid,
-    HTMLScreen_iface_tids
+dispex_static_data_t Screen_dispex = {
+    .id         = PROT_Screen,
+    .vtbl       = &HTMLScreen_dispex_vtbl,
+    .disp_tid   = DispHTMLScreen_tid,
+    .iface_tids = Screen_iface_tids,
 };
 
 HRESULT create_html_screen(HTMLInnerWindow *window, IHTMLScreen **ret)
@@ -436,7 +437,7 @@ HRESULT create_html_screen(HTMLInnerWindow *window, IHTMLScreen **ret)
 
     screen->IHTMLScreen_iface.lpVtbl = &HTMLSreenVtbl;
 
-    init_dispatch(&screen->dispex, &HTMLScreen_dispex, window,
+    init_dispatch(&screen->dispex, &Screen_dispex, window,
                   dispex_compat_mode(&window->event_target.dispex));
 
     *ret = &screen->IHTMLScreen_iface;
@@ -548,15 +549,15 @@ static const dispex_static_data_vtbl_t OmHistory_dispex_vtbl = {
     .unlink           = OmHistory_unlink,
 };
 
-static const tid_t OmHistory_iface_tids[] = {
+static const tid_t History_iface_tids[] = {
     IOmHistory_tid,
     0
 };
-static dispex_static_data_t OmHistory_dispex = {
-    "History",
-    &OmHistory_dispex_vtbl,
-    DispHTMLHistory_tid,
-    OmHistory_iface_tids
+dispex_static_data_t History_dispex = {
+    .id         = PROT_History,
+    .vtbl       = &OmHistory_dispex_vtbl,
+    .disp_tid   = DispHTMLHistory_tid,
+    .iface_tids = History_iface_tids,
 };
 
 
@@ -568,7 +569,7 @@ HRESULT create_history(HTMLInnerWindow *window, OmHistory **ret)
     if(!history)
         return E_OUTOFMEMORY;
 
-    init_dispatch(&history->dispex, &OmHistory_dispex, window,
+    init_dispatch(&history->dispex, &History_dispex, window,
                   dispex_compat_mode(&window->event_target.dispex));
     history->IOmHistory_iface.lpVtbl = &OmHistoryVtbl;
 
@@ -663,15 +664,15 @@ static const dispex_static_data_vtbl_t HTMLPluginsCollection_dispex_vtbl = {
     .unlink           = HTMLPluginsCollection_unlink
 };
 
-static const tid_t HTMLPluginsCollection_iface_tids[] = {
+static const tid_t PluginArray_iface_tids[] = {
     IHTMLPluginsCollection_tid,
     0
 };
-static dispex_static_data_t HTMLPluginsCollection_dispex = {
-    "PluginArray",
-    &HTMLPluginsCollection_dispex_vtbl,
-    DispCPlugins_tid,
-    HTMLPluginsCollection_iface_tids
+dispex_static_data_t PluginArray_dispex = {
+    .id         = PROT_PluginArray,
+    .vtbl       = &HTMLPluginsCollection_dispex_vtbl,
+    .disp_tid   = DispCPlugins_tid,
+    .iface_tids = PluginArray_iface_tids,
 };
 
 static HRESULT create_plugins_collection(OmNavigator *navigator, HTMLPluginsCollection **ret)
@@ -685,8 +686,7 @@ static HRESULT create_plugins_collection(OmNavigator *navigator, HTMLPluginsColl
     col->IHTMLPluginsCollection_iface.lpVtbl = &HTMLPluginsCollectionVtbl;
     col->navigator = navigator;
 
-    init_dispatch(&col->dispex, &HTMLPluginsCollection_dispex, NULL,
-                  dispex_compat_mode(&navigator->dispex));
+    init_dispatch_with_owner(&col->dispex, &PluginArray_dispex, &navigator->dispex);
 
     *ret = col;
     return S_OK;
@@ -765,15 +765,15 @@ static const dispex_static_data_vtbl_t HTMLMimeTypesCollection_dispex_vtbl = {
     .unlink           = HTMLMimeTypesCollection_unlink
 };
 
-static const tid_t HTMLMimeTypesCollection_iface_tids[] = {
+static const tid_t MimeTypeArray_iface_tids[] = {
     IHTMLMimeTypesCollection_tid,
     0
 };
-static dispex_static_data_t HTMLMimeTypesCollection_dispex = {
-    "MimeTypeArray",
-    &HTMLMimeTypesCollection_dispex_vtbl,
-    IHTMLMimeTypesCollection_tid,
-    HTMLMimeTypesCollection_iface_tids
+dispex_static_data_t MimeTypeArray_dispex = {
+    .id         = PROT_MimeTypeArray,
+    .vtbl       = &HTMLMimeTypesCollection_dispex_vtbl,
+    .disp_tid   = IHTMLMimeTypesCollection_tid,
+    .iface_tids = MimeTypeArray_iface_tids,
 };
 
 static HRESULT create_mime_types_collection(OmNavigator *navigator, HTMLMimeTypesCollection **ret)
@@ -787,8 +787,7 @@ static HRESULT create_mime_types_collection(OmNavigator *navigator, HTMLMimeType
     col->IHTMLMimeTypesCollection_iface.lpVtbl = &HTMLMimeTypesCollectionVtbl;
     col->navigator = navigator;
 
-    init_dispatch(&col->dispex, &HTMLMimeTypesCollection_dispex, NULL,
-                  dispex_compat_mode(&navigator->dispex));
+    init_dispatch_with_owner(&col->dispex, &MimeTypeArray_dispex, &navigator->dispex);
 
     *ret = col;
     return S_OK;
@@ -1142,21 +1141,21 @@ static void OmNavigator_destructor(DispatchEx *dispex)
     free(This);
 }
 
-static const dispex_static_data_vtbl_t OmNavigator_dispex_vtbl = {
+static const dispex_static_data_vtbl_t Navigator_dispex_vtbl = {
     .query_interface  = OmNavigator_query_interface,
     .destructor       = OmNavigator_destructor,
     .unlink           = OmNavigator_unlink
 };
 
-static const tid_t OmNavigator_iface_tids[] = {
+static const tid_t Navigator_iface_tids[] = {
     IOmNavigator_tid,
     0
 };
-static dispex_static_data_t OmNavigator_dispex = {
-    "Navigator",
-    &OmNavigator_dispex_vtbl,
-    DispHTMLNavigator_tid,
-    OmNavigator_iface_tids
+dispex_static_data_t Navigator_dispex = {
+    .id         = PROT_Navigator,
+    .vtbl       = &Navigator_dispex_vtbl,
+    .disp_tid   = DispHTMLNavigator_tid,
+    .iface_tids = Navigator_iface_tids,
 };
 
 HRESULT create_navigator(HTMLInnerWindow *script_global, IOmNavigator **navigator)
@@ -1169,7 +1168,7 @@ HRESULT create_navigator(HTMLInnerWindow *script_global, IOmNavigator **navigato
 
     ret->IOmNavigator_iface.lpVtbl = &OmNavigatorVtbl;
 
-    init_dispatch(&ret->dispex, &OmNavigator_dispex, script_global,
+    init_dispatch(&ret->dispex, &Navigator_dispex, script_global,
                   dispex_compat_mode(&script_global->event_target.dispex));
 
     *navigator = &ret->IOmNavigator_iface;
@@ -1522,15 +1521,15 @@ static const dispex_static_data_vtbl_t HTMLPerformanceTiming_dispex_vtbl = {
     .unlink           = HTMLPerformanceTiming_unlink
 };
 
-static const tid_t HTMLPerformanceTiming_iface_tids[] = {
+static const tid_t PerformanceTiming_iface_tids[] = {
     IHTMLPerformanceTiming_tid,
     0
 };
-static dispex_static_data_t HTMLPerformanceTiming_dispex = {
-    "PerformanceTiming",
-    &HTMLPerformanceTiming_dispex_vtbl,
-    IHTMLPerformanceTiming_tid,
-    HTMLPerformanceTiming_iface_tids
+dispex_static_data_t PerformanceTiming_dispex = {
+    .id         = PROT_PerformanceTiming,
+    .vtbl       = &HTMLPerformanceTiming_dispex_vtbl,
+    .disp_tid   = IHTMLPerformanceTiming_tid,
+    .iface_tids = PerformanceTiming_iface_tids,
 };
 
 typedef struct {
@@ -1643,15 +1642,15 @@ static const dispex_static_data_vtbl_t HTMLPerformanceNavigation_dispex_vtbl = {
     .unlink           = HTMLPerformanceNavigation_unlink
 };
 
-static const tid_t HTMLPerformanceNavigation_iface_tids[] = {
+static const tid_t PerformanceNavigation_iface_tids[] = {
     IHTMLPerformanceNavigation_tid,
     0
 };
-static dispex_static_data_t HTMLPerformanceNavigation_dispex = {
-    "PerformanceNavigation",
-    &HTMLPerformanceNavigation_dispex_vtbl,
-    IHTMLPerformanceNavigation_tid,
-    HTMLPerformanceNavigation_iface_tids
+dispex_static_data_t PerformanceNavigation_dispex = {
+    .id         = PROT_PerformanceNavigation,
+    .vtbl       = &HTMLPerformanceNavigation_dispex_vtbl,
+    .disp_tid   = IHTMLPerformanceNavigation_tid,
+    .iface_tids = PerformanceNavigation_iface_tids,
 };
 
 typedef struct {
@@ -1688,7 +1687,7 @@ static HRESULT WINAPI HTMLPerformance_get_navigation(IHTMLPerformance *iface,
         navigation->window = This->window;
         IHTMLWindow2_AddRef(&This->window->base.IHTMLWindow2_iface);
 
-        init_dispatch(&navigation->dispex, &HTMLPerformanceNavigation_dispex, This->window,
+        init_dispatch(&navigation->dispex, &PerformanceNavigation_dispex, This->window,
                       dispex_compat_mode(&This->dispex));
 
         This->navigation = &navigation->IHTMLPerformanceNavigation_iface;
@@ -1715,7 +1714,7 @@ static HRESULT WINAPI HTMLPerformance_get_timing(IHTMLPerformance *iface, IHTMLP
         timing->window = This->window;
         IHTMLWindow2_AddRef(&This->window->base.IHTMLWindow2_iface);
 
-        init_dispatch(&timing->dispex, &HTMLPerformanceTiming_dispex, This->window,
+        init_dispatch(&timing->dispex, &PerformanceTiming_dispex, This->window,
                       dispex_compat_mode(&This->dispex));
 
         This->timing = &timing->IHTMLPerformanceTiming_iface;
@@ -1806,15 +1805,15 @@ static const dispex_static_data_vtbl_t HTMLPerformance_dispex_vtbl = {
     .unlink           = HTMLPerformance_unlink
 };
 
-static const tid_t HTMLPerformance_iface_tids[] = {
+static const tid_t Performance_iface_tids[] = {
     IHTMLPerformance_tid,
     0
 };
-static dispex_static_data_t HTMLPerformance_dispex = {
-    "Performance",
-    &HTMLPerformance_dispex_vtbl,
-    IHTMLPerformance_tid,
-    HTMLPerformance_iface_tids
+dispex_static_data_t Performance_dispex = {
+    .id         = PROT_Performance,
+    .vtbl       = &HTMLPerformance_dispex_vtbl,
+    .disp_tid   = IHTMLPerformance_tid,
+    .iface_tids = Performance_iface_tids,
 };
 
 HRESULT create_performance(HTMLInnerWindow *window, IHTMLPerformance **ret)
@@ -1830,7 +1829,7 @@ HRESULT create_performance(HTMLInnerWindow *window, IHTMLPerformance **ret)
     performance->window = window;
     IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
 
-    init_dispatch(&performance->dispex, &HTMLPerformance_dispex, window, compat_mode);
+    init_dispatch(&performance->dispex, &Performance_dispex, window, compat_mode);
 
     *ret = &performance->IHTMLPerformance_iface;
     return S_OK;
@@ -1911,18 +1910,19 @@ static const dispex_static_data_vtbl_t HTMLNamespaceCollection_dispex_vtbl = {
     .destructor       = HTMLNamespaceCollection_destructor,
 };
 
-static const tid_t HTMLNamespaceCollection_iface_tids[] = {
+static const tid_t MSNamespaceInfoCollection_iface_tids[] = {
     IHTMLNamespaceCollection_tid,
     0
 };
-static dispex_static_data_t HTMLNamespaceCollection_dispex = {
-    "MSNamespaceInfoCollection",
-    &HTMLNamespaceCollection_dispex_vtbl,
-    DispHTMLNamespaceCollection_tid,
-    HTMLNamespaceCollection_iface_tids
+dispex_static_data_t MSNamespaceInfoCollection_dispex = {
+    .id              = PROT_MSNamespaceInfoCollection,
+    .vtbl            = &HTMLNamespaceCollection_dispex_vtbl,
+    .disp_tid        = DispHTMLNamespaceCollection_tid,
+    .iface_tids      = MSNamespaceInfoCollection_iface_tids,
+    .max_compat_mode = COMPAT_MODE_IE9,
 };
 
-HRESULT create_namespace_collection(compat_mode_t compat_mode, IHTMLNamespaceCollection **ret)
+HRESULT create_namespace_collection(HTMLDocumentNode *doc, IHTMLNamespaceCollection **ret)
 {
     HTMLNamespaceCollection *namespaces;
 
@@ -1930,7 +1930,8 @@ HRESULT create_namespace_collection(compat_mode_t compat_mode, IHTMLNamespaceCol
         return E_OUTOFMEMORY;
 
     namespaces->IHTMLNamespaceCollection_iface.lpVtbl = &HTMLNamespaceCollectionVtbl;
-    init_dispatch(&namespaces->dispex, &HTMLNamespaceCollection_dispex, NULL, compat_mode);
+    init_dispatch(&namespaces->dispex, &MSNamespaceInfoCollection_dispex, doc->script_global,
+                  dispex_compat_mode(&doc->node.event_target.dispex));
     *ret = &namespaces->IHTMLNamespaceCollection_iface;
     return S_OK;
 }
@@ -2106,20 +2107,21 @@ static void console_destructor(DispatchEx *dispex)
     free(console);
 }
 
-static const dispex_static_data_vtbl_t console_dispex_vtbl = {
+static const dispex_static_data_vtbl_t Console_dispex_vtbl = {
     .query_interface  = console_query_interface,
     .destructor       = console_destructor,
 };
 
-static const tid_t console_iface_tids[] = {
+static const tid_t Console_iface_tids[] = {
     IWineMSHTMLConsole_tid,
     0
 };
-static dispex_static_data_t console_dispex = {
-    "Console",
-    &console_dispex_vtbl,
-    IWineMSHTMLConsole_tid,
-    console_iface_tids
+dispex_static_data_t Console_dispex = {
+    .id              = PROT_Console,
+    .vtbl            = &Console_dispex_vtbl,
+    .disp_tid        = IWineMSHTMLConsole_tid,
+    .iface_tids      = Console_iface_tids,
+    .min_compat_mode = COMPAT_MODE_IE10,
 };
 
 void create_console(HTMLInnerWindow *window, IWineMSHTMLConsole **ret)
@@ -2134,7 +2136,7 @@ void create_console(HTMLInnerWindow *window, IWineMSHTMLConsole **ret)
     }
 
     obj->IWineMSHTMLConsole_iface.lpVtbl = &WineMSHTMLConsoleVtbl;
-    init_dispatch(&obj->dispex, &console_dispex, window, dispex_compat_mode(&window->event_target.dispex));
+    init_dispatch(&obj->dispex, &Console_dispex, window, dispex_compat_mode(&window->event_target.dispex));
 
     *ret = &obj->IWineMSHTMLConsole_iface;
 }
@@ -2352,7 +2354,7 @@ static inline struct media_query_list *media_query_list_from_DispatchEx(Dispatch
     return CONTAINING_RECORD(iface, struct media_query_list, dispex);
 }
 
-static void *media_query_list_query_interface(DispatchEx *dispex, REFIID riid)
+static void *MediaQueryList_query_interface(DispatchEx *dispex, REFIID riid)
 {
     struct media_query_list *media_query_list = media_query_list_from_DispatchEx(dispex);
 
@@ -2362,7 +2364,7 @@ static void *media_query_list_query_interface(DispatchEx *dispex, REFIID riid)
     return NULL;
 }
 
-static void media_query_list_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
+static void MediaQueryList_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
 {
     struct media_query_list *media_query_list = media_query_list_from_DispatchEx(dispex);
     struct media_query_list_listener *listener;
@@ -2373,7 +2375,7 @@ static void media_query_list_traverse(DispatchEx *dispex, nsCycleCollectionTrave
         note_cc_edge((nsISupports*)media_query_list->nsquerylist, "nsquerylist", cb);
 }
 
-static void media_query_list_unlink(DispatchEx *dispex)
+static void MediaQueryList_unlink(DispatchEx *dispex)
 {
     struct media_query_list *media_query_list = media_query_list_from_DispatchEx(dispex);
 
@@ -2387,29 +2389,30 @@ static void media_query_list_unlink(DispatchEx *dispex)
     unlink_ref(&media_query_list->nsquerylist);
 }
 
-static void media_query_list_destructor(DispatchEx *dispex)
+static void MediaQueryList_destructor(DispatchEx *dispex)
 {
     struct media_query_list *media_query_list = media_query_list_from_DispatchEx(dispex);
     nsIDOMMediaQueryListListener_Release(&media_query_list->callback->nsIDOMMediaQueryListListener_iface);
     free(media_query_list);
 }
 
-static const dispex_static_data_vtbl_t media_query_list_dispex_vtbl = {
-    .query_interface  = media_query_list_query_interface,
-    .destructor       = media_query_list_destructor,
-    .traverse         = media_query_list_traverse,
-    .unlink           = media_query_list_unlink
+static const dispex_static_data_vtbl_t MediaQueryList_dispex_vtbl = {
+    .query_interface  = MediaQueryList_query_interface,
+    .destructor       = MediaQueryList_destructor,
+    .traverse         = MediaQueryList_traverse,
+    .unlink           = MediaQueryList_unlink
 };
 
-static const tid_t media_query_list_iface_tids[] = {
+static const tid_t MediaQueryList_iface_tids[] = {
     IWineMSHTMLMediaQueryList_tid,
     0
 };
-static dispex_static_data_t media_query_list_dispex = {
-    "MediaQueryList",
-    &media_query_list_dispex_vtbl,
-    IWineMSHTMLMediaQueryList_tid,
-    media_query_list_iface_tids
+dispex_static_data_t MediaQueryList_dispex = {
+    .id              = PROT_MediaQueryList,
+    .vtbl            = &MediaQueryList_dispex_vtbl,
+    .disp_tid        = IWineMSHTMLMediaQueryList_tid,
+    .iface_tids      = MediaQueryList_iface_tids,
+    .min_compat_mode = COMPAT_MODE_IE10,
 };
 
 HRESULT create_media_query_list(HTMLInnerWindow *window, BSTR media_query, IDispatch **ret)
@@ -2450,7 +2453,7 @@ HRESULT create_media_query_list(HTMLInnerWindow *window, BSTR media_query, IDisp
 
     media_query_list->IWineMSHTMLMediaQueryList_iface.lpVtbl = &media_query_list_vtbl;
     list_init(&media_query_list->listeners);
-    init_dispatch(&media_query_list->dispex, &media_query_list_dispex, window,
+    init_dispatch(&media_query_list->dispex, &MediaQueryList_dispex, window,
                   dispex_compat_mode(&window->event_target.dispex));
 
     *ret = (IDispatch*)&media_query_list->IWineMSHTMLMediaQueryList_iface;

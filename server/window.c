@@ -84,6 +84,7 @@ struct window
     unsigned int     alpha;           /* alpha value for a layered window */
     unsigned int     layered_flags;   /* flags for a layered window */
     unsigned int     dpi_context;     /* DPI awareness context */
+    unsigned int     monitor_dpi;     /* DPI of the window monitor */
     lparam_t         user_data;       /* user-specific data */
     WCHAR           *text;            /* window caption text */
     data_size_t      text_len;        /* length of window caption */
@@ -123,9 +124,10 @@ static const struct object_ops window_ops =
 };
 
 /* flags that can be set by the client */
-#define PAINT_HAS_SURFACE        SET_WINPOS_PAINT_SURFACE
-#define PAINT_HAS_PIXEL_FORMAT   SET_WINPOS_PIXEL_FORMAT
-#define PAINT_CLIENT_FLAGS       (PAINT_HAS_SURFACE | PAINT_HAS_PIXEL_FORMAT)
+#define PAINT_HAS_SURFACE          SET_WINPOS_PAINT_SURFACE
+#define PAINT_HAS_PIXEL_FORMAT     SET_WINPOS_PIXEL_FORMAT
+#define PAINT_HAS_LAYERED_SURFACE  SET_WINPOS_LAYERED_WINDOW
+#define PAINT_CLIENT_FLAGS         (PAINT_HAS_SURFACE | PAINT_HAS_PIXEL_FORMAT | PAINT_HAS_LAYERED_SURFACE)
 /* flags only manipulated by the server */
 #define PAINT_INTERNAL           0x0010  /* internal WM_PAINT pending */
 #define PAINT_ERASE              0x0020  /* needs WM_ERASEBKGND */
@@ -142,12 +144,6 @@ struct user_handle_array
 };
 
 static const rectangle_t empty_rect;
-
-/* global window pointers */
-static struct window *shell_window;
-static struct window *shell_listview;
-static struct window *progman_window;
-static struct window *taskman_window;
 
 /* magic HWND_TOP etc. pointers */
 #define WINPTR_TOP       ((struct window *)1L)
@@ -244,20 +240,17 @@ static inline void update_pixel_format_flags( struct window *win )
         win->paint_flags |= PAINT_PIXEL_FORMAT_CHILD;
 }
 
-static unsigned int get_window_dpi( struct window *win )
-{
-    unsigned int dpi;
-    if ((dpi = NTUSER_DPI_CONTEXT_GET_DPI( win->dpi_context ))) return dpi;
-    /* FIXME: return the window monitor DPI? */
-    return USER_DEFAULT_SCREEN_DPI;
-}
-
 /* get the per-monitor DPI for a window */
 static unsigned int get_monitor_dpi( struct window *win )
 {
-    /* FIXME: we return the desktop window DPI for now */
-    while (!is_desktop_window( win )) win = win->parent;
-    return get_window_dpi( win );
+    while (win->parent && !is_desktop_window( win->parent )) win = win->parent;
+    return win->monitor_dpi;
+}
+
+static unsigned int get_window_dpi( struct window *win )
+{
+    if (NTUSER_DPI_CONTEXT_IS_MONITOR_AWARE( win->dpi_context )) return get_monitor_dpi( win );
+    return NTUSER_DPI_CONTEXT_GET_DPI( win->dpi_context );
 }
 
 /* link a window at the right place in the siblings list */
@@ -565,7 +558,6 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->desktop        = desktop;
     win->class          = class;
     win->atom           = atom;
-    win->last_active    = win->handle;
     win->win_region     = NULL;
     win->update_region  = NULL;
     win->style          = 0;
@@ -577,6 +569,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_layered     = 0;
     win->is_orphan      = 0;
     win->dpi_context    = NTUSER_DPI_PER_MONITOR_AWARE;
+    win->monitor_dpi    = USER_DEFAULT_SCREEN_DPI;
     win->user_data      = 0;
     win->text           = NULL;
     win->text_len       = 0;
@@ -597,6 +590,7 @@ static struct window *create_window( struct window *parent, struct window *owner
         win->nb_extra_bytes = extra_bytes;
     }
     if (!(win->handle = alloc_user_handle( win, USER_WINDOW ))) goto failed;
+    win->last_active = win->handle;
 
     /* if parent belongs to a different thread and the window isn't */
     /* top-level, attach the two threads */
@@ -2022,10 +2016,10 @@ void free_window_handle( struct window *win )
     }
 
     /* reset global window pointers, if the corresponding window is destroyed */
-    if (win == shell_window) shell_window = NULL;
-    if (win == shell_listview) shell_listview = NULL;
-    if (win == progman_window) progman_window = NULL;
-    if (win == taskman_window) taskman_window = NULL;
+    if (win == win->desktop->shell_window) win->desktop->shell_window = NULL;
+    if (win == win->desktop->shell_listview) win->desktop->shell_listview = NULL;
+    if (win == win->desktop->progman_window) win->desktop->progman_window = NULL;
+    if (win == win->desktop->taskman_window) win->desktop->taskman_window = NULL;
     free_hotkeys( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
     destroy_properties( win );
@@ -2475,8 +2469,11 @@ DECL_HANDLER(set_window_pos)
     win->paint_flags = (win->paint_flags & ~PAINT_CLIENT_FLAGS) | (req->paint_flags & PAINT_CLIENT_FLAGS);
     if (win->paint_flags & PAINT_HAS_PIXEL_FORMAT) update_pixel_format_flags( win );
 
+    win->monitor_dpi = req->monitor_dpi;
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
+
+    if (win->paint_flags & SET_WINPOS_LAYERED_WINDOW) validate_whole_window( win );
 
     reply->new_style = win->style;
     reply->new_ex_style = win->ex_style;
@@ -2915,9 +2912,9 @@ DECL_HANDLER(get_window_properties)
 }
 
 
-/* get the new window pointer for a global window, checking permissions */
-/* helper for set_global_windows request */
-static int get_new_global_window( struct window **win, user_handle_t handle )
+/* get the new window pointer for a desktop shell window, checking permissions */
+/* helper for set_desktop_shell_windows request */
+static int get_new_shell_window( struct window **win, user_handle_t handle )
 {
     if (!handle)
     {
@@ -2933,36 +2930,44 @@ static int get_new_global_window( struct window **win, user_handle_t handle )
     return (*win != NULL);
 }
 
-/* Set/get the global windows */
-DECL_HANDLER(set_global_windows)
+/* Set/get the desktop shell windows */
+DECL_HANDLER(set_desktop_shell_windows)
 {
-    struct window *new_shell_window   = shell_window;
-    struct window *new_shell_listview = shell_listview;
-    struct window *new_progman_window = progman_window;
-    struct window *new_taskman_window = taskman_window;
+    struct desktop *desktop;
+    struct window *new_shell_window, *new_shell_listview, *new_progman_window, *new_taskman_window;
 
-    reply->old_shell_window   = shell_window ? shell_window->handle : 0;
-    reply->old_shell_listview = shell_listview ? shell_listview->handle : 0;
-    reply->old_progman_window = progman_window ? progman_window->handle : 0;
-    reply->old_taskman_window = taskman_window ? taskman_window->handle : 0;
+    if (!(desktop = get_desktop_obj( current->process, current->desktop, 0 ))) return;
 
-    if (req->flags & SET_GLOBAL_SHELL_WINDOWS)
+    new_shell_window   = desktop->shell_window;
+    new_shell_listview = desktop->shell_listview;
+    new_progman_window = desktop->progman_window;
+    new_taskman_window = desktop->taskman_window;
+
+    reply->old_shell_window   = new_shell_window ? new_shell_window->handle : 0;
+    reply->old_shell_listview = new_shell_listview ? new_shell_listview->handle : 0;
+    reply->old_progman_window = new_progman_window ? new_progman_window->handle : 0;
+    reply->old_taskman_window = new_taskman_window ? new_taskman_window->handle : 0;
+
+    if (req->flags & SET_DESKTOP_SHELL_WINDOWS)
     {
-        if (!get_new_global_window( &new_shell_window, req->shell_window )) return;
-        if (!get_new_global_window( &new_shell_listview, req->shell_listview )) return;
+        if (!get_new_shell_window( &new_shell_window, req->shell_window )) goto done;
+        if (!get_new_shell_window( &new_shell_listview, req->shell_listview )) goto done;
     }
-    if (req->flags & SET_GLOBAL_PROGMAN_WINDOW)
+    if (req->flags & SET_DESKTOP_PROGMAN_WINDOW)
     {
-        if (!get_new_global_window( &new_progman_window, req->progman_window )) return;
+        if (!get_new_shell_window( &new_progman_window, req->progman_window )) goto done;
     }
-    if (req->flags & SET_GLOBAL_TASKMAN_WINDOW)
+    if (req->flags & SET_DESKTOP_TASKMAN_WINDOW)
     {
-        if (!get_new_global_window( &new_taskman_window, req->taskman_window )) return;
+        if (!get_new_shell_window( &new_taskman_window, req->taskman_window )) goto done;
     }
-    shell_window   = new_shell_window;
-    shell_listview = new_shell_listview;
-    progman_window = new_progman_window;
-    taskman_window = new_taskman_window;
+    desktop->shell_window   = new_shell_window;
+    desktop->shell_listview = new_shell_listview;
+    desktop->progman_window = new_progman_window;
+    desktop->taskman_window = new_taskman_window;
+
+done:
+    release_object( desktop );
 }
 
 /* retrieve layered info for a window */

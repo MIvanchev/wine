@@ -128,12 +128,15 @@ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
 struct exc_stack_layout
 {
     CONTEXT              context;        /* 000 */
-    EXCEPTION_RECORD     rec;            /* 390 */
-    ULONG64              align;          /* 428 */
-    ULONG64              redzone[2];     /* 430 */
+    CONTEXT_EX           context_ex;     /* 390 */
+    EXCEPTION_RECORD     rec;            /* 3b0 */
+    ULONG64              align;          /* 448 */
+    ULONG64              sp;             /* 450 */
+    ULONG64              pc;             /* 458 */
+    ULONG64              redzone[2];     /* 460 */
 };
-C_ASSERT( offsetof(struct exc_stack_layout, rec) == 0x390 );
-C_ASSERT( sizeof(struct exc_stack_layout) == 0x440 );
+C_ASSERT( offsetof(struct exc_stack_layout, rec) == 0x3b0 );
+C_ASSERT( sizeof(struct exc_stack_layout) == 0x470 );
 
 /* stack layout when calling KiUserApcDispatcher */
 struct apc_stack_layout
@@ -201,6 +204,29 @@ static BOOL is_inside_syscall( ucontext_t *sigcontext )
 {
     return ((char *)SP_sig(sigcontext) >= (char *)ntdll_get_thread_data()->kernel_stack &&
             (char *)SP_sig(sigcontext) <= (char *)arm64_thread_data()->syscall_frame);
+}
+
+/***********************************************************************
+ *           context_init_empty_xstate
+ *
+ * Initializes a context's CONTEXT_EX structure to point to an empty xstate buffer
+ */
+static inline void context_init_empty_xstate( CONTEXT *context, void *xstate_buffer )
+{
+    CONTEXT_EX *xctx;
+
+    xctx = (CONTEXT_EX *)(context + 1);
+    xctx->Legacy.Length = sizeof(CONTEXT);
+    xctx->Legacy.Offset = -(LONG)sizeof(CONTEXT);
+    xctx->XState.Length = 0;
+    xctx->XState.Offset = (BYTE *)xstate_buffer - (BYTE *)xctx;
+    xctx->All.Length = sizeof(CONTEXT) + xctx->XState.Offset + xctx->XState.Length;
+    xctx->All.Offset = -(LONG)sizeof(CONTEXT);
+}
+
+void set_process_instrumentation_callback( void *callback )
+{
+    if (callback) FIXME( "Not supported.\n" );
 }
 
 
@@ -320,10 +346,21 @@ static void restore_context( const CONTEXT *context, ucontext_t *sigcontext )
  */
 NTSTATUS signal_set_full_context( CONTEXT *context )
 {
+    struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
     NTSTATUS status = NtSetContextThread( GetCurrentThread(), context );
 
     if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER)
-        arm64_thread_data()->syscall_frame->restore_flags |= CONTEXT_INTEGER;
+        frame->restore_flags |= CONTEXT_INTEGER;
+
+    if (is_arm64ec() && !is_ec_code( frame->pc ))
+    {
+        CONTEXT *user_context = (CONTEXT *)((frame->sp - sizeof(CONTEXT)) & ~15);
+
+        user_context->ContextFlags = CONTEXT_FULL;
+        NtGetContextThread( GetCurrentThread(), user_context );
+        frame->sp = (ULONG_PTR)user_context;
+        frame->pc = (ULONG_PTR)pKiUserEmulationDispatcher;
+    }
     return status;
 }
 
@@ -712,6 +749,9 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
     stack = virtual_setup_exception( stack_ptr, sizeof(*stack), rec );
     stack->rec = *rec;
     stack->context = *context;
+    context_init_empty_xstate( &stack->context, stack->redzone );
+    stack->sp = stack->context.Sp;
+    stack->pc = stack->context.Pc;
 
     SP_sig(sigcontext) = (ULONG_PTR)stack;
     PC_sig(sigcontext) = (ULONG_PTR)pKiUserExceptionDispatcher;
@@ -793,6 +833,10 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
     stack = (struct exc_stack_layout *)(context->Sp & ~15) - 1;
     memmove( &stack->context, context, sizeof(*context) );
     memmove( &stack->rec, rec, sizeof(*rec) );
+    context_init_empty_xstate( &stack->context, stack->redzone );
+    stack->sp = stack->context.Sp;
+    stack->pc = stack->context.Pc;
+
     frame->pc = (ULONG64)pKiUserExceptionDispatcher;
     frame->sp = (ULONG64)stack;
     frame->restore_flags |= CONTEXT_CONTROL;
@@ -1039,9 +1083,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     rec.NumberParameters = 2;
     rec.ExceptionInformation[0] = (get_fault_esr( context ) & 0x40) != 0;
     rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
-    rec.ExceptionCode = virtual_handle_fault( siginfo->si_addr, rec.ExceptionInformation[0],
-                                              (void *)SP_sig(context) );
-    if (!rec.ExceptionCode) return;
+    if (!virtual_handle_fault( &rec, (void *)SP_sig(context) )) return;
     if (handle_syscall_fault( context, &rec )) return;
     setup_exception( context, &rec );
 }

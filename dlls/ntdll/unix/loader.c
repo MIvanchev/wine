@@ -73,11 +73,13 @@
 # ifndef _POSIX_SPAWN_DISABLE_ASLR
 #  define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 # endif
+# define environ (*_NSGetEnviron())
+#else
+  extern char **environ;
 #endif
 #ifdef __ANDROID__
 # include <jni.h>
 #endif
-extern char **environ;
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -111,6 +113,7 @@ void *pKiRaiseUserExceptionDispatcher = NULL;
 void *pKiUserExceptionDispatcher = NULL;
 void *pKiUserApcDispatcher = NULL;
 void *pKiUserCallbackDispatcher = NULL;
+void *pKiUserEmulationDispatcher = NULL;
 void *pLdrInitializeThunk = NULL;
 void *pRtlUserThreadStart = NULL;
 void *p__wine_ctrl_routine = NULL;
@@ -1576,6 +1579,7 @@ static void load_ntdll_functions( HMODULE module )
     if (is_arm64ec())
     {
         GET_FUNC( __wine_unix_call_dispatcher_arm64ec );
+        GET_FUNC( KiUserEmulationDispatcher );
     }
     *p__wine_syscall_dispatcher = __wine_syscall_dispatcher;
     *p__wine_unixlib_handle = (UINT_PTR)unix_call_funcs;
@@ -1669,6 +1673,7 @@ static void redirect_ntdll_functions( HMODULE module )
     REDIRECT( KiUserExceptionDispatcher );
     REDIRECT( KiUserApcDispatcher );
     REDIRECT( KiUserCallbackDispatcher );
+    REDIRECT( KiUserEmulationDispatcher );
     REDIRECT( LdrInitializeThunk );
     REDIRECT( RtlUserThreadStart );
 #undef REDIRECT
@@ -1950,7 +1955,6 @@ static jstring wine_init_jni( JNIEnv *env, jobject obj, jobjectArray cmdline, jo
 
     main_argc = argc;
     main_argv = argv;
-    main_envp = environ;
 
     init_paths( argv );
     virtual_init();
@@ -2146,11 +2150,10 @@ static void check_command_line( int argc, char *argv[] )
  *
  * Main entry point called by the wine loader.
  */
-DECLSPEC_EXPORT void __wine_main( int argc, char *argv[], char *envp[] )
+DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
 {
     main_argc = argc;
     main_argv = argv;
-    main_envp = envp;
 
     init_paths( argv );
 

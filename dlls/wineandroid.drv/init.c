@@ -50,6 +50,7 @@ static RECT monitor_rc_work;
 static int device_init_done;
 
 PNTAPCFUNC register_window_callback;
+UINT64 start_device_callback;
 
 typedef struct
 {
@@ -77,7 +78,7 @@ void init_monitors( int width, int height )
     monitor_rc_work = virtual_screen_rect;
 
     if (!hwnd || !NtUserIsWindowVisible( hwnd )) return;
-    if (!NtUserGetWindowRect( hwnd, &rect, get_win_monitor_dpi( hwnd ) )) return;
+    if (!NtUserGetWindowRect( hwnd, &rect, NtUserGetWinMonitorDpi( hwnd, MDT_DEFAULT ) )) return;
     if (rect.top) monitor_rc_work.bottom = rect.top;
     else monitor_rc_work.top = rect.bottom;
     TRACE( "found tray %p %s work area %s\n", hwnd,
@@ -279,39 +280,17 @@ UINT ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
                     DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
         .dmBitsPerPel = screen_bpp, .dmPelsWidth = screen_width, .dmPelsHeight = screen_height, .dmDisplayFrequency = 60,
     };
+    UINT dpi = NtUserGetSystemDpiForProcess( NULL );
     DEVMODEW current = mode;
 
     device_manager->add_gpu( "Wine GPU", &pci_id, NULL, param );
-    device_manager->add_source( "Default", source_flags, param );
+    device_manager->add_source( "Default", source_flags, dpi, param );
     device_manager->add_monitor( &gdi_monitor, param );
 
     current.dmFields |= DM_POSITION;
     device_manager->add_modes( &current, 1, &mode, param );
 
     return STATUS_SUCCESS;
-}
-
-
-/***********************************************************************
- *           ANDROID_GetCurrentDisplaySettings
- */
-BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
-{
-    devmode->dmDisplayFlags = 0;
-    devmode->dmPosition.x = 0;
-    devmode->dmPosition.y = 0;
-    devmode->dmDisplayOrientation = 0;
-    devmode->dmDisplayFixedOutput = 0;
-    devmode->dmPelsWidth = screen_width;
-    devmode->dmPelsHeight = screen_height;
-    devmode->dmBitsPerPel = screen_bpp;
-    devmode->dmDisplayFrequency = 60;
-    devmode->dmFields = DM_POSITION | DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT |
-                        DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-    TRACE( "current mode -- %dx%d %d bpp @%d Hz\n",
-           (int)devmode->dmPelsWidth, (int)devmode->dmPelsHeight,
-           (int)devmode->dmBitsPerPel, (int)devmode->dmDisplayFrequency );
-    return TRUE;
 }
 
 
@@ -336,7 +315,6 @@ static const struct user_driver_funcs android_drv_funcs =
     .pVkKeyScanEx = ANDROID_VkKeyScanEx,
     .pSetCursor = ANDROID_SetCursor,
     .pChangeDisplaySettings = ANDROID_ChangeDisplaySettings,
-    .pGetCurrentDisplaySettings = ANDROID_GetCurrentDisplaySettings,
     .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
     .pCreateDesktop = ANDROID_CreateDesktop,
     .pCreateWindow = ANDROID_CreateWindow,
@@ -345,9 +323,7 @@ static const struct user_driver_funcs android_drv_funcs =
     .pProcessEvents = ANDROID_ProcessEvents,
     .pSetCapture = ANDROID_SetCapture,
     .pSetParent = ANDROID_SetParent,
-    .pSetWindowStyle = ANDROID_SetWindowStyle,
     .pShowWindow = ANDROID_ShowWindow,
-    .pCreateLayeredWindow = ANDROID_CreateLayeredWindow,
     .pWindowMessage = ANDROID_WindowMessage,
     .pWindowPosChanging = ANDROID_WindowPosChanging,
     .pCreateWindowSurface = ANDROID_CreateWindowSurface,
@@ -575,6 +551,7 @@ static HRESULT android_init( void *arg )
     pthread_mutexattr_destroy( &attr );
 
     register_window_callback = params->register_window_callback;
+    start_device_callback = params->start_device_callback;
 
     if ((java_vm = *p_java_vm))  /* running under Java */
     {

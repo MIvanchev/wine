@@ -216,7 +216,7 @@ static void storage_event_proc(event_task_t *_task)
     if(event->event_id == EVENTID_STORAGE && (compat_mode = dispex_compat_mode(&window->event_target.dispex)) >= COMPAT_MODE_IE9) {
         dispatch_event(&window->event_target, event);
         if(window->doc) {
-            hres = create_event_obj(event, compat_mode, (IHTMLEventObj**)&V_DISPATCH(&var));
+            hres = create_event_obj(event, window->doc, (IHTMLEventObj**)&V_DISPATCH(&var));
             if(SUCCEEDED(hres)) {
                 V_VT(&var) = VT_DISPATCH;
                 fire_event(&window->doc->node, L"onstorage", &var, &cancelled);
@@ -1100,7 +1100,7 @@ static HRESULT get_prop(HTMLStorage *This, const WCHAR *name, DISPID *dispid)
     return S_OK;
 }
 
-static HRESULT HTMLStorage_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
+static HRESULT HTMLStorage_get_dispid(DispatchEx *dispex, const WCHAR *name, DWORD flags, DISPID *dispid)
 {
     HTMLStorage *This = impl_from_DispatchEx(dispex);
     HRESULT hres;
@@ -1115,17 +1115,6 @@ static HRESULT HTMLStorage_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags
     }
 
     return get_prop(This, name, dispid);
-}
-
-static HRESULT HTMLStorage_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
-{
-    HTMLStorage *This = impl_from_DispatchEx(dispex);
-    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
-
-    if(idx >= This->num_props)
-        return DISP_E_MEMBERNOTFOUND;
-
-    return (*name = SysAllocString(This->props[idx])) ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT HTMLStorage_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
@@ -1278,27 +1267,38 @@ static HRESULT HTMLStorage_next_dispid(DispatchEx *dispex, DISPID id, DISPID *pi
     return S_OK;
 }
 
-static const dispex_static_data_vtbl_t HTMLStorage_dispex_vtbl = {
+static HRESULT HTMLStorage_get_prop_desc(DispatchEx *dispex, DISPID id, struct property_info *desc)
+{
+    HTMLStorage *This = impl_from_DispatchEx(dispex);
+
+    desc->name = This->props[id - MSHTML_DISPID_CUSTOM_MIN];
+    desc->id = id;
+    desc->flags = PROPF_WRITABLE | PROPF_CONFIGURABLE | PROPF_ENUMERABLE;
+    desc->iid = 0;
+    return S_OK;
+}
+
+static const dispex_static_data_vtbl_t Storage_dispex_vtbl = {
     .query_interface  = HTMLStorage_query_interface,
     .destructor       = HTMLStorage_destructor,
     .traverse         = HTMLStorage_traverse,
     .unlink           = HTMLStorage_unlink,
     .get_dispid       = HTMLStorage_get_dispid,
-    .get_name         = HTMLStorage_get_name,
     .invoke           = HTMLStorage_invoke,
     .delete           = HTMLStorage_delete,
     .next_dispid      = HTMLStorage_next_dispid,
+    .get_prop_desc    = HTMLStorage_get_prop_desc,
 };
 
 static const tid_t HTMLStorage_iface_tids[] = {
     IHTMLStorage_tid,
     0
 };
-static dispex_static_data_t HTMLStorage_dispex = {
-    "Storage",
-    &HTMLStorage_dispex_vtbl,
-    IHTMLStorage_tid,
-    HTMLStorage_iface_tids
+dispex_static_data_t Storage_dispex = {
+    .id         = PROT_Storage,
+    .vtbl       = &Storage_dispex_vtbl,
+    .disp_tid   = IHTMLStorage_tid,
+    .iface_tids = HTMLStorage_iface_tids,
 };
 
 static HRESULT build_session_origin(IUri *uri, BSTR hostname, BSTR *ret)
@@ -1451,7 +1451,7 @@ HRESULT create_html_storage(HTMLInnerWindow *window, BOOL local, IHTMLStorage **
     storage->window = window;
     IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
 
-    init_dispatch(&storage->dispex, &HTMLStorage_dispex, NULL,
+    init_dispatch(&storage->dispex, &Storage_dispex, window,
                   dispex_compat_mode(&window->event_target.dispex));
 
     *p = &storage->IHTMLStorage_iface;

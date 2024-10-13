@@ -322,11 +322,12 @@ static const tid_t DocumentType_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t DocumentType_dispex = {
-    "DocumentType",
-    &DocumentType_event_target_vtbl.dispex_vtbl,
-    DispDOMDocumentType_tid,
-    DocumentType_iface_tids
+dispex_static_data_t DocumentType_dispex = {
+    .id           = PROT_DocumentType,
+    .prototype_id = PROT_Node,
+    .vtbl         = &DocumentType_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispDOMDocumentType_tid,
+    .iface_tids   = DocumentType_iface_tids,
 };
 
 HRESULT create_doctype_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNode **ret)
@@ -491,7 +492,7 @@ static HRESULT WINAPI HTMLDocument_get_images(IHTMLDocument2 *iface, IHTMLElemen
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -528,7 +529,7 @@ static HRESULT WINAPI HTMLDocument_get_applets(IHTMLDocument2 *iface, IHTMLEleme
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -565,7 +566,7 @@ static HRESULT WINAPI HTMLDocument_get_links(IHTMLDocument2 *iface, IHTMLElement
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -602,7 +603,7 @@ static HRESULT WINAPI HTMLDocument_get_forms(IHTMLDocument2 *iface, IHTMLElement
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -639,7 +640,7 @@ static HRESULT WINAPI HTMLDocument_get_anchors(IHTMLDocument2 *iface, IHTMLEleme
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -729,7 +730,7 @@ static HRESULT WINAPI HTMLDocument_get_scripts(IHTMLDocument2 *iface, IHTMLEleme
     }
 
     if(nscoll) {
-        *p = create_collection_from_htmlcol(nscoll, This->document_mode);
+        *p = create_collection_from_htmlcol(nscoll, &This->node.event_target.dispex);
         nsIDOMHTMLCollection_Release(nscoll);
     }
 
@@ -1934,8 +1935,7 @@ static HRESULT WINAPI HTMLDocument_get_styleSheets(IHTMLDocument2 *iface,
         return map_nsresult(nsres);
     }
 
-    hres = create_style_sheet_collection(nsstylelist,
-                                         dispex_compat_mode(&This->node.event_target.dispex), p);
+    hres = create_style_sheet_collection(nsstylelist, This, p);
     nsIDOMStyleSheetList_Release(nsstylelist);
     return hres;
 }
@@ -2004,8 +2004,7 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
 
     if(bstrHref && *bstrHref) {
         FIXME("semi-stub for href %s\n", debugstr_w(bstrHref));
-        return create_style_sheet(NULL, dispex_compat_mode(&This->node.event_target.dispex),
-                                  ppnewStyleSheet);
+        return create_style_sheet(NULL, &This->node.event_target.dispex, ppnewStyleSheet);
     }
 
     hres = create_element(This, L"style", &elem);
@@ -2601,7 +2600,7 @@ static HRESULT WINAPI HTMLDocument3_getElementsByName(IHTMLDocument3 *iface, BST
         return E_FAIL;
     }
 
-    *ppelColl = create_collection_from_nodelist(node_list, This->document_mode);
+    *ppelColl = create_collection_from_nodelist(node_list, &This->node.event_target.dispex);
     nsIDOMNodeList_Release(node_list);
     return S_OK;
 }
@@ -2678,7 +2677,7 @@ static HRESULT WINAPI HTMLDocument3_getElementsByTagName(IHTMLDocument3 *iface, 
     }
 
 
-    *pelColl = create_collection_from_nodelist(nslist, This->document_mode);
+    *pelColl = create_collection_from_nodelist(nslist, &This->node.event_target.dispex);
     nsIDOMNodeList_Release(nslist);
 
     return S_OK;
@@ -2819,8 +2818,7 @@ static HRESULT WINAPI HTMLDocument4_get_namespaces(IHTMLDocument4 *iface, IDispa
     if(!This->namespaces) {
         HRESULT hres;
 
-        hres = create_namespace_collection(dispex_compat_mode(&This->node.event_target.dispex),
-                                           &This->namespaces);
+        hres = create_namespace_collection(This, &This->namespaces);
         if(FAILED(hres))
             return hres;
     }
@@ -2864,7 +2862,7 @@ static HRESULT WINAPI HTMLDocument4_createEventObject(IHTMLDocument4 *iface,
         return E_NOTIMPL;
     }
 
-    return create_event_obj(NULL, dispex_compat_mode(&This->node.event_target.dispex), ppEventObj);
+    return create_event_obj(NULL, This, ppEventObj);
 }
 
 static HRESULT WINAPI HTMLDocument4_fireEvent(IHTMLDocument4 *iface, BSTR bstrEventName,
@@ -3015,7 +3013,7 @@ static HRESULT WINAPI HTMLDocument5_createAttribute(IHTMLDocument5 *iface, BSTR 
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(bstrattrName), ppattribute);
 
-    hres = HTMLDOMAttribute_Create(bstrattrName, NULL, 0, dispex_compat_mode(&This->node.event_target.dispex), &attr);
+    hres = HTMLDOMAttribute_Create(bstrattrName, NULL, 0, This, &attr);
     if(FAILED(hres))
         return hres;
 
@@ -3488,7 +3486,7 @@ static HRESULT WINAPI HTMLDocument7_getElementsByClassName(IHTMLDocument7 *iface
     }
 
 
-    *pel = create_collection_from_nodelist(nslist, This->document_mode);
+    *pel = create_collection_from_nodelist(nslist, &This->node.event_target.dispex);
     nsIDOMNodeList_Release(nslist);
     return S_OK;
 }
@@ -4448,7 +4446,7 @@ static HRESULT WINAPI DocumentSelector_querySelectorAll(IDocumentSelector *iface
         return map_nsresult(nsres);
     }
 
-    hres = create_child_collection(node_list, dispex_compat_mode(&This->node.event_target.dispex), pel);
+    hres = create_child_collection(node_list, &This->node.event_target.dispex, pel);
     nsIDOMNodeList_Release(node_list);
     return hres;
 }
@@ -5365,18 +5363,7 @@ static void HTMLDocumentNode_destructor(DispatchEx *dispex)
     HTMLDOMNode_destructor(&This->node.event_target.dispex);
 }
 
-static HRESULT HTMLDocumentNode_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
-{
-    HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
-    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
-
-    if(!This->dom_document || idx >= This->elem_vars_cnt)
-        return DISP_E_MEMBERNOTFOUND;
-
-    return (*name = SysAllocString(This->elem_vars[idx])) ? S_OK : E_OUTOFMEMORY;
-}
-
-static HRESULT HTMLDocumentNode_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
+static HRESULT HTMLDocumentNode_get_dispid(DispatchEx *dispex, const WCHAR *name, DWORD grfdex, DISPID *dispid)
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
     HRESULT hres = DISP_E_UNKNOWNNAME;
@@ -5390,7 +5377,7 @@ static HRESULT HTMLDocumentNode_get_dispid(DispatchEx *dispex, BSTR name, DWORD 
     return hres;
 }
 
-static HRESULT HTMLDocumentNode_find_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
+static HRESULT HTMLDocumentNode_find_dispid(DispatchEx *dispex, const WCHAR *name, DWORD grfdex, DISPID *dispid)
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
     HRESULT hres = DISP_E_UNKNOWNNAME;
@@ -5532,13 +5519,29 @@ static HRESULT HTMLDocumentNode_next_dispid(DispatchEx *dispex, DISPID id, DISPI
     return S_OK;
 }
 
-static compat_mode_t HTMLDocumentNode_get_compat_mode(DispatchEx *dispex)
+static HRESULT HTMLDocumentNode_get_prop_desc(DispatchEx *dispex, DISPID id, struct property_info *desc)
+{
+    HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+
+    if(!This->dom_document || idx >= This->elem_vars_cnt)
+        return DISP_E_MEMBERNOTFOUND;
+
+    desc->name = This->elem_vars[idx];
+    desc->id = id;
+    desc->flags = PROPF_WRITABLE | PROPF_CONFIGURABLE | PROPF_ENUMERABLE;
+    desc->iid = 0;
+    return S_OK;
+}
+
+static HTMLInnerWindow *HTMLDocumentNode_get_script_global(DispatchEx *dispex)
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
 
-    TRACE("(%p) returning %u\n", This, This->document_mode);
+    TRACE("(%p) using %u compat mode\n", This, This->document_mode);
 
-    return lock_document_mode(This);
+    lock_document_mode(This);
+    return This->script_global;
 }
 
 static nsISupports *HTMLDocumentNode_get_gecko_target(DispatchEx *dispex)
@@ -5623,19 +5626,19 @@ static HRESULT HTMLDocumentNode_handle_event(DispatchEx* dispex, DOMEvent *event
     return S_OK;
 }
 
-static const event_target_vtbl_t HTMLDocumentNode_event_target_vtbl = {
+static const event_target_vtbl_t HTMLDocument_event_target_vtbl = {
     {
         .query_interface     = HTMLDocumentNode_query_interface,
         .destructor          = HTMLDocumentNode_destructor,
         .traverse            = HTMLDocumentNode_traverse,
         .unlink              = HTMLDocumentNode_unlink,
-        .get_name            = HTMLDocumentNode_get_name,
         .get_dispid          = HTMLDocumentNode_get_dispid,
         .find_dispid         = HTMLDocumentNode_find_dispid,
+        .get_prop_desc       = HTMLDocumentNode_get_prop_desc,
         .invoke              = HTMLDocumentNode_invoke,
         .disp_invoke         = HTMLDocumentNode_disp_invoke,
         .next_dispid         = HTMLDocumentNode_next_dispid,
-        .get_compat_mode     = HTMLDocumentNode_get_compat_mode,
+        .get_script_global   = HTMLDocumentNode_get_script_global,
     },
     .get_gecko_target        = HTMLDocumentNode_get_gecko_target,
     .bind_event              = HTMLDocumentNode_bind_event,
@@ -5705,12 +5708,18 @@ static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t
     dispex_info_add_interface(info, IHTMLDocument2_tid, mode >= COMPAT_MODE_IE11 ? document2_ie11_hooks : document2_hooks);
 }
 
-static dispex_static_data_t HTMLDocumentNode_dispex = {
-    "HTMLDocument",
-    &HTMLDocumentNode_event_target_vtbl.dispex_vtbl,
-    DispHTMLDocument_tid,
-    HTMLDocumentNode_iface_tids,
-    HTMLDocumentNode_init_dispex_info
+dispex_static_data_t Document_dispex = {
+    .id           = PROT_Document,
+    .prototype_id = PROT_Node,
+};
+
+dispex_static_data_t HTMLDocument_dispex = {
+    .id           = PROT_HTMLDocument,
+    .prototype_id = PROT_Document,
+    .vtbl         = &HTMLDocument_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLDocument_tid,
+    .iface_tids   = HTMLDocumentNode_iface_tids,
+    .init_info    = HTMLDocumentNode_init_dispex_info,
 };
 
 static HTMLDocumentNode *alloc_doc_node(HTMLDocumentObj *doc_obj, HTMLInnerWindow *window, HTMLInnerWindow *script_global)
@@ -5789,7 +5798,7 @@ HRESULT create_document_node(nsIDOMDocument *nsdoc, GeckoBrowser *browser, HTMLI
         doc->html_document = NULL;
     }
 
-    HTMLDOMNode_Init(doc, &doc->node, (nsIDOMNode*)doc->dom_document, &HTMLDocumentNode_dispex);
+    HTMLDOMNode_Init(doc, &doc->node, (nsIDOMNode*)doc->dom_document, &HTMLDocument_dispex);
 
     init_document_mutation(doc);
     doc_init_events(doc);
@@ -5814,6 +5823,15 @@ HRESULT create_document_node(nsIDOMDocument *nsdoc, GeckoBrowser *browser, HTMLI
     return S_OK;
 }
 
+dispex_static_data_t DocumentFragment_dispex = {
+    .id           = PROT_DocumentFragment,
+    .prototype_id = PROT_Node,
+    .vtbl         = &HTMLDocument_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLDocument_tid,
+    .iface_tids   = HTMLDocumentNode_iface_tids,
+    .init_info    = HTMLDocumentNode_init_dispex_info,
+};
+
 static HRESULT create_document_fragment(nsIDOMNode *nsnode, HTMLDocumentNode *doc_node, HTMLDocumentNode **ret)
 {
     HTMLDocumentNode *doc_frag;
@@ -5822,9 +5840,10 @@ static HRESULT create_document_fragment(nsIDOMNode *nsnode, HTMLDocumentNode *do
     if(!doc_frag)
         return E_OUTOFMEMORY;
 
-    HTMLDOMNode_Init(doc_node, &doc_frag->node, nsnode, &HTMLDocumentNode_dispex);
+    HTMLDOMNode_Init(doc_node, &doc_frag->node, nsnode, &DocumentFragment_dispex);
     doc_frag->node.vtbl = &HTMLDocumentFragmentImplVtbl;
     doc_frag->document_mode = lock_document_mode(doc_node);
+    dispex_compat_mode(&doc_frag->node.event_target.dispex); /* make sure the object is fully initialized */
 
     *ret = doc_frag;
     return S_OK;

@@ -61,9 +61,6 @@
 # include <sys/sysmacros.h>
 #endif
 #ifdef HAVE_SYS_VNODE_H
-# ifdef HAVE_STDINT_H
-# include <stdint.h>  /* needed for kfreebsd */
-# endif
 /* Work around a conflict with Solaris' system list defined in sys/list.h. */
 #define list SYSLIST
 #define list_next SYSLIST_NEXT
@@ -1780,8 +1777,8 @@ static int get_file_info( const char *path, struct stat *st, ULONG *attr )
 #ifdef ENOATTR
         if (errno == ENOATTR) return ret;
 #endif
-        WARN( "Failed to get extended attribute " SAMBA_XATTR_DOS_ATTRIB " from \"%s\". errno %d (%s)\n",
-              path, errno, strerror( errno ) );
+        WARN( "Failed to get extended attribute " SAMBA_XATTR_DOS_ATTRIB " from %s. errno %d (%s)\n",
+              debugstr_a(path), errno, strerror( errno ) );
     }
     return ret;
 }
@@ -2317,12 +2314,12 @@ static NTSTATUS get_dir_data_entry( struct dir_data *dir_data, void *info_ptr, I
 
     if (get_file_info( names->unix_name, &st, &attributes ) == -1)
     {
-        TRACE( "file no longer exists %s\n", names->unix_name );
+        TRACE( "file no longer exists %s\n", debugstr_a(names->unix_name) );
         return STATUS_SUCCESS;
     }
     if (is_ignored_file( &st ))
     {
-        TRACE( "ignoring file %s\n", names->unix_name );
+        TRACE( "ignoring file %s\n", debugstr_a(names->unix_name) );
         return STATUS_SUCCESS;
     }
     start = dir_info_align( io->Information );
@@ -2486,7 +2483,7 @@ static NTSTATUS read_directory_data_getattrlist( struct dir_data *data, const ch
             return STATUS_NO_SUCH_FILE;
     }
 
-    TRACE( "found %s\n", buffer.name );
+    TRACE( "found %s\n", debugstr_a(buffer.name) );
 
     if (!append_entry( data, buffer.name, NULL, NULL )) return STATUS_NO_MEMORY;
 
@@ -2509,7 +2506,7 @@ static NTSTATUS read_directory_data_stat( struct dir_data *data, const char *uni
     if (!get_dir_case_sensitivity(".")) return STATUS_NO_SUCH_FILE;
     if (stat( unix_name, &st ) == -1) return STATUS_NO_SUCH_FILE;
 
-    TRACE( "found %s\n", unix_name );
+    TRACE( "found %s\n", debugstr_a(unix_name) );
 
     if (!append_entry( data, unix_name, NULL, NULL )) return STATUS_NO_MEMORY;
 
@@ -4175,6 +4172,7 @@ NTSTATUS WINAPI NtCreateMailslotFile( HANDLE *handle, ULONG access, OBJECT_ATTRI
     SERVER_START_REQ( create_mailslot )
     {
         req->access       = access;
+        req->options      = options;
         req->max_msgsize  = msg_size;
         req->read_timeout = timeout ? timeout->QuadPart : -1;
         wine_server_add_data( req, objattr, len );
@@ -4518,44 +4516,6 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
                 status = fill_name_info( unix_name, &info->NameInformation, &name_len );
                 free( unix_name );
                 io->Information = FIELD_OFFSET(FILE_ALL_INFORMATION, NameInformation.FileName) + name_len;
-            }
-        }
-        break;
-    case FileMailslotQueryInformation:
-        {
-            FILE_MAILSLOT_QUERY_INFORMATION *info = ptr;
-
-            SERVER_START_REQ( set_mailslot_info )
-            {
-                req->handle = wine_server_obj_handle( handle );
-                req->flags = 0;
-                status = wine_server_call( req );
-                if (status == STATUS_SUCCESS)
-                {
-                    info->MaximumMessageSize = reply->max_msgsize;
-                    info->MailslotQuota = 0;
-                    info->NextMessageSize = 0;
-                    info->MessagesAvailable = 0;
-                    info->ReadTimeout.QuadPart = reply->read_timeout;
-                }
-            }
-            SERVER_END_REQ;
-            if (!status)
-            {
-                char *tmpbuf;
-                ULONG size = info->MaximumMessageSize ? info->MaximumMessageSize : 0x10000;
-                if (size > 0x10000) size = 0x10000;
-                if ((tmpbuf = malloc( size )))
-                {
-                    if (needs_close) close( fd );
-                    if (!server_get_unix_fd( handle, FILE_READ_DATA, &fd, &needs_close, NULL, NULL ))
-                    {
-                        int res = recv( fd, tmpbuf, size, MSG_PEEK );
-                        info->MessagesAvailable = (res > 0);
-                        info->NextMessageSize = (res >= 0) ? res : MAILSLOT_NO_MESSAGE;
-                    }
-                    free( tmpbuf );
-                }
             }
         }
         break;
@@ -5155,10 +5115,7 @@ static BOOL async_write_proc( void *user, ULONG_PTR *info, unsigned int *status 
                                           &needs_close, &type, NULL )))
             break;
 
-        if (!fileio->count && type == FD_TYPE_MAILSLOT)
-            result = send( fd, fileio->buffer, 0, 0 );
-        else
-            result = write( fd, &fileio->buffer[fileio->already], fileio->count - fileio->already );
+        result = write( fd, &fileio->buffer[fileio->already], fileio->count - fileio->already );
 
         if (needs_close) close( fd );
 
@@ -5363,20 +5320,6 @@ static unsigned int get_io_timeouts( HANDLE handle, enum server_fd_type type, UL
         }
         break;
     }
-    case FD_TYPE_MAILSLOT:
-        if (is_read)
-        {
-            timeouts->interval = 0;  /* return as soon as we got something */
-            SERVER_START_REQ( set_mailslot_info )
-            {
-                req->handle = wine_server_obj_handle( handle );
-                req->flags = 0;
-                if (!wine_server_call( req ) && reply->read_timeout != TIMEOUT_INFINITE)
-                    timeouts->total = reply->read_timeout / -10000;
-            }
-            SERVER_END_REQ;
-        }
-        break;
     case FD_TYPE_SOCKET:
     case FD_TYPE_CHAR:
         if (is_read) timeouts->interval = 0;  /* return as soon as we got something */
@@ -5427,7 +5370,6 @@ static NTSTATUS get_io_avail_mode( HANDLE handle, enum server_fd_type type, BOOL
         }
         break;
     }
-    case FD_TYPE_MAILSLOT:
     case FD_TYPE_SOCKET:
     case FD_TYPE_CHAR:
         *avail_mode = TRUE;
@@ -5702,7 +5644,7 @@ NTSTATUS WINAPI NtReadFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, vo
                 if (total)  /* return with what we got so far */
                     status = STATUS_SUCCESS;
                 else
-                    status = (type == FD_TYPE_MAILSLOT) ? STATUS_IO_TIMEOUT : STATUS_TIMEOUT;
+                    status = STATUS_TIMEOUT;
                 goto done;
             }
             if (ret == -1 && errno != EINTR)
@@ -5933,11 +5875,7 @@ NTSTATUS WINAPI NtWriteFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, v
 
     for (;;)
     {
-        /* zero-length writes on sockets may not work with plain write(2) */
-        if (!length && type == FD_TYPE_MAILSLOT)
-            result = send( unix_handle, buffer, 0, 0 );
-        else
-            result = write( unix_handle, (const char *)buffer + total, length - total );
+        result = write( unix_handle, (const char *)buffer + total, length - total );
 
         if (result >= 0)
         {

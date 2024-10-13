@@ -1868,7 +1868,6 @@ static void x11drv_surface_destroy( struct window_surface *window_surface )
     TRACE( "freeing %p\n", surface );
     if (surface->gc) XFreeGC( gdi_display, surface->gc );
     if (surface->image) x11drv_image_destroy( surface->image );
-    free( surface );
 }
 
 static const struct window_surface_funcs x11drv_surface_funcs =
@@ -1889,6 +1888,7 @@ static struct window_surface *create_surface( HWND hwnd, Window window, const XV
     BITMAPINFO *info = (BITMAPINFO *)buffer;
     struct x11drv_window_surface *surface;
     int width = rect->right - rect->left, height = rect->bottom - rect->top;
+    struct window_surface *window_surface;
     struct x11drv_image *image;
     D3DDDIFORMAT d3d_format;
     HBITMAP bitmap = 0;
@@ -1932,123 +1932,70 @@ static struct window_surface *create_surface( HWND hwnd, Window window, const XV
         if (desc.hDeviceDc) NtUserReleaseDC( hwnd, desc.hDeviceDc );
     }
 
-    if (!(surface = calloc( 1, sizeof(*surface) )))
+    if (!(window_surface = window_surface_create( sizeof(*surface), &x11drv_surface_funcs, hwnd, rect, info, bitmap )))
     {
         if (bitmap) NtGdiDeleteObjectApp( bitmap );
         x11drv_image_destroy( image );
-        return NULL;
     }
-    surface->image = image;
-    surface->byteswap = byteswap;
-
-    if (!window_surface_init( &surface->header, &x11drv_surface_funcs, hwnd, rect, info, bitmap )) goto failed;
-
-    surface->window = window;
-    surface->gc = XCreateGC( gdi_display, window, 0, NULL );
-    XSetSubwindowMode( gdi_display, surface->gc, IncludeInferiors );
-#ifdef HAVE_LIBXSHAPE
-    XShapeCombineMask( gdi_display, surface->window, ShapeBounding, 0, 0, None, ShapeSet );
-#endif
-
-    TRACE( "created %p for %lx %s image %p\n", surface, window, wine_dbgstr_rect(rect), surface->image->ximage->data );
-
-    return &surface->header;
-
-failed:
-    window_surface_release( &surface->header );
-    return NULL;
-}
-
-/***********************************************************************
- *           expose_surface
- */
-HRGN expose_surface( struct window_surface *window_surface, const RECT *rect )
-{
-    HRGN region = 0;
-    RECT rc = *rect;
-
-    if (window_surface->funcs != &x11drv_surface_funcs) return 0;  /* we may get the null surface */
-
-    window_surface_lock( window_surface );
-    OffsetRect( &rc, -window_surface->rect.left, -window_surface->rect.top );
-    add_bounds_rect( &window_surface->bounds, &rc );
-    if (window_surface->clip_region)
+    else
     {
-        region = NtGdiCreateRectRgn( rect->left, rect->top, rect->right, rect->bottom );
-        if (NtGdiCombineRgn( region, region, window_surface->clip_region, RGN_DIFF ) <= NULLREGION)
-        {
-            NtGdiDeleteObjectApp( region );
-            region = 0;
-        }
+        surface = get_x11_surface( window_surface );
+        surface->image = image;
+        surface->byteswap = byteswap;
+        surface->window = window;
+        surface->gc = XCreateGC( gdi_display, window, 0, NULL );
+        XSetSubwindowMode( gdi_display, surface->gc, IncludeInferiors );
     }
-    window_surface_unlock( window_surface );
-    return region;
+
+    return window_surface;
 }
 
+
+static BOOL enable_direct_drawing( struct x11drv_win_data *data, BOOL layered )
+{
+    if (layered) return FALSE;
+    if (data->embedded) return TRUE; /* draw directly to the window */
+    if (data->whole_window == root_window) return TRUE; /* draw directly to the window */
+    if (data->client_window) return TRUE; /* draw directly to the window */
+    if (!client_side_graphics) return TRUE; /* draw directly to the window */
+    return FALSE;
+}
 
 /***********************************************************************
  *      CreateWindowSurface   (X11DRV.@)
  */
-BOOL X11DRV_CreateWindowSurface( HWND hwnd, const RECT *surface_rect, struct window_surface **surface )
+BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_rect, struct window_surface **surface )
 {
+    struct window_surface *previous;
     struct x11drv_win_data *data;
-    BOOL layered = NtUserGetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYERED;
 
-    TRACE( "hwnd %p, surface_rect %s, surface %p\n", hwnd, wine_dbgstr_rect( surface_rect ), surface );
+    TRACE( "hwnd %p, layered %u, surface_rect %s, surface %p\n", hwnd, layered, wine_dbgstr_rect( surface_rect ), surface );
 
     if (!(data = get_win_data( hwnd ))) return TRUE; /* use default surface */
-
-    if (*surface) window_surface_release( *surface );
-    *surface = NULL;  /* indicate that we want to draw directly to the window */
-
-    if (data->embedded) goto done; /* draw directly to the window */
-    if (data->whole_window == root_window) goto done; /* draw directly to the window */
-    if (data->client_window) goto done; /* draw directly to the window */
-    if (!client_side_graphics && !layered) goto done; /* draw directly to the window */
-
-    if (data->surface)
+    if ((previous = *surface) && previous->funcs == &x11drv_surface_funcs)
     {
-        if (EqualRect( &data->surface->rect, surface_rect ))
-        {
-            /* existing surface is good enough */
-            window_surface_add_ref( data->surface );
-            *surface = data->surface;
-            goto done;
-        }
+        Window window = get_x11_surface(previous)->window;
+        if (data->whole_window == window && !enable_direct_drawing( data, layered )) goto done; /* use default surface */
+        /* re-create window surface is window has changed, which can happen when changing visual */
+        TRACE( "re-creating hwnd %p surface with new window %lx\n", data->hwnd, data->whole_window );
+    }
+    if (previous) window_surface_release( previous );
+
+    if (layered)
+    {
+        data->layered = TRUE;
+        if (!data->embedded && argb_visual.visualid) set_window_visual( data, &argb_visual, TRUE );
+    }
+    else if (enable_direct_drawing( data, layered ))
+    {
+        *surface = NULL;  /* indicate that we want to draw directly to the window */
+        goto done; /* draw directly to the window */
     }
 
-    *surface = create_surface( data->hwnd, data->whole_window, &data->vis, surface_rect, FALSE );
+    *surface = create_surface( data->hwnd, data->whole_window, &data->vis, surface_rect,
+                               layered ? data->use_alpha : FALSE );
 
 done:
     release_win_data( data );
-    return TRUE;
-}
-
-
-/*****************************************************************************
- *              CreateLayeredWindow  (X11DRV.@)
- */
-BOOL X11DRV_CreateLayeredWindow( HWND hwnd, const RECT *surface_rect, COLORREF color_key,
-                                 struct window_surface **window_surface )
-{
-    struct window_surface *surface;
-    struct x11drv_win_data *data;
-
-    if (!(data = get_win_data( hwnd ))) return FALSE;
-
-    data->layered = TRUE;
-    if (!data->embedded && argb_visual.visualid) set_window_visual( data, &argb_visual, TRUE );
-
-    surface = data->surface;
-    if (!surface || !EqualRect( &surface->rect, surface_rect ))
-    {
-        data->surface = create_surface( data->hwnd, data->whole_window, &data->vis, surface_rect, data->use_alpha );
-        if (surface) window_surface_release( surface );
-        surface = data->surface;
-    }
-
-    if ((*window_surface = surface)) window_surface_add_ref( surface );
-    release_win_data( data );
-
     return TRUE;
 }

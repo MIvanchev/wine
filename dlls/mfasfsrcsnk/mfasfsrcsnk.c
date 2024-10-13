@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Jactry Zeng for CodeWeavers
+ * Copyright 2024 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,11 +16,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#pragma makedep register
+#include "media_source.h"
 
-[
-    helpstring("Media Engine Class Factory"),
-    threading(both),
-    uuid(b44392da-499b-446b-a4cb-005fead0e6d5)
-]
-coclass MFMediaEngineClassFactory { interface IMFMediaEngineClassFactory; }
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
+
+/***********************************************************************
+ *              DllGetClassObject (mfsrcsnk.@)
+ */
+HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void **out)
+{
+    if (IsEqualGUID(clsid, &CLSID_AsfByteStreamPlugin))
+        return IClassFactory_QueryInterface(&asf_byte_stream_plugin_factory, riid, out);
+
+    *out = NULL;
+    FIXME("Unknown clsid %s.\n", debugstr_guid(clsid));
+    return CLASS_E_CLASSNOTAVAILABLE;
+}

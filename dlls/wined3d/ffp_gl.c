@@ -759,8 +759,8 @@ static void depth(struct wined3d_context *context, const struct wined3d_state *s
         }
     }
 
-    if (context->stream_info.position_transformed && !isStateDirty(context, STATE_TRANSFORM(WINED3D_TS_PROJECTION)))
-        context_apply_state(context, state, STATE_TRANSFORM(WINED3D_TS_PROJECTION));
+    if (context->stream_info.position_transformed)
+        context->constant_update_mask |= WINED3D_SHADER_CONST_FFP_PROJ;
 }
 
 static void depth_stencil(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -1035,35 +1035,29 @@ static void shader_bumpenv(struct wined3d_context *context, const struct wined3d
 
 void clipplane(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
-    UINT index = state_id - STATE_CLIPPLANE(0);
-    GLdouble plane[4];
+    context->constant_update_mask |= WINED3D_SHADER_CONST_VS_CLIP_PLANES;
+}
 
-    if (index >= gl_info->limits.user_clip_distances)
-        return;
+void ffp_vertex_update_clip_plane_constants(const struct wined3d_gl_info *gl_info, const struct wined3d_state *state)
+{
+    for (unsigned int i = 0; i < gl_info->limits.user_clip_distances; ++i)
+    {
+        GLdouble plane[4];
 
-    gl_info->gl_ops.gl.p_glMatrixMode(GL_MODELVIEW);
-    gl_info->gl_ops.gl.p_glPushMatrix();
-
-    /* Clip Plane settings are affected by the model view in OpenGL, the View transform in direct3d */
-    if (!use_vs(state))
-        gl_info->gl_ops.gl.p_glLoadMatrixf(&state->transforms[WINED3D_TS_VIEW]._11);
-    else
-        /* With vertex shaders, clip planes are not transformed in Direct3D,
-         * while in OpenGL they are still transformed by the model view matrix. */
+        gl_info->gl_ops.gl.p_glMatrixMode(GL_MODELVIEW);
+        gl_info->gl_ops.gl.p_glPushMatrix();
         gl_info->gl_ops.gl.p_glLoadIdentity();
 
-    plane[0] = state->clip_planes[index].x;
-    plane[1] = state->clip_planes[index].y;
-    plane[2] = state->clip_planes[index].z;
-    plane[3] = state->clip_planes[index].w;
+        plane[0] = state->clip_planes[i].x;
+        plane[1] = state->clip_planes[i].y;
+        plane[2] = state->clip_planes[i].z;
+        plane[3] = state->clip_planes[i].w;
 
-    TRACE("Clipplane [%.8e, %.8e, %.8e, %.8e]\n",
-            plane[0], plane[1], plane[2], plane[3]);
-    gl_info->gl_ops.gl.p_glClipPlane(GL_CLIP_PLANE0 + index, plane);
-    checkGLcall("glClipPlane");
+        gl_info->gl_ops.gl.p_glClipPlane(GL_CLIP_PLANE0 + i, plane);
+        checkGLcall("glClipPlane");
 
-    gl_info->gl_ops.gl.p_glPopMatrix();
+        gl_info->gl_ops.gl.p_glPopMatrix();
+    }
 }
 
 static void streamsrc(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -1145,7 +1139,7 @@ static void viewport_miscpart_cc(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
-    /* See get_projection_matrix() in utils.c for a discussion about those values. */
+    /* See get_projection_matrix() in glsl_shader.c for a discussion about those values. */
     float pixel_center_offset = context->d3d_info->wined3d_creation_flags
             & WINED3D_PIXEL_CENTER_INTEGER ? 0.5f : 0.0f;
     GLdouble depth_ranges[2 * WINED3D_MAX_VIEWPORTS];
@@ -1644,22 +1638,6 @@ static void prune_invalid_states(struct wined3d_state_entry *state_table, const 
         state_table[i].representative = 0;
         state_table[i].apply = state_undefined;
     }
-
-    start = STATE_TRANSFORM(WINED3D_TS_TEXTURE0 + d3d_info->ffp_fragment_caps.max_blend_stages);
-    last = STATE_TRANSFORM(WINED3D_TS_TEXTURE0 + WINED3D_MAX_FFP_TEXTURES - 1);
-    for (i = start; i <= last; ++i)
-    {
-        state_table[i].representative = 0;
-        state_table[i].apply = state_undefined;
-    }
-
-    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(d3d_info->limits.ffp_vertex_blend_matrices));
-    last = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255));
-    for (i = start; i <= last; ++i)
-    {
-        state_table[i].representative = 0;
-        state_table[i].apply = state_undefined;
-    }
 }
 
 static void validate_state_table(struct wined3d_state_entry *state_table)
@@ -1675,14 +1653,12 @@ static void validate_state_table(struct wined3d_state_entry *state_table)
         { 11,  14},
         { 16,  23},
         { 27,  27},
-        { 30,  33},
-        { 39,  40},
-        { 42,  47},
-        { 49, 135},
-        {138, 139},
-        {144, 144},
-        {149, 150},
+        { 29,  33},
+        { 39, 135},
+        {137, 139},
+        {141, 151},
         {153, 153},
+        {157, 160},
         {162, 165},
         {167, 193},
         {195, 209},
@@ -1690,7 +1666,6 @@ static void validate_state_table(struct wined3d_state_entry *state_table)
     };
     static const unsigned int simple_states[] =
     {
-        STATE_MATERIAL,
         STATE_VDECL,
         STATE_STREAMSRC,
         STATE_INDEXBUFFER,
@@ -1711,12 +1686,10 @@ static void validate_state_table(struct wined3d_state_entry *state_table)
         STATE_COMPUTE_UNORDERED_ACCESS_VIEW_BINDING,
         STATE_GRAPHICS_UNORDERED_ACCESS_VIEW_BINDING,
         STATE_VIEWPORT,
-        STATE_LIGHT_TYPE,
         STATE_SCISSORRECT,
         STATE_RASTERIZER,
         STATE_BASEVERTEXINDEX,
         STATE_FRAMEBUFFER,
-        STATE_POINT_ENABLE,
         STATE_BLEND,
         STATE_BLEND_FACTOR,
         STATE_DEPTH_STENCIL,

@@ -46,15 +46,6 @@ static CFMutableDictionaryRef win_datas;
 static unsigned int activate_on_focus_time;
 
 
-/**********************************************************************
- *       get_win_monitor_dpi
- */
-static UINT get_win_monitor_dpi(HWND hwnd)
-{
-    return NtUserGetSystemDpiForProcess(NULL);  /* FIXME: get monitor dpi */
-}
-
-
 /* per-monitor DPI aware NtUserSetWindowPos call */
 static BOOL set_window_pos(HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags)
 {
@@ -74,42 +65,46 @@ static void set_internal_window_pos(HWND hwnd, UINT cmd, RECT *rect, POINT *pt)
 }
 
 
-/***********************************************************************
- *              get_cocoa_window_features
- */
-static void get_cocoa_window_features(struct macdrv_win_data *data,
-                                      DWORD style, DWORD ex_style,
-                                      struct macdrv_window_features* wf,
-                                      const RECT *window_rect,
-                                      const RECT *client_rect)
+static struct macdrv_window_features get_window_features_for_style(DWORD style, DWORD ex_style, BOOL shaped)
 {
-    memset(wf, 0, sizeof(*wf));
+    struct macdrv_window_features wf = {0};
 
-    if (ex_style & WS_EX_NOACTIVATE) wf->prevents_app_activation = TRUE;
-
-    if (disable_window_decorations) return;
-    if (IsRectEmpty(window_rect)) return;
-    if (EqualRect(window_rect, client_rect)) return;
+    if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
 
     if ((style & WS_CAPTION) == WS_CAPTION && !(ex_style & WS_EX_LAYERED))
     {
-        wf->shadow = TRUE;
-        if (!data->shaped)
+        wf.shadow = TRUE;
+        if (!shaped)
         {
-            wf->title_bar = TRUE;
-            if (style & WS_SYSMENU) wf->close_button = TRUE;
-            if (style & WS_MINIMIZEBOX) wf->minimize_button = TRUE;
-            if (style & WS_MAXIMIZEBOX) wf->maximize_button = TRUE;
-            if (ex_style & WS_EX_TOOLWINDOW) wf->utility = TRUE;
+            wf.title_bar = TRUE;
+            if (style & WS_SYSMENU) wf.close_button = TRUE;
+            if (style & WS_MINIMIZEBOX) wf.minimize_button = TRUE;
+            if (style & WS_MAXIMIZEBOX) wf.maximize_button = TRUE;
+            if (ex_style & WS_EX_TOOLWINDOW) wf.utility = TRUE;
         }
     }
     if (style & WS_THICKFRAME)
     {
-        wf->shadow = TRUE;
-        if (!data->shaped) wf->resizable = TRUE;
+        wf.shadow = TRUE;
+        if (!shaped) wf.resizable = TRUE;
     }
-    else if (ex_style & WS_EX_DLGMODALFRAME) wf->shadow = TRUE;
-    else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) wf->shadow = TRUE;
+    else if (ex_style & WS_EX_DLGMODALFRAME) wf.shadow = TRUE;
+    else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) wf.shadow = TRUE;
+
+    return wf;
+}
+
+/***********************************************************************
+ *              get_cocoa_window_features
+ */
+static struct macdrv_window_features get_cocoa_window_features(struct macdrv_win_data *data, DWORD style, DWORD ex_style)
+{
+    struct macdrv_window_features wf = {0};
+
+    if (ex_style & WS_EX_NOACTIVATE) wf.prevents_app_activation = TRUE;
+    if (EqualRect(&data->rects.window, &data->rects.visible)) return wf;
+
+    return get_window_features_for_style(style, ex_style, data->shaped);
 }
 
 
@@ -144,98 +139,11 @@ static void get_cocoa_window_state(struct macdrv_win_data *data,
     state->excluded_by_expose = state->excluded_by_cycle =
         (!(ex_style & WS_EX_APPWINDOW) &&
          (NtUserGetWindowRelative(data->hwnd, GW_OWNER) || (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))));
-    if (IsRectEmpty(&data->window_rect))
+    if (IsRectEmpty(&data->rects.window))
         state->excluded_by_expose = TRUE;
     state->minimized = (style & WS_MINIMIZE) != 0;
     state->minimized_valid = state->minimized != data->minimized;
     state->maximized = (style & WS_MAXIMIZE) != 0;
-}
-
-
-/***********************************************************************
- *              get_mac_rect_offset
- *
- * Helper for macdrv_window_to_mac_rect and macdrv_mac_to_window_rect.
- */
-static void get_mac_rect_offset(struct macdrv_win_data *data, unsigned int style, RECT *rect,
-                                const RECT *window_rect, const RECT *client_rect)
-{
-    unsigned int ex_style, style_mask = 0, ex_style_mask = 0;
-    UINT dpi = get_win_monitor_dpi(data->hwnd);
-
-    rect->top = rect->bottom = rect->left = rect->right = 0;
-
-    ex_style = NtUserGetWindowLongW(data->hwnd, GWL_EXSTYLE);
-
-    if (!data->shaped)
-    {
-        struct macdrv_window_features wf;
-        get_cocoa_window_features(data, style, ex_style, &wf, window_rect, client_rect);
-
-        if (wf.title_bar)
-        {
-            style_mask |= WS_CAPTION;
-            ex_style_mask |= WS_EX_TOOLWINDOW;
-        }
-        if (wf.shadow)
-        {
-            style_mask |= WS_DLGFRAME | WS_THICKFRAME;
-            ex_style_mask |= WS_EX_DLGMODALFRAME;
-        }
-    }
-
-    NtUserAdjustWindowRect(rect, style & style_mask, FALSE, ex_style & ex_style_mask, dpi);
-
-    TRACE("%p/%p style %08x ex_style %08x shaped %d -> %s\n", data->hwnd, data->cocoa_window,
-          style, ex_style, data->shaped, wine_dbgstr_rect(rect));
-}
-
-
-/***********************************************************************
- *              macdrv_window_to_mac_rect
- *
- * Convert a rect from client to Mac window coordinates
- */
-static void macdrv_window_to_mac_rect(struct macdrv_win_data *data, DWORD style, RECT *rect,
-                                      const RECT *window_rect, const RECT *client_rect)
-{
-    RECT rc;
-
-    if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return;
-    if (IsRectEmpty(rect)) return;
-
-    get_mac_rect_offset(data, style, &rc, window_rect, client_rect);
-
-    rect->left   -= rc.left;
-    rect->right  -= rc.right;
-    rect->top    -= rc.top;
-    rect->bottom -= rc.bottom;
-    if (rect->top >= rect->bottom) rect->bottom = rect->top + 1;
-    if (rect->left >= rect->right) rect->right = rect->left + 1;
-}
-
-
-/***********************************************************************
- *              macdrv_mac_to_window_rect
- *
- * Opposite of macdrv_window_to_mac_rect
- */
-static void macdrv_mac_to_window_rect(struct macdrv_win_data *data, RECT *rect)
-{
-    RECT rc;
-    DWORD style = NtUserGetWindowLongW(data->hwnd, GWL_STYLE);
-
-    if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return;
-    if (IsRectEmpty(rect)) return;
-
-    get_mac_rect_offset(data, style, &rc, &data->window_rect, &data->client_rect);
-
-    rect->left   += rc.left;
-    rect->right  += rc.right;
-    rect->top    += rc.top;
-    rect->bottom += rc.bottom;
-    if (rect->top >= rect->bottom) rect->bottom = rect->top + 1;
-    if (rect->left >= rect->right) rect->right = rect->left + 1;
 }
 
 
@@ -278,7 +186,6 @@ static struct macdrv_win_data *alloc_win_data(HWND hwnd)
     if ((data = calloc(1, sizeof(*data))))
     {
         data->hwnd = hwnd;
-        data->color_key = CLR_INVALID;
         data->swap_interval = 1;
         pthread_mutex_lock(&win_data_mutex);
         if (!win_datas)
@@ -387,7 +294,7 @@ static void set_cocoa_window_properties(struct macdrv_win_data *data)
     owner_win = macdrv_get_cocoa_window(owner, TRUE);
     macdrv_set_cocoa_parent_window(data->cocoa_window, owner_win);
 
-    get_cocoa_window_features(data, style, ex_style, &wf, &data->window_rect, &data->client_rect);
+    wf = get_cocoa_window_features(data, style, ex_style);
     macdrv_set_cocoa_window_features(data->cocoa_window, &wf);
 
     get_cocoa_window_state(data, style, ex_style, &state);
@@ -404,142 +311,39 @@ static void set_cocoa_window_properties(struct macdrv_win_data *data)
  */
 static void sync_window_region(struct macdrv_win_data *data, HRGN win_region)
 {
-    HRGN hrgn = win_region;
-    RGNDATA *region_data;
-    const CGRect* rects;
-    int count;
-
     if (!data->cocoa_window) return;
-    data->shaped = FALSE;
 
-    if (IsRectEmpty(&data->window_rect))  /* set an empty shape */
+    if (IsRectEmpty(&data->rects.window))  /* set an empty shape */
     {
+        data->shaped = FALSE;
         TRACE("win %p/%p setting empty shape for zero-sized window\n", data->hwnd, data->cocoa_window);
         macdrv_set_window_shape(data->cocoa_window, &CGRectZero, 1);
         return;
     }
 
-    if (hrgn == (HRGN)1)  /* hack: win_region == 1 means retrieve region from server */
-    {
-        if (!(hrgn = NtGdiCreateRectRgn(0, 0, 0, 0))) return;
-        if (NtUserGetWindowRgnEx(data->hwnd, hrgn, 0) == ERROR)
-        {
-            NtGdiDeleteObjectApp(hrgn);
-            hrgn = 0;
-        }
-    }
-
-    if (hrgn && NtUserGetWindowLongW(data->hwnd, GWL_EXSTYLE) & WS_EX_LAYOUTRTL)
-        NtUserMirrorRgn(data->hwnd, hrgn);
-    if (hrgn)
-    {
-        NtGdiOffsetRgn(hrgn, data->window_rect.left - data->whole_rect.left,
-                       data->window_rect.top - data->whole_rect.top);
-    }
-    region_data = get_region_data(hrgn, 0);
-    if (region_data)
-    {
-        rects = (CGRect*)region_data->Buffer;
-        count = region_data->rdh.nCount;
-        /* Special case optimization.  If the region entirely encloses the Cocoa
-           window, it's the same as there being no region.  It's potentially
-           hard/slow to test this for arbitrary regions, so we just check for
-           very simple regions. */
-        if (count == 1 && CGRectContainsRect(rects[0],
-            CGRectOffset(cgrect_from_rect(data->whole_rect), -data->whole_rect.left, -data->whole_rect.top)))
-        {
-            TRACE("optimizing for simple region that contains Cocoa content rect\n");
-            rects = NULL;
-            count = 0;
-        }
-    }
-    else
-    {
-        rects = NULL;
-        count = 0;
-    }
-
-    TRACE("win %p/%p win_region %p rects %p count %d\n", data->hwnd, data->cocoa_window, win_region, rects, count);
-    macdrv_set_window_shape(data->cocoa_window, rects, count);
-
-    free(region_data);
-    data->shaped = (region_data != NULL);
-
-    if (hrgn && hrgn != win_region) NtGdiDeleteObjectApp(hrgn);
-}
-
-
-/***********************************************************************
- *              add_bounds_rect
- */
-static inline void add_bounds_rect(RECT *bounds, const RECT *rect)
-{
-    if (rect->left >= rect->right || rect->top >= rect->bottom) return;
-    bounds->left   = min(bounds->left, rect->left);
-    bounds->top    = min(bounds->top, rect->top);
-    bounds->right  = max(bounds->right, rect->right);
-    bounds->bottom = max(bounds->bottom, rect->bottom);
+    /* use surface shape instead */
+    macdrv_set_window_shape(data->cocoa_window, NULL, 0);
 }
 
 
 /***********************************************************************
  *              sync_window_opacity
  */
-static void sync_window_opacity(struct macdrv_win_data *data, COLORREF key, BYTE alpha,
+static void sync_window_opacity(struct macdrv_win_data *data, BYTE alpha,
                                 BOOL per_pixel_alpha, DWORD flags)
 {
     CGFloat opacity = 1.0;
-    BOOL needs_flush = FALSE;
 
     if (flags & LWA_ALPHA) opacity = alpha / 255.0;
 
     TRACE("setting window %p/%p alpha to %g\n", data->hwnd, data->cocoa_window, opacity);
     macdrv_set_window_alpha(data->cocoa_window, opacity);
 
-    if (flags & LWA_COLORKEY)
-    {
-        /* FIXME: treat PALETTEINDEX and DIBINDEX as black */
-        if ((key & (1 << 24)) || key >> 16 == 0x10ff)
-            key = RGB(0, 0, 0);
-    }
-    else
-        key = CLR_INVALID;
-
-    if (data->color_key != key)
-    {
-        if (key == CLR_INVALID)
-        {
-            TRACE("clearing color-key for window %p/%p\n", data->hwnd, data->cocoa_window);
-            macdrv_clear_window_color_key(data->cocoa_window);
-        }
-        else
-        {
-            TRACE("setting color-key for window %p/%p to RGB %d,%d,%d\n", data->hwnd, data->cocoa_window,
-                  GetRValue(key), GetGValue(key), GetBValue(key));
-            macdrv_set_window_color_key(data->cocoa_window, GetRValue(key), GetGValue(key), GetBValue(key));
-        }
-
-        data->color_key = key;
-        needs_flush = TRUE;
-    }
-
     if (!data->per_pixel_alpha != !per_pixel_alpha)
     {
         TRACE("setting window %p/%p per-pixel-alpha to %d\n", data->hwnd, data->cocoa_window, per_pixel_alpha);
         macdrv_window_use_per_pixel_alpha(data->cocoa_window, per_pixel_alpha);
         data->per_pixel_alpha = per_pixel_alpha;
-        needs_flush = TRUE;
-    }
-
-    if (needs_flush && data->surface)
-    {
-        RECT rect;
-
-        rect = data->whole_rect;
-        OffsetRect(&rect, -data->whole_rect.left, -data->whole_rect.top);
-        window_surface_lock(data->surface);
-        add_bounds_rect(&data->surface->bounds, &rect);
-        window_surface_unlock(data->surface);
     }
 }
 
@@ -551,7 +355,7 @@ static void sync_window_min_max_info(HWND hwnd)
 {
     LONG style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
     LONG exstyle = NtUserGetWindowLongW(hwnd, GWL_EXSTYLE);
-    UINT dpi = get_win_monitor_dpi(hwnd);
+    UINT dpi = NtUserGetWinMonitorDpi(hwnd, MDT_DEFAULT);
     RECT win_rect, primary_monitor_rect;
     MINMAXINFO minmax;
     LONG adjustedStyle;
@@ -565,7 +369,7 @@ static void sync_window_min_max_info(HWND hwnd)
 
     if (!macdrv_get_cocoa_window(hwnd, FALSE)) return;
 
-    NtUserGetWindowRect(hwnd, &win_rect, get_win_monitor_dpi(hwnd));
+    NtUserGetWindowRect(hwnd, &win_rect, dpi);
     minmax.ptReserved.x = win_rect.left;
     minmax.ptReserved.y = win_rect.top;
 
@@ -657,7 +461,7 @@ static void sync_window_min_max_info(HWND hwnd)
         CGSize min_size, max_size;
 
         SetRect(&min_rect, 0, 0, minmax.ptMinTrackSize.x, minmax.ptMinTrackSize.y);
-        macdrv_window_to_mac_rect(data, style, &min_rect, &data->window_rect, &data->client_rect);
+        min_rect = visible_rect_from_window(&data->rects, min_rect);
         min_size = CGSizeMake(min_rect.right - min_rect.left, min_rect.bottom - min_rect.top);
 
         if (minmax.ptMaxTrackSize.x == NtUserGetSystemMetrics(SM_CXMAXTRACK) &&
@@ -666,7 +470,7 @@ static void sync_window_min_max_info(HWND hwnd)
         else
         {
             SetRect(&max_rect, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
-            macdrv_window_to_mac_rect(data, style, &max_rect, &data->window_rect, &data->client_rect);
+            max_rect = visible_rect_from_window(&data->rects, max_rect);
             max_size = CGSizeMake(max_rect.right - max_rect.left, max_rect.bottom - max_rect.top);
         }
 
@@ -687,8 +491,8 @@ static void sync_window_min_max_info(HWND hwnd)
  */
 static void create_client_cocoa_view(struct macdrv_win_data *data)
 {
-    RECT rect = data->client_rect;
-    OffsetRect(&rect, -data->whole_rect.left, -data->whole_rect.top);
+    RECT rect = data->rects.client;
+    OffsetRect(&rect, -data->rects.visible.left, -data->rects.visible.top);
 
     if (data->client_cocoa_view)
         macdrv_set_view_frame(data->client_cocoa_view, cgrect_from_rect(rect));
@@ -729,18 +533,15 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     style = NtUserGetWindowLongW(data->hwnd, GWL_STYLE);
     ex_style = NtUserGetWindowLongW(data->hwnd, GWL_EXSTYLE);
 
-    data->whole_rect = data->window_rect;
-    macdrv_window_to_mac_rect(data, style, &data->whole_rect, &data->window_rect, &data->client_rect);
+    wf = get_cocoa_window_features(data, style, ex_style);
 
-    get_cocoa_window_features(data, style, ex_style, &wf, &data->window_rect, &data->client_rect);
-
-    frame = cgrect_from_rect(data->whole_rect);
+    frame = cgrect_from_rect(data->rects.visible);
     constrain_window_frame(&frame.origin, &frame.size);
     if (frame.size.width < 1 || frame.size.height < 1)
         frame.size.width = frame.size.height = 1;
 
-    TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->window_rect),
-          wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
+    TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->rects.window),
+          wine_dbgstr_rect(&data->rects.visible), wine_dbgstr_rect(&data->rects.client));
 
     data->cocoa_window = macdrv_create_cocoa_window(&wf, frame, data->hwnd, thread_data->queue);
     if (!data->cocoa_window) goto done;
@@ -753,11 +554,11 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     macdrv_set_cocoa_window_title(data->cocoa_window, text, wcslen(text));
 
     /* set the window region */
-    if (win_rgn || IsRectEmpty(&data->window_rect)) sync_window_region(data, win_rgn);
+    if (win_rgn || IsRectEmpty(&data->rects.window)) sync_window_region(data, win_rgn);
 
     /* set the window opacity */
     if (!NtUserGetLayeredWindowAttributes(data->hwnd, &key, &alpha, &layered_flags)) layered_flags = 0;
-    sync_window_opacity(data, key, alpha, FALSE, layered_flags);
+    sync_window_opacity(data, alpha, FALSE, layered_flags);
 
 done:
     if (win_rgn) NtGdiDeleteObjectApp(win_rgn);
@@ -778,11 +579,6 @@ static void destroy_cocoa_window(struct macdrv_win_data *data)
     macdrv_destroy_cocoa_window(data->cocoa_window);
     data->cocoa_window = 0;
     data->on_screen = FALSE;
-    data->color_key = CLR_INVALID;
-    if (data->surface) window_surface_release(data->surface);
-    data->surface = NULL;
-    if (data->unminimized_surface) window_surface_release(data->unminimized_surface);
-    data->unminimized_surface = NULL;
 }
 
 
@@ -793,14 +589,14 @@ static void destroy_cocoa_window(struct macdrv_win_data *data)
  */
 static void create_cocoa_view(struct macdrv_win_data *data)
 {
-    BOOL equal = EqualRect(&data->window_rect, &data->client_rect);
-    CGRect frame = cgrect_from_rect(data->window_rect);
+    BOOL equal = EqualRect(&data->rects.window, &data->rects.client);
+    CGRect frame = cgrect_from_rect(data->rects.window);
 
     data->shaped = FALSE;
-    data->whole_rect = data->window_rect;
+    data->rects.visible = data->rects.window;
 
-    TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->window_rect),
-          wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
+    TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->rects.window),
+          wine_dbgstr_rect(&data->rects.visible), wine_dbgstr_rect(&data->rects.client));
 
     if (!equal)
         data->cocoa_view = macdrv_create_view(frame);
@@ -856,8 +652,7 @@ static void set_cocoa_view_parent(struct macdrv_win_data *data, HWND parent)
  *
  * Create a Mac data window structure for an existing window.
  */
-static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const RECT *window_rect,
-                                                      const RECT *client_rect)
+static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const struct window_rects *rects)
 {
     struct macdrv_win_data *data;
     HWND parent;
@@ -874,23 +669,21 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const RECT *win
     if (parent != NtUserGetDesktopWindow() && !NtUserGetAncestor(parent, GA_PARENT)) return NULL;
 
     if (!(data = alloc_win_data(hwnd))) return NULL;
-
-    data->whole_rect = data->window_rect = *window_rect;
-    data->client_rect = *client_rect;
+    data->rects = *rects;
 
     if (parent == NtUserGetDesktopWindow())
     {
         create_cocoa_window(data);
         TRACE("win %p/%p window %s whole %s client %s\n",
-               hwnd, data->cocoa_window, wine_dbgstr_rect(&data->window_rect),
-               wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
+               hwnd, data->cocoa_window, wine_dbgstr_rect(&data->rects.window),
+               wine_dbgstr_rect(&data->rects.visible), wine_dbgstr_rect(&data->rects.client));
     }
     else
     {
         create_cocoa_view(data);
         TRACE("win %p/%p window %s whole %s client %s\n",
-               hwnd, data->cocoa_view, wine_dbgstr_rect(&data->window_rect),
-               wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
+               hwnd, data->cocoa_view, wine_dbgstr_rect(&data->rects.window),
+               wine_dbgstr_rect(&data->rects.visible), wine_dbgstr_rect(&data->rects.client));
 
         set_cocoa_view_parent(data, parent);
     }
@@ -1151,8 +944,8 @@ static void sync_client_view_position(struct macdrv_win_data *data)
 {
     if (data->cocoa_view != data->client_cocoa_view)
     {
-        RECT rect = data->client_rect;
-        OffsetRect(&rect, -data->whole_rect.left, -data->whole_rect.top);
+        RECT rect = data->rects.client;
+        OffsetRect(&rect, -data->rects.visible.left, -data->rects.visible.top);
         macdrv_set_view_frame(data->client_cocoa_view, cgrect_from_rect(rect));
         TRACE("win %p/%p client %s\n", data->hwnd, data->client_cocoa_view, wine_dbgstr_rect(&rect));
     }
@@ -1164,10 +957,9 @@ static void sync_client_view_position(struct macdrv_win_data *data)
  *
  * Synchronize the Mac window position with the Windows one
  */
-static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, const RECT *old_window_rect,
-                                 const RECT *old_whole_rect)
+static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, const struct window_rects *old_rects)
 {
-    CGRect frame = cgrect_from_rect(data->whole_rect);
+    CGRect frame = cgrect_from_rect(data->rects.visible);
     BOOL force_z_order = FALSE;
 
     if (data->cocoa_window)
@@ -1183,7 +975,7 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
     else
     {
         BOOL were_equal = (data->cocoa_view == data->client_cocoa_view);
-        BOOL now_equal = EqualRect(&data->whole_rect, &data->client_rect);
+        BOOL now_equal = EqualRect(&data->rects.visible, &data->rects.client);
 
         if (were_equal && !now_equal)
         {
@@ -1201,71 +993,24 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
             macdrv_set_view_frame(data->cocoa_view, frame);
             force_z_order = TRUE;
         }
-        else if (!EqualRect(&data->whole_rect, old_whole_rect))
+        else if (!EqualRect(&data->rects.visible, &old_rects->visible))
             macdrv_set_view_frame(data->cocoa_view, frame);
     }
 
     sync_client_view_position(data);
 
-    if (old_window_rect && old_whole_rect &&
-        (IsRectEmpty(old_window_rect) != IsRectEmpty(&data->window_rect) ||
-         old_window_rect->left - old_whole_rect->left != data->window_rect.left - data->whole_rect.left ||
-         old_window_rect->top - old_whole_rect->top != data->window_rect.top - data->whole_rect.top))
+    if (old_rects &&
+        (IsRectEmpty(&old_rects->window) != IsRectEmpty(&data->rects.window) ||
+         old_rects->window.left - old_rects->visible.left != data->rects.window.left - data->rects.visible.left ||
+         old_rects->window.top - old_rects->visible.top != data->rects.window.top - data->rects.visible.top))
         sync_window_region(data, (HRGN)1);
 
     TRACE("win %p/%p whole_rect %s frame %s\n", data->hwnd,
           data->cocoa_window ? (void*)data->cocoa_window : (void*)data->cocoa_view,
-          wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_cgrect(frame));
+          wine_dbgstr_rect(&data->rects.visible), wine_dbgstr_cgrect(frame));
 
     if (force_z_order || !(swp_flags & SWP_NOZORDER) || (swp_flags & SWP_SHOWWINDOW))
         sync_window_z_order(data);
-}
-
-
-/***********************************************************************
- *              move_window_bits
- *
- * Move the window bits when a window is moved.
- */
-static void move_window_bits(HWND hwnd, macdrv_window window, const RECT *old_rect, const RECT *new_rect,
-                             const RECT *old_client_rect, const RECT *new_client_rect,
-                             const RECT *new_window_rect)
-{
-    RECT src_rect = *old_rect;
-    RECT dst_rect = *new_rect;
-    HDC hdc_src, hdc_dst;
-    HRGN rgn;
-    HWND parent = 0;
-
-    if (!window)
-    {
-        OffsetRect(&dst_rect, -new_window_rect->left, -new_window_rect->top);
-        parent = NtUserGetAncestor(hwnd, GA_PARENT);
-        hdc_src = NtUserGetDCEx(parent, 0, DCX_CACHE);
-        hdc_dst = NtUserGetDCEx(hwnd, 0, DCX_CACHE | DCX_WINDOW);
-    }
-    else
-    {
-        OffsetRect(&dst_rect, -new_client_rect->left, -new_client_rect->top);
-        /* make src rect relative to the old position of the window */
-        OffsetRect(&src_rect, -old_client_rect->left, -old_client_rect->top);
-        if (dst_rect.left == src_rect.left && dst_rect.top == src_rect.top) return;
-        hdc_src = hdc_dst = NtUserGetDCEx(hwnd, 0, DCX_CACHE);
-    }
-
-    rgn = NtGdiCreateRectRgn(dst_rect.left, dst_rect.top, dst_rect.right, dst_rect.bottom);
-    NtGdiExtSelectClipRgn(hdc_dst, rgn, RGN_COPY);
-    NtGdiDeleteObjectApp(rgn);
-    NtUserExcludeUpdateRgn(hdc_dst, hwnd);
-
-    TRACE("copying bits for win %p/%p %s -> %s\n", hwnd, window,
-          wine_dbgstr_rect(&src_rect), wine_dbgstr_rect(&dst_rect));
-    NtGdiBitBlt(hdc_dst, dst_rect.left, dst_rect.top,
-                dst_rect.right - dst_rect.left, dst_rect.bottom - dst_rect.top,
-                hdc_src, src_rect.left, src_rect.top, SRCCOPY, 0, 0);
-
-    NtUserReleaseDC(hwnd, hdc_dst);
-    if (hdc_src != hdc_dst) NtUserReleaseDC(parent, hdc_src);
 }
 
 
@@ -1342,7 +1087,7 @@ static HMONITOR monitor_from_point(POINT pt, UINT flags)
  */
 static LRESULT move_window(HWND hwnd, WPARAM wparam)
 {
-    UINT dpi = get_win_monitor_dpi(hwnd);
+    UINT dpi = NtUserGetWinMonitorDpi(hwnd, MDT_DEFAULT);
     MSG msg;
     RECT origRect, movedRect, desktopRect;
     int hittest = (int)(wparam & 0x0f);
@@ -1369,7 +1114,7 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
     else
         captionHeight = 0;
 
-    NtUserGetWindowRect(hwnd, &origRect, get_win_monitor_dpi(hwnd));
+    NtUserGetWindowRect(hwnd, &origRect, NtUserGetWinMonitorDpi(hwnd, MDT_DEFAULT));
     movedRect = origRect;
 
     if (!hittest)
@@ -1685,7 +1430,7 @@ void macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWOR
         data->ulw_layered = FALSE;
         if (data->cocoa_window)
         {
-            sync_window_opacity(data, key, alpha, FALSE, flags);
+            sync_window_opacity(data, alpha, FALSE, flags);
             /* since layered attributes are now set, can now show the window */
             if ((NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_VISIBLE) && !data->on_screen)
                 show_window(data);
@@ -1780,7 +1525,7 @@ void macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
         {
             data->layered = FALSE;
             data->ulw_layered = FALSE;
-            sync_window_opacity(data, 0, 0, FALSE, 0);
+            sync_window_opacity(data, 0, FALSE, 0);
         }
 
         if (offset == GWL_EXSTYLE && (changed & WS_EX_LAYOUTRTL))
@@ -1840,7 +1585,7 @@ UINT macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
 
     macdrv_get_cocoa_window_frame(data->cocoa_window, &frame);
     *rect = rect_from_cgrect(frame);
-    macdrv_mac_to_window_rect(data, rect);
+    *rect = window_rect_from_visible(&data->rects, *rect);
     TRACE("rect %s -> %s\n", wine_dbgstr_cgrect(frame), wine_dbgstr_rect(rect));
     swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE | SWP_NOSIZE | SWP_NOCLIENTSIZE);
 
@@ -1891,8 +1636,7 @@ done:
 /***********************************************************************
  *              UpdateLayeredWindow   (MACDRV.@)
  */
-void macdrv_UpdateLayeredWindow(HWND hwnd, const RECT *window_rect, COLORREF color_key,
-                                BYTE alpha, UINT flags)
+void macdrv_UpdateLayeredWindow(HWND hwnd, UINT flags)
 {
     struct macdrv_win_data *data;
 
@@ -1903,7 +1647,7 @@ void macdrv_UpdateLayeredWindow(HWND hwnd, const RECT *window_rect, COLORREF col
             show_window(data);
 
         /* The ULW flags are a superset of the LWA flags. */
-        sync_window_opacity(data, color_key, 255, TRUE, flags);
+        sync_window_opacity(data, 255, TRUE, flags);
         release_win_data(data);
     }
 }
@@ -1945,121 +1689,68 @@ LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 /***********************************************************************
  *              WindowPosChanging   (MACDRV.@)
  */
-BOOL macdrv_WindowPosChanging(HWND hwnd, UINT swp_flags, BOOL shaped, const RECT *window_rect,
-                              const RECT *client_rect, RECT *visible_rect)
+BOOL macdrv_WindowPosChanging(HWND hwnd, UINT swp_flags, BOOL shaped, const struct window_rects *rects)
 {
     struct macdrv_win_data *data = get_win_data(hwnd);
-    DWORD style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
     BOOL ret = FALSE;
 
-    TRACE("hwnd %p, swp_flags %04x, shaped %u, window_rect %s, client_rect %s, visible_rect %s\n",
-          hwnd, swp_flags, shaped, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
-          wine_dbgstr_rect(visible_rect));
+    TRACE("hwnd %p, swp_flags %04x, shaped %u, rects %s\n", hwnd, swp_flags, shaped, debugstr_window_rects(rects));
 
-    if (!data && !(data = macdrv_create_win_data(hwnd, window_rect, client_rect))) return FALSE; /* use default surface */
+    if (!data && !(data = macdrv_create_win_data(hwnd, rects))) return FALSE; /* use default surface */
     data->shaped = shaped;
 
-    macdrv_window_to_mac_rect(data, style, visible_rect, window_rect, client_rect);
-    TRACE("visible_rect %s -> %s\n", wine_dbgstr_rect(window_rect),
-          wine_dbgstr_rect(visible_rect));
-
-    if (!data->cocoa_window) goto done; /* use default surface */
-    if (data->ulw_layered) goto done; /* use default surface */
-
-    ret = TRUE;
-
-done:
+    ret = !!data->cocoa_window; /* use default surface if we don't have a window */
     release_win_data(data);
+
     return ret;
+}
+
+
+/***********************************************************************
+ *      GetWindowStyleMasks   (X11DRV.@)
+ */
+BOOL macdrv_GetWindowStyleMasks(HWND hwnd, UINT style, UINT ex_style, UINT *style_mask, UINT *ex_style_mask)
+{
+    struct macdrv_window_features wf = get_window_features_for_style(style, ex_style, FALSE);
+
+    *style_mask = ex_style = 0;
+    if (wf.title_bar)
+    {
+        *style_mask |= WS_CAPTION;
+        *ex_style_mask |= WS_EX_TOOLWINDOW;
+    }
+    if (wf.shadow)
+    {
+        *style_mask |= WS_DLGFRAME | WS_THICKFRAME;
+        *ex_style_mask |= WS_EX_DLGMODALFRAME;
+    }
+
+    return TRUE;
 }
 
 
 /***********************************************************************
  *              WindowPosChanged   (MACDRV.@)
  */
-void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
-                             const RECT *window_rect, const RECT *client_rect,
-                             const RECT *visible_rect, const RECT *valid_rects,
-                             struct window_surface *surface)
+void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags, BOOL fullscreen,
+                             const struct window_rects *new_rects, struct window_surface *surface)
 {
     struct macdrv_thread_data *thread_data;
     struct macdrv_win_data *data;
     unsigned int new_style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
-    RECT old_window_rect, old_whole_rect, old_client_rect;
+    struct window_rects old_rects;
 
     if (!(data = get_win_data(hwnd))) return;
 
     thread_data = macdrv_thread_data();
 
-    old_window_rect = data->window_rect;
-    old_whole_rect  = data->whole_rect;
-    old_client_rect = data->client_rect;
-    data->window_rect = *window_rect;
-    data->whole_rect  = *visible_rect;
-    data->client_rect = *client_rect;
-    if (data->cocoa_window && !data->ulw_layered)
-    {
-        if (surface) window_surface_add_ref(surface);
-        if (new_style & WS_MINIMIZE)
-        {
-            if (!data->unminimized_surface && data->surface)
-            {
-                data->unminimized_surface = data->surface;
-                window_surface_add_ref(data->unminimized_surface);
-            }
-        }
-        else
-        {
-            if (data->unminimized_surface)
-            {
-                window_surface_release(data->unminimized_surface);
-                data->unminimized_surface = NULL;
-            }
-        }
-        if (data->surface) window_surface_release(data->surface);
-        data->surface = surface;
-    }
+    old_rects = data->rects;
+    data->rects = *new_rects;
 
-    TRACE("win %p/%p window %s whole %s client %s style %08x flags %08x surface %p\n",
-           hwnd, data->cocoa_window, wine_dbgstr_rect(window_rect),
-           wine_dbgstr_rect(visible_rect), wine_dbgstr_rect(client_rect),
-           new_style, swp_flags, surface);
+    TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
+          debugstr_window_rects(new_rects), new_style, swp_flags, surface);
 
-    if (!IsRectEmpty(&valid_rects[0]))
-    {
-        macdrv_window window = data->cocoa_window;
-        int x_offset = old_whole_rect.left - data->whole_rect.left;
-        int y_offset = old_whole_rect.top - data->whole_rect.top;
-
-        /* if all that happened is that the whole window moved, copy everything */
-        if (!(swp_flags & SWP_FRAMECHANGED) &&
-            old_whole_rect.right   - data->whole_rect.right   == x_offset &&
-            old_whole_rect.bottom  - data->whole_rect.bottom  == y_offset &&
-            old_client_rect.left   - data->client_rect.left   == x_offset &&
-            old_client_rect.right  - data->client_rect.right  == x_offset &&
-            old_client_rect.top    - data->client_rect.top    == y_offset &&
-            old_client_rect.bottom - data->client_rect.bottom == y_offset &&
-            EqualRect(&valid_rects[0], &data->client_rect))
-        {
-            /* A Cocoa window's bits are moved automatically */
-            if (!window && (x_offset != 0 || y_offset != 0))
-            {
-                release_win_data(data);
-                move_window_bits(hwnd, window, &old_whole_rect, visible_rect,
-                                 &old_client_rect, client_rect, window_rect);
-                if (!(data = get_win_data(hwnd))) return;
-            }
-        }
-        else
-        {
-            release_win_data(data);
-            move_window_bits(hwnd, window, &valid_rects[1], &valid_rects[0],
-                             &old_client_rect, client_rect, window_rect);
-            if (!(data = get_win_data(hwnd))) return;
-        }
-    }
-
-    sync_gl_view(data, &old_whole_rect, &old_client_rect);
+    sync_gl_view(data, &old_rects);
 
     if (!data->cocoa_window && !data->cocoa_view) goto done;
 
@@ -2080,7 +1771,7 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     }
     else
     {
-        sync_window_position(data, swp_flags, &old_window_rect, &old_whole_rect);
+        sync_window_position(data, swp_flags, &old_rects);
         if (data->cocoa_window)
             set_cocoa_window_properties(data);
     }
@@ -2168,25 +1859,25 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
           event->window_frame_changed.fullscreen, event->window_frame_changed.in_resize);
 
     rect = rect_from_cgrect(event->window_frame_changed.frame);
-    macdrv_mac_to_window_rect(data, &rect);
+    rect = window_rect_from_visible(&data->rects, rect);
     NtUserMapWindowPoints(0, parent, (POINT *)&rect, 2, 0 /* per-monitor DPI */);
 
     width = rect.right - rect.left;
     height = rect.bottom - rect.top;
 
-    if (data->window_rect.left == rect.left && data->window_rect.top == rect.top)
+    if (data->rects.window.left == rect.left && data->rects.window.top == rect.top)
         flags |= SWP_NOMOVE;
     else
-        TRACE("%p moving from (%d,%d) to (%d,%d)\n", hwnd, (int)data->window_rect.left,
-              (int)data->window_rect.top, (int)rect.left, (int)rect.top);
+        TRACE("%p moving from (%d,%d) to (%d,%d)\n", hwnd, (int)data->rects.window.left,
+              (int)data->rects.window.top, (int)rect.left, (int)rect.top);
 
-    if ((data->window_rect.right - data->window_rect.left == width &&
-         data->window_rect.bottom - data->window_rect.top == height) ||
-        (IsRectEmpty(&data->window_rect) && width == 1 && height == 1))
+    if ((data->rects.window.right - data->rects.window.left == width &&
+         data->rects.window.bottom - data->rects.window.top == height) ||
+        (IsRectEmpty(&data->rects.window) && width == 1 && height == 1))
         flags |= SWP_NOSIZE;
     else
-        TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, (int)(data->window_rect.right - data->window_rect.left),
-              (int)(data->window_rect.bottom - data->window_rect.top), width, height);
+        TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, (int)(data->rects.window.right - data->rects.window.left),
+              (int)(data->rects.window.bottom - data->rects.window.top), width, height);
 
     being_dragged = data->drag_event != NULL;
     release_win_data(data);
@@ -2403,7 +2094,7 @@ void macdrv_window_restore_requested(HWND hwnd, const macdrv_event *event)
             HWND parent = NtUserGetAncestor(hwnd, GA_PARENT);
 
             rect = rect_from_cgrect(event->window_restore_requested.frame);
-            macdrv_mac_to_window_rect(data, &rect);
+            rect = window_rect_from_visible(&data->rects, rect);
             NtUserMapWindowPoints(0, parent, (POINT *)&rect, 2, 0 /* per-monitor DPI */);
 
             release_win_data(data);
@@ -2529,7 +2220,7 @@ void macdrv_reassert_window_position(HWND hwnd)
     if (data)
     {
         if (data->cocoa_window && data->on_screen)
-            sync_window_position(data, SWP_NOZORDER | SWP_NOACTIVATE, NULL, NULL);
+            sync_window_position(data, SWP_NOZORDER | SWP_NOACTIVATE, NULL);
         release_win_data(data);
     }
 }
@@ -2542,14 +2233,16 @@ void macdrv_reassert_window_position(HWND hwnd)
  */
 void macdrv_app_quit_requested(const macdrv_event *event)
 {
-    struct app_quit_request_params params = { .flags = 0 };
+    struct app_quit_request_params params = {.dispatch = {.callback = app_quit_request_callback}};
+    void *ret_ptr;
+    ULONG ret_len;
 
     TRACE("reason %d\n", event->app_quit_requested.reason);
 
     if (event->app_quit_requested.reason == QUIT_REASON_LOGOUT)
         params.flags = ENDSESSION_LOGOFF;
 
-    macdrv_client_func(client_func_app_quit_request, &params, sizeof(params));
+    KeUserDispatchCallback(&params.dispatch, sizeof(params), &ret_ptr, &ret_len);
 }
 
 
@@ -2561,13 +2254,14 @@ void macdrv_app_quit_requested(const macdrv_event *event)
 BOOL query_resize_size(HWND hwnd, macdrv_query *query)
 {
     struct macdrv_win_data *data = get_win_data(hwnd);
-    RECT rect = rect_from_cgrect(query->resize_size.rect);
+    RECT rect;
     int corner;
     BOOL ret = FALSE;
 
     if (!data) return FALSE;
 
-    macdrv_mac_to_window_rect(data, &rect);
+    rect = rect_from_cgrect(query->resize_size.rect);
+    rect = window_rect_from_visible(&data->rects, rect);
 
     if (query->resize_size.from_left)
     {
@@ -2583,8 +2277,7 @@ BOOL query_resize_size(HWND hwnd, macdrv_query *query)
 
     if (send_message(hwnd, WM_SIZING, corner, (LPARAM)&rect))
     {
-        macdrv_window_to_mac_rect(data, NtUserGetWindowLongW(hwnd, GWL_STYLE), &rect,
-                                  &data->window_rect, &data->client_rect);
+        rect = visible_rect_from_window(&data->rects, rect);
         query->resize_size.rect = cgrect_from_rect(rect);
         ret = TRUE;
     }
