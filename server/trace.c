@@ -1511,6 +1511,24 @@ static void dump_varargs_directory_entries( const char *prefix, data_size_t size
     fputc( '}', stderr );
 }
 
+static void dump_varargs_monitor_infos( const char *prefix, data_size_t size )
+{
+    const struct monitor_info *monitor = cur_data;
+    data_size_t len = size / sizeof(*monitor);
+
+    fprintf( stderr,"%s{", prefix );
+    while (len > 0)
+    {
+        dump_rectangle( "{raw:", &monitor->virt );
+        dump_rectangle( ",virt:", &monitor->virt );
+        fprintf( stderr, ",flags:%#x,dpi:%u", monitor->flags, monitor->dpi );
+        fputc( '}', stderr );
+        if (--len) fputc( ',', stderr );
+    }
+    fputc( '}', stderr );
+    remove_data( size );
+}
+
 typedef void (*dump_func)( const void *req );
 
 /* Everything below this line is generated automatically by tools/make_requests */
@@ -3470,6 +3488,11 @@ static void dump_close_winstation_request( const struct close_winstation_request
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_set_winstation_monitors_request( const struct set_winstation_monitors_request *req )
+{
+    dump_varargs_monitor_infos( " infos=", cur_size );
+}
+
 static void dump_get_process_winstation_request( const struct get_process_winstation_request *req )
 {
 }
@@ -4519,9 +4542,23 @@ static void dump_add_completion_request( const struct add_completion_request *re
 static void dump_remove_completion_request( const struct remove_completion_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", alertable=%d", req->alertable );
 }
 
 static void dump_remove_completion_reply( const struct remove_completion_reply *req )
+{
+    dump_uint64( " ckey=", &req->ckey );
+    dump_uint64( ", cvalue=", &req->cvalue );
+    dump_uint64( ", information=", &req->information );
+    fprintf( stderr, ", status=%08x", req->status );
+    fprintf( stderr, ", wait_handle=%04x", req->wait_handle );
+}
+
+static void dump_get_thread_completion_request( const struct get_thread_completion_request *req )
+{
+}
+
+static void dump_get_thread_completion_reply( const struct get_thread_completion_reply *req )
 {
     dump_uint64( " ckey=", &req->ckey );
     dump_uint64( ", cvalue=", &req->cvalue );
@@ -4942,6 +4979,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_winstation_request,
     (dump_func)dump_open_winstation_request,
     (dump_func)dump_close_winstation_request,
+    (dump_func)dump_set_winstation_monitors_request,
     (dump_func)dump_get_process_winstation_request,
     (dump_func)dump_set_process_winstation_request,
     (dump_func)dump_enum_winstation_request,
@@ -5034,6 +5072,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_open_completion_request,
     (dump_func)dump_add_completion_request,
     (dump_func)dump_remove_completion_request,
+    (dump_func)dump_get_thread_completion_request,
     (dump_func)dump_query_completion_request,
     (dump_func)dump_set_completion_info_request,
     (dump_func)dump_add_fd_completion_request,
@@ -5234,6 +5273,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_winstation_reply,
     (dump_func)dump_open_winstation_reply,
     NULL,
+    NULL,
     (dump_func)dump_get_process_winstation_reply,
     NULL,
     (dump_func)dump_enum_winstation_reply,
@@ -5326,6 +5366,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_open_completion_reply,
     NULL,
     (dump_func)dump_remove_completion_reply,
+    (dump_func)dump_get_thread_completion_reply,
     (dump_func)dump_query_completion_reply,
     NULL,
     NULL,
@@ -5526,6 +5567,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "create_winstation",
     "open_winstation",
     "close_winstation",
+    "set_winstation_monitors",
     "get_process_winstation",
     "set_process_winstation",
     "enum_winstation",
@@ -5618,6 +5660,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "open_completion",
     "add_completion",
     "remove_completion",
+    "get_thread_completion",
     "query_completion",
     "set_completion_info",
     "add_fd_completion",

@@ -289,6 +289,7 @@ DECL_HANDLER(get_window_properties);
 DECL_HANDLER(create_winstation);
 DECL_HANDLER(open_winstation);
 DECL_HANDLER(close_winstation);
+DECL_HANDLER(set_winstation_monitors);
 DECL_HANDLER(get_process_winstation);
 DECL_HANDLER(set_process_winstation);
 DECL_HANDLER(enum_winstation);
@@ -381,6 +382,7 @@ DECL_HANDLER(create_completion);
 DECL_HANDLER(open_completion);
 DECL_HANDLER(add_completion);
 DECL_HANDLER(remove_completion);
+DECL_HANDLER(get_thread_completion);
 DECL_HANDLER(query_completion);
 DECL_HANDLER(set_completion_info);
 DECL_HANDLER(add_fd_completion);
@@ -584,6 +586,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_create_winstation,
     (req_handler)req_open_winstation,
     (req_handler)req_close_winstation,
+    (req_handler)req_set_winstation_monitors,
     (req_handler)req_get_process_winstation,
     (req_handler)req_set_process_winstation,
     (req_handler)req_enum_winstation,
@@ -676,6 +679,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_open_completion,
     (req_handler)req_add_completion,
     (req_handler)req_remove_completion,
+    (req_handler)req_get_thread_completion,
     (req_handler)req_query_completion,
     (req_handler)req_set_completion_info,
     (req_handler)req_add_fd_completion,
@@ -1729,6 +1733,7 @@ C_ASSERT( FIELD_OFFSET(struct open_winstation_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_winstation_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct close_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct close_winstation_request) == 16 );
+C_ASSERT( sizeof(struct set_winstation_monitors_request) == 16 );
 C_ASSERT( sizeof(struct get_process_winstation_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_process_winstation_reply, handle) == 8 );
 C_ASSERT( sizeof(struct get_process_winstation_reply) == 16 );
@@ -2235,12 +2240,20 @@ C_ASSERT( FIELD_OFFSET(struct add_completion_request, information) == 32 );
 C_ASSERT( FIELD_OFFSET(struct add_completion_request, status) == 40 );
 C_ASSERT( sizeof(struct add_completion_request) == 48 );
 C_ASSERT( FIELD_OFFSET(struct remove_completion_request, handle) == 12 );
-C_ASSERT( sizeof(struct remove_completion_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct remove_completion_request, alertable) == 16 );
+C_ASSERT( sizeof(struct remove_completion_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct remove_completion_reply, ckey) == 8 );
 C_ASSERT( FIELD_OFFSET(struct remove_completion_reply, cvalue) == 16 );
 C_ASSERT( FIELD_OFFSET(struct remove_completion_reply, information) == 24 );
 C_ASSERT( FIELD_OFFSET(struct remove_completion_reply, status) == 32 );
+C_ASSERT( FIELD_OFFSET(struct remove_completion_reply, wait_handle) == 36 );
 C_ASSERT( sizeof(struct remove_completion_reply) == 40 );
+C_ASSERT( sizeof(struct get_thread_completion_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_completion_reply, ckey) == 8 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_completion_reply, cvalue) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_completion_reply, information) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_completion_reply, status) == 32 );
+C_ASSERT( sizeof(struct get_thread_completion_reply) == 40 );
 C_ASSERT( FIELD_OFFSET(struct query_completion_request, handle) == 12 );
 C_ASSERT( sizeof(struct query_completion_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct query_completion_reply, depth) == 8 );
