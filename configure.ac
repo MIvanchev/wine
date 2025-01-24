@@ -829,12 +829,12 @@ do
             ;;
         esac])
 
-    CFLAGS=${CROSSCFLAGS:-"-g -O2"}
     CPPFLAGS=""
-    LDFLAGS=$CROSSLDFLAGS
+    AS_VAR_SET_IF([${wine_arch}_CFLAGS],[],[AS_VAR_SET([${wine_arch}_CFLAGS],[${CROSSCFLAGS:-"-g -O2"}])])
+    AS_VAR_SET_IF([${wine_arch}_LDFLAGS],[],[AS_VAR_SET([${wine_arch}_LDFLAGS],[$CROSSLDFLAGS])])
     AS_VAR_COPY([CC],[${wine_arch}_CC])
-    AS_VAR_COPY([${wine_arch}_CFLAGS],[CFLAGS])
-    AS_VAR_COPY([${wine_arch}_LDFLAGS],[LDFLAGS])
+    AS_VAR_COPY([CFLAGS],[${wine_arch}_CFLAGS])
+    AS_VAR_COPY([LDFLAGS],[${wine_arch}_LDFLAGS])
     AS_VAR_SET([${wine_arch}_EXTRACFLAGS],["-D__WINE_PE_BUILD -Wall"])
 
     target=""
@@ -1004,16 +1004,19 @@ This is an error since --enable-archs=$wine_arch was requested.])])
     if test "x$ac_debug_format_seen" = x
     then
       case $wine_crossdebug in
-        *dwarf)  WINE_TRY_PE_CFLAGS([-gdwarf-4]) ;;
+        *dwarf)  dnl clang emits a warning without -Wl,-debug:dwarf, so ensure linker option is present
+                 WINE_TRY_PE_CFLAGS([-Wl,-debug:dwarf],[AS_VAR_APPEND([${wine_arch}_LDFLAGS],[" -Wl,-debug:dwarf"])
+                                                        CFLAGS="$CFLAGS -Wl,-debug:dwarf"])
+                 WINE_TRY_PE_CFLAGS([-gdwarf-4]) ;;
         pdb)     WINE_TRY_PE_CFLAGS([-gcodeview]) ;;
       esac
     fi
     AS_VAR_SET([${wine_arch}_DEBUG],[$wine_crossdebug])
 
     test "x$enable_werror" != xyes || WINE_TRY_PE_CFLAGS([-Werror])
-    test "x$enable_build_id" != xyes || WINE_TRY_PE_CFLAGS([-Wl,--build-id],
-                                         [AS_VAR_APPEND([${wine_arch}_CFLAGS],[" -Wl,--build-id"])
-                                          AS_VAR_APPEND([${wine_arch}_LDFLAGS],[" -Wl,--build-id"])])
+    dnl clang for PE target wants -build-id (and not --build-id as gcc/mingw or clang in unix target)
+    dnl don't bother testing flags, compilation will fail afterwards
+    test "x$enable_build_id" != xyes || AS_VAR_APPEND([${wine_arch}_LDFLAGS],[" -Wl,--build-id"])
 
 done
 
@@ -2000,11 +2003,8 @@ int a(int b, ...) { __builtin_ms_va_list list; __builtin_ms_va_start(list,b); }]
   then
       WINE_TRY_CFLAGS([-Werror])
   fi
-  if test "x$enable_build_id" = "xyes"
-  then
-      WINE_TRY_CFLAGS([-Wl,--build-id], [CFLAGS="$CFLAGS -Wl,--build-id"
-                      LDFLAGS="$LDFLAGS -Wl,--build-id"])
-  fi
+
+  AS_VAR_IF([enable_build_id],[yes],[WINE_TRY_CFLAGS([-Wl,--build-id],[LDFLAGS="$LDFLAGS -Wl,--build-id"])])
 fi
 
 dnl **** Disable Fortify, it has too many false positives
@@ -2086,6 +2086,7 @@ AC_CHECK_FUNCS(\
 	posix_fadvise \
 	posix_fallocate \
 	prctl \
+	sched_getcpu \
 	sched_yield \
 	setproctitle \
 	setprogname \
@@ -2570,6 +2571,7 @@ WINE_CONFIG_MAKEFILE(dlls/d3dx9_40)
 WINE_CONFIG_MAKEFILE(dlls/d3dx9_41)
 WINE_CONFIG_MAKEFILE(dlls/d3dx9_42)
 WINE_CONFIG_MAKEFILE(dlls/d3dx9_43)
+WINE_CONFIG_MAKEFILE(dlls/d3dx9_43/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dxof)
 WINE_CONFIG_MAKEFILE(dlls/d3dxof/tests)
 WINE_CONFIG_MAKEFILE(dlls/dataexchange)
@@ -3237,6 +3239,8 @@ WINE_CONFIG_MAKEFILE(dlls/windows.media.speech)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.media)
 WINE_CONFIG_MAKEFILE(dlls/windows.media/tests)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.networking.hostname)
 WINE_CONFIG_MAKEFILE(dlls/windows.networking.hostname/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.networking)
@@ -3260,6 +3264,7 @@ WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext/tests)
 WINE_CONFIG_MAKEFILE(dlls/winealsa.drv)
 WINE_CONFIG_MAKEFILE(dlls/wineandroid.drv)
+WINE_CONFIG_MAKEFILE(dlls/winebth.sys)
 WINE_CONFIG_MAKEFILE(dlls/winebus.sys)
 WINE_CONFIG_MAKEFILE(dlls/winecoreaudio.drv)
 WINE_CONFIG_MAKEFILE(dlls/winecrt0)

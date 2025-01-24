@@ -427,6 +427,12 @@ static BOOL is_hidraw_enabled(WORD vid, WORD pid, const USAGE_AND_PAGE *usages, 
     DWORD size;
 
     if (check_bus_option(L"DisableHidraw", FALSE)) return FALSE;
+
+    if (usages->UsagePage == HID_USAGE_PAGE_DIGITIZER)
+    {
+        WARN("Ignoring unsupported %04X:%04X hidraw touchscreen\n", vid, pid);
+        return FALSE;
+    }
     if (usages->UsagePage != HID_USAGE_PAGE_GENERIC) return TRUE;
     if (usages->Usage != HID_USAGE_GENERIC_GAMEPAD && usages->Usage != HID_USAGE_GENERIC_JOYSTICK) return TRUE;
 
@@ -535,6 +541,8 @@ static void process_hid_report(DEVICE_OBJECT *device, BYTE *report_buf, DWORD re
     struct hid_report *report, *last_report;
     IRP *irp;
 
+    TRACE("device %p report_buf %p (%#x), report_len %#lx\n", device, report_buf, *report_buf, report_len);
+
     if (!(report = RtlAllocateHeap(GetProcessHeap(), 0, size))) return;
     memcpy(report->buffer, report_buf, report_len);
     report->length = report_len;
@@ -593,10 +601,24 @@ static void process_hid_report(DEVICE_OBJECT *device, BYTE *report_buf, DWORD re
     }
 
     RtlEnterCriticalSection(&ext->cs);
-    list_add_tail(&ext->reports, &report->entry);
+
+    if (ext->state != DEVICE_STATE_STARTED)
+    {
+        RtlLeaveCriticalSection(&ext->cs);
+        return;
+    }
 
     if (!ext->collection_desc.ReportIDs[0].ReportID) last_report = ext->last_reports[0];
     else last_report = ext->last_reports[report_buf[0]];
+    if (!last_report)
+    {
+        WARN("Ignoring report with unexpected id %#x\n", *report_buf);
+        RtlLeaveCriticalSection(&ext->cs);
+        return;
+    }
+
+    list_add_tail(&ext->reports, &report->entry);
+
     memcpy(last_report->buffer, report_buf, report_len);
 
     if ((irp = pop_pending_read(ext)))

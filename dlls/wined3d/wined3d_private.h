@@ -2035,6 +2035,9 @@ struct wined3d_blitter_ops
 struct wined3d_blitter *wined3d_cpu_blitter_create(void);
 void wined3d_vk_blitter_create(struct wined3d_blitter **next);
 
+void cpu_blitter_clear_texture(struct wined3d_texture *texture, unsigned int sub_resource_idx,
+        const struct wined3d_box *box, const struct wined3d_color *colour);
+
 BOOL wined3d_clip_blit(const RECT *clip_rect, RECT *clipped, RECT *other);
 
 void context_invalidate_compute_state(struct wined3d_context *context, DWORD state_id);
@@ -4298,7 +4301,8 @@ BOOL shader_match_semantic(const char *semantic_name, enum wined3d_decl_usage us
 
 enum vkd3d_shader_visibility vkd3d_shader_visibility_from_wined3d(enum wined3d_shader_type shader_type);
 
-bool ffp_hlsl_compile_vs(const struct wined3d_ffp_vs_settings *settings, struct wined3d_shader_desc *shader_desc);
+bool ffp_hlsl_compile_vs(const struct wined3d_ffp_vs_settings *settings,
+        struct wined3d_shader_desc *shader_desc, struct wined3d_device *device);
 bool ffp_hlsl_compile_ps(const struct ffp_frag_settings *settings, struct wined3d_shader_desc *shader_desc);
 
 static inline BOOL shader_is_scalar(const struct wined3d_shader_register *reg)

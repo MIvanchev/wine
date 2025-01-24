@@ -1621,6 +1621,9 @@ static void test_reg_load_key(void)
     ret = RegUnLoadKeyA(HKEY_LOCAL_MACHINE, "Test");
     ok(ret == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %ld\n", ret);
 
+    ret = RegLoadKeyA(HKEY_LOCAL_MACHINE, "Test", "");
+    ok(ret == ERROR_INVALID_PARAMETER, "expected INVALID_PARAMETER, got %ld\n", ret);
+
     /* check if modifications are saved */
     ret = RegLoadKeyA(HKEY_LOCAL_MACHINE, "Test", saved_key);
     ok(ret == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %ld\n", ret);
@@ -4174,6 +4177,7 @@ static void test_RegNotifyChangeKeyValue(void)
     ret = RegOpenKeyA(hkey_main, "TestKey", &key);
     ok(ret == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %ld\n", ret);
 
+    data.key = key;
     data.flags = REG_NOTIFY_THREAD_AGNOSTIC;
     thread = CreateThread(NULL, 0, notify_change_thread, &data, 0, NULL);
     WaitForSingleObject(thread, INFINITE);
@@ -5121,6 +5125,36 @@ static void test_RegRenameKey(void)
     RegCloseKey(key);
 }
 
+static BOOL check_cs_number( const WCHAR *str )
+{
+    if (str[0] < '0' || str[0] > '9' || str[1] < '0' || str[1] > '9' || str[2] < '0' || str[2] > '9')
+        return FALSE;
+    if (str[0] == '0' && str[1] == '0' && str[2] == '0')
+        return FALSE;
+    return TRUE;
+}
+
+static void test_control_set_symlink(void)
+{
+    static const WCHAR target_pfxW[] = L"\\REGISTRY\\Machine\\System\\ControlSet";
+    DWORD target_len, type, len, err;
+    BYTE buffer[1024];
+    HKEY key;
+
+    target_len = sizeof(target_pfxW) + 3 * sizeof(WCHAR);
+
+    err = RegOpenKeyExA( HKEY_LOCAL_MACHINE, "System\\CurrentControlSet", REG_OPTION_OPEN_LINK, KEY_QUERY_VALUE, &key );
+    ok( err == ERROR_SUCCESS, "RegOpenKeyEx failed error %lu\n", err );
+    len = sizeof(buffer);
+    err = RegQueryValueExA( key, "SymbolicLinkValue", NULL, &type, buffer, &len );
+    ok( err == ERROR_SUCCESS, "RegQueryValueEx failed error %lu\n", err );
+    ok( len == target_len - sizeof(WCHAR), "wrong len %lu\n", len );
+    ok( !wcsnicmp( (WCHAR*)buffer, target_pfxW, ARRAY_SIZE(target_pfxW) - 1 ) &&
+        check_cs_number( (WCHAR*)buffer + ARRAY_SIZE(target_pfxW) - 1 ),
+        "wrong link target\n" );
+    RegCloseKey( key );
+}
+
 START_TEST(registry)
 {
     /* Load pointers for functions that are not available in all Windows versions */
@@ -5161,6 +5195,7 @@ START_TEST(registry)
     test_EnumDynamicTimeZoneInformation();
     test_perflib_key();
     test_RegRenameKey();
+    test_control_set_symlink();
 
     /* cleanup */
     delete_key( hkey_main );

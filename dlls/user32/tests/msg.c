@@ -9325,6 +9325,9 @@ static void subtest_swp_paint_regions_( int line, int wrap_toplevel, LPCSTR pare
     ok( hauxchild != 0, "Creating child window (%s) returned error %lu\n",
         debugstr_a( child_class ), GetLastError() );
 
+    SetWindowPos( htoplevel ? htoplevel : hparent, NULL, 0, 0, 0, 0,
+                  SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_SHOWWINDOW );
+
     for (i = 0; i < ARRAY_SIZE(exposure_tests); i++)
     {
         const struct exposure_test *extest = &exposure_tests[i];
@@ -20538,6 +20541,186 @@ static void test_hook_changing_window_proc(void)
     DestroyWindow( hwnd );
 }
 
+static void test_radiobutton_focus(void)
+{
+    HWND hwnd, button;
+    DWORD style;
+    int i;
+    DWORD types[] = { BS_RADIOBUTTON, BS_AUTORADIOBUTTON };
+
+    static const struct message set_focus_default_seq[] =
+    {
+        { WM_COMMAND, sent|parent|wparam, MAKEWPARAM(ID_BUTTON, BN_SETFOCUS) },
+        { WM_COMMAND, sent|parent|wparam, MAKEWPARAM(ID_BUTTON, BN_CLICKED) },
+        { 0 }
+    };
+
+    static const struct message set_focus_checked_seq[] =
+    {
+        { WM_COMMAND, sent|parent|wparam, MAKEWPARAM(ID_BUTTON, BN_SETFOCUS) },
+        { 0 }
+    };
+
+    static const struct message WM_LBUTTONDOWN_seq[] =
+    {
+        { WM_KILLFOCUS, sent|parent },
+        { WM_IME_SETCONTEXT, sent|optional|parent },
+        { WM_IME_SETCONTEXT, sent|optional|defwinproc },
+        { WM_COMMAND, sent|parent },
+        { 0 }
+    };
+
+    static const struct message set_focus_without_notify_seq[] =
+    {
+        { WM_COMMAND, sent|parent|wparam, ID_BUTTON },
+        { 0 }
+    };
+
+    hwnd = CreateWindowExA(0, "TestParentClass", "Test parent", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           100, 100, 200, 200, 0, 0, 0, NULL);
+    ok(hwnd != 0, "Failed to create parent window\n");
+
+    for (i = 0; i < ARRAY_SIZE(types); i++)
+    {
+        /* Test default button */
+        style = types[i] | WS_CHILD | WS_VISIBLE | BS_NOTIFY;
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        ok(button != NULL, "failed to create a button, 0x%08lx, %p\n", style, hwnd);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        flush_events();
+        ok_sequence(set_focus_default_seq, "WM_SETFOCUS on default radiobutton", FALSE);
+        DestroyWindow(button);
+
+        /* Test already checked button */
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        SendMessageA(button, BM_SETCHECK, BST_CHECKED, 0);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        flush_events();
+        ok_sequence(set_focus_checked_seq, "WM_SETFOCUS on checked radiobutton", FALSE);
+        DestroyWindow(button);
+
+        /* Test already focused button */
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        SendMessageA(button, BM_SETCHECK, BST_UNCHECKED, 0);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        flush_events();
+        ok_sequence(set_focus_default_seq, "WM_SETFOCUS on focused radiobutton", FALSE);
+        DestroyWindow(button);
+
+        /* Test WM_LBUTTONDOWN */
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_LBUTTONDOWN, 0, MAKELPARAM(7, 7));
+        flush_events();
+        ok_sequence(WM_LBUTTONDOWN_seq, "WM_LBUTTONDOWN on radiobutton", FALSE);
+        DestroyWindow(button);
+
+        /* Test without BS_NOTIFY */
+        style = types[i] | WS_CHILD | WS_VISIBLE;
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        flush_events();
+        ok_sequence(set_focus_without_notify_seq, "WM_SETFOCUS on radiobutton without BS_NOTIFY", FALSE);
+        DestroyWindow(button);
+
+        /* Test disabled button */
+        style = types[i] | WS_CHILD | WS_VISIBLE | BS_NOTIFY;
+        button = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, hwnd, (HMENU)ID_BUTTON, 0, NULL);
+        EnableWindow(button, FALSE);
+        flush_events();
+        flush_sequence();
+        SendMessageA(button, WM_SETFOCUS, 0, 0);
+        flush_events();
+        ok_sequence(set_focus_default_seq, "WM_SETFOCUS on disabled radiobutton", FALSE);
+        DestroyWindow(button);
+    }
+
+    DestroyWindow(hwnd);
+}
+
+static LONG test_hook_cleanup_hook_proc_child_id;
+static DWORD test_hook_cleanup_hook_proc_thread_id, test_hook_cleanup_hook_proc_call_thread_id;
+
+static void CALLBACK test_hook_cleanup_hook_proc( HWINEVENTHOOK hook, DWORD event_id, HWND hwnd, LONG obj_id,
+                                                  LONG child_id, DWORD thread_id, DWORD event_time )
+{
+    test_hook_cleanup_hook_proc_child_id = child_id;
+    test_hook_cleanup_hook_proc_call_thread_id = GetCurrentThreadId();
+    test_hook_cleanup_hook_proc_thread_id = thread_id;
+}
+
+struct test_hook_cleanup_data
+{
+    HWND hwnd;
+    HANDLE hook_installed_event;
+    HANDLE done_event;
+    DWORD main_thread_id;
+};
+
+static DWORD WINAPI test_hook_cleanup_thread_proc( void *context )
+{
+    struct test_hook_cleanup_data *d = context;
+    HWINEVENTHOOK hook;
+
+    hook = SetWinEventHook( EVENT_MIN, EVENT_MAX, GetModuleHandleW( NULL ), test_hook_cleanup_hook_proc,
+                            GetCurrentProcessId(), 0, WINEVENT_INCONTEXT );
+    ok( !!hook, "got error %ld.\n", GetLastError() );
+
+    test_hook_cleanup_hook_proc_child_id = -1;
+    NotifyWinEvent( EVENT_MIN, d->hwnd, 1, 1 );
+    ok( test_hook_cleanup_hook_proc_child_id == 1, "got %ld.\n", test_hook_cleanup_hook_proc_child_id );
+    todo_wine ok( test_hook_cleanup_hook_proc_thread_id == d->main_thread_id, "got %#lx.\n",
+        test_hook_cleanup_hook_proc_thread_id );
+    ok( test_hook_cleanup_hook_proc_call_thread_id == GetCurrentThreadId(), "got %#lx.\n",
+        test_hook_cleanup_hook_proc_call_thread_id );
+
+    SetEvent( d->hook_installed_event );
+    WaitForSingleObject( d->done_event, INFINITE );
+    return 0;
+}
+
+static void test_hook_cleanup(void)
+{
+    struct test_hook_cleanup_data d;
+    HANDLE thread;
+
+    d.main_thread_id = GetCurrentThreadId();
+    d.hwnd = CreateWindowA ("static", "window", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0 );
+    d.hook_installed_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    d.done_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+
+    thread = CreateThread( NULL, 0, test_hook_cleanup_thread_proc, &d, 0, NULL );
+    WaitForSingleObject( d.hook_installed_event, INFINITE );
+
+    test_hook_cleanup_hook_proc_child_id = -1;
+    NotifyWinEvent( EVENT_MIN, d.hwnd, 1, 2 );
+    ok( test_hook_cleanup_hook_proc_child_id == 2, "got %ld.\n", test_hook_cleanup_hook_proc_child_id );
+    ok( test_hook_cleanup_hook_proc_thread_id == GetCurrentThreadId(), "got %#lx.\n",
+        test_hook_cleanup_hook_proc_thread_id );
+    ok( test_hook_cleanup_hook_proc_call_thread_id == GetCurrentThreadId(), "got %#lx.\n",
+        test_hook_cleanup_hook_proc_call_thread_id );
+
+    SetEvent( d.done_event );
+    WaitForSingleObject( thread, INFINITE );
+
+    /* Hook is removed when thread which created it is terminated. */
+    test_hook_cleanup_hook_proc_child_id = -1;
+    NotifyWinEvent( EVENT_MIN, d.hwnd, 1, 3 );
+    ok( test_hook_cleanup_hook_proc_child_id == -1, "got %ld.\n", test_hook_cleanup_hook_proc_child_id );
+
+    DestroyWindow( d.hwnd );
+}
+
 START_TEST(msg)
 {
     char **test_argv;
@@ -20585,6 +20768,7 @@ START_TEST(msg)
     test_setparent_status();
     test_InSendMessage();
     test_SetFocus();
+    test_radiobutton_focus();
     test_SetParent();
     test_PostMessage();
     test_broadcast();
@@ -20660,6 +20844,7 @@ START_TEST(msg)
     test_DoubleSetCapture();
     test_create_name();
     test_hook_changing_window_proc();
+    test_hook_cleanup();
     /* keep it the last test, under Windows it tends to break the tests
      * which rely on active/foreground windows being correct.
      */

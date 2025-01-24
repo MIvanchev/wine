@@ -194,12 +194,34 @@ static HFONT X11DRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
     return dev->funcs->pSelectFont( dev, hfont, aa_flags );
 }
 
+static BOOL needs_client_window_clipping( HWND hwnd )
+{
+    RECT rect, client;
+    UINT ret = 0;
+    HRGN region;
+    HDC hdc;
+
+    NtUserGetClientRect( hwnd, &client, NtUserGetDpiForWindow( hwnd ) );
+    OffsetRect( &client, -client.left, -client.top );
+
+    if (!(hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | DCX_USESTYLE ))) return FALSE;
+    if ((region = NtGdiCreateRectRgn( 0, 0, 0, 0 )))
+    {
+        ret = NtGdiGetRandomRgn( hdc, region, SYSRGN );
+        if (ret > 0 && (ret = NtGdiGetRgnBox( region, &rect )) < NULLREGION) ret = 0;
+        if (ret == SIMPLEREGION && EqualRect( &rect, &client )) ret = 0;
+        NtGdiDeleteObjectApp( region );
+    }
+    NtUserReleaseDC( hwnd, hdc );
+
+    return ret > 0;
+}
+
 BOOL needs_offscreen_rendering( HWND hwnd, BOOL known_child )
 {
     if (NtUserGetDpiForWindow( hwnd ) != NtUserGetWinMonitorDpi( hwnd, MDT_RAW_DPI )) return TRUE; /* needs DPI scaling */
     if (NtUserGetAncestor( hwnd, GA_PARENT ) != NtUserGetDesktopWindow()) return TRUE; /* child window, needs compositing */
-    if (NtUserGetWindowRelative( hwnd, GW_CHILD )) return TRUE; /* window has children, needs compositing */
-    if (known_child) return TRUE; /* window is/have children, needs compositing */
+    if (NtUserGetWindowRelative( hwnd, GW_CHILD ) || known_child) return needs_client_window_clipping( hwnd ); /* window has children, needs compositing */
     return FALSE;
 }
 

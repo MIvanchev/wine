@@ -42,9 +42,6 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifdef HAVE_LIBXRANDR
 
-#define VK_NO_PROTOTYPES
-#define WINE_VK_HOST
-
 #include "wine/vulkan.h"
 #include "wine/vulkan_driver.h"
 
