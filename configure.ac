@@ -1382,11 +1382,14 @@ then
     then
         WINE_PACKAGE_FLAGS(EGL,[egl],[-lEGL],,,
             [AC_CHECK_HEADER([EGL/egl.h],
-               [WINE_CHECK_LIB(EGL,eglGetProcAddress)])])
+               [WINE_CHECK_LIB(vulkan,eglGetProcAddress,
+                               [EGL_CFLAGS="$VULKAN_CFLAGS"
+                                EGL_LIBS="$VULKAN_LIBS"
+                                AC_DEFINE(HAVE_LIBEGL, 1, [Define if we have the libEGL development environment])])])])
         WINE_PACKAGE_FLAGS(WAYLAND_EGL,[wayland-egl],,,,
             [AC_CHECK_HEADER([wayland-egl.h],
                [WINE_CHECK_LIB(wayland-egl,wl_egl_window_create)])])
-        WINE_NOTICE_WITH(opengl, [test "$ac_cv_lib_EGL_eglGetProcAddress" != yes -o "$ac_cv_lib_wayland_egl_wl_egl_window_create" != yes],
+        WINE_NOTICE_WITH(opengl, [test "$ac_cv_lib_vulkan_eglGetProcAddress" != yes -o "$ac_cv_lib_wayland_egl_wl_egl_window_create" != yes],
             [EGL ${notice_platform}development files not found, the Wayland driver won't support OpenGL])
     fi
 fi
