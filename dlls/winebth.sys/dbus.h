@@ -23,11 +23,11 @@
 
 #include "config.h"
 
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 #include <dbus/dbus.h>
 #endif
 
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 
 #define DBUS_FUNCS               \
     DO_FUNC(dbus_bus_add_match); \
@@ -109,5 +109,5 @@
 DBUS_FUNCS;
 #undef DO_FUNC
 
-#endif /* SONAME_LIBDBUS_1 */
+#endif /* HAVE_LIBDBUS_1 */
 #endif /* __WINE_BLUETOOTHAPIS_UNIXLIB_DBUS_H */

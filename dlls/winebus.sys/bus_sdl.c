@@ -1195,4 +1195,4 @@ NTSTATUS sdl_bus_stop(void *args)
     return STATUS_NOT_IMPLEMENTED;
 }
 
-#endif /* SONAME_LIBSDL2 */
+#endif /* HAVE_LIBSDL2 */

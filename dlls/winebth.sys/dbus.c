@@ -30,7 +30,7 @@
 #include <assert.h>
 #include <pthread.h>
 
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 #include <dbus/dbus.h>
 #endif
 
@@ -50,7 +50,7 @@
 #include "unixlib_priv.h"
 #include "dbus.h"
 
-#ifdef SONAME_LIBDBUS_1
+#ifdef HAVE_LIBDBUS_1
 
 /* BlueZ is the userspace Bluetooth management daemon for Linux systems, which provides an
  * object-based API for interacting with Bluetooth adapters and devices on top of DBus. Every DBus
@@ -111,29 +111,13 @@ const int bluez_timeout = -1;
 #define BLUEZ_DEST "org.bluez"
 #define BLUEZ_INTERFACE_ADAPTER "org.bluez.Adapter1"
 
-#define DO_FUNC( f ) typeof( f ) (*p_##f)
+#define DO_FUNC( f ) typeof( f ) (*p_##f) = f
 DBUS_FUNCS;
 #undef DO_FUNC
 
 static BOOL load_dbus_functions( void )
 {
-    void *handle = dlopen( SONAME_LIBDBUS_1, RTLD_NOW );
-
-    if (handle == NULL) goto failed;
-
-#define DO_FUNC( f )                                                                               \
-    if (!( p_##f = dlsym( handle, #f ) ))                                                          \
-    {                                                                                              \
-    ERR( "failed to load symbol %s: %s\n", #f, dlerror() );                                        \
-        goto failed;                                                                               \
-    }
-    DBUS_FUNCS;
-#undef DO_FUNC
     return TRUE;
-
-failed:
-    WARN( "failed to load DBus support: %s\n", dlerror() );
-    return FALSE;
 }
 
 static NTSTATUS bluez_dbus_error_to_ntstatus( const DBusError *error )
@@ -978,4 +962,4 @@ NTSTATUS bluez_dbus_loop( void *c, void *watcher, struct winebluetooth_event *re
     return STATUS_NOT_SUPPORTED;
 }
 
-#endif /* SONAME_LIBDBUS_1 */
+#endif /* HAVE_LIBDBUS_1 */

@@ -155,7 +155,7 @@ static void vulkan_init_once(void)
     ERR( "Wine was built without Vulkan support.\n" );
 }
 
-#endif /* SONAME_LIBVULKAN */
+#endif /* HAVE_LIBVULKAN */
 
 static BOOL vulkan_init(void)
 {

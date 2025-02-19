@@ -177,7 +177,7 @@ static void vulkan_surface_update_offscreen( HWND hwnd, struct x11drv_vulkan_sur
 
     if (!surface->offscreen)
     {
-#ifdef SONAME_LIBXCOMPOSITE
+#ifdef HAVE_LIBXCOMPOSITE
         if (usexcomposite) pXCompositeUnredirectWindow( gdi_display, surface->window, CompositeRedirectManual );
 #endif
         if (surface->hdc_dst)
@@ -198,7 +198,7 @@ static void vulkan_surface_update_offscreen( HWND hwnd, struct x11drv_vulkan_sur
         surface->hdc_dst = NtGdiOpenDCW( &device_str, NULL, NULL, 0, TRUE, NULL, NULL, NULL );
         surface->hdc_src = NtGdiOpenDCW( &device_str, NULL, NULL, 0, TRUE, NULL, NULL, NULL );
         set_dc_drawable( surface->hdc_src, surface->window, &surface->rect, IncludeInferiors );
-#ifdef SONAME_LIBXCOMPOSITE
+#ifdef HAVE_LIBXCOMPOSITE
         if (usexcomposite) pXCompositeRedirectWindow( gdi_display, surface->window, CompositeRedirectManual );
 #endif
     }
