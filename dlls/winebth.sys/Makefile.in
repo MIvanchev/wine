@@ -2,7 +2,7 @@ MODULE  = winebth.sys
 IMPORTS = ntoskrnl uuid
 UNIXLIB = winebth.so
 UNIX_CFLAGS = $(DBUS_CFLAGS)
-UNIX_LIBS = $(DBUS_LIBS)
+UNIX_LIBS = $(DBUS_LIBS) $(PTHREAD_LIBS)
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 

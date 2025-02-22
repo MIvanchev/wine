@@ -196,6 +196,7 @@ else
     AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
 fi
 AC_SUBST(toolsdir,[$wine_cv_toolsdir])
+AC_SUBST(wine64dir,[$with_wine64])
 AC_SUBST(RUNTESTFLAGS,["-q -P wine"])
 AC_SUBST(SED_CMD,["LC_ALL=C sed -e 's,@bindir@,\${bindir},g' -e 's,@PACKAGE_STRING@,$PACKAGE_STRING,g' -e 's,@PACKAGE_VERSION@,$PACKAGE_VERSION,g'"])
 
@@ -608,12 +609,13 @@ case $host_os in
     dnl Disable modules that can't be used on Windows
     enable_loader=${enable_loader:-no}
     enable_server=${enable_server:-no}
+    enable_wine=${enable_wine:-no}
     dnl Disable dependencies that are not useful on Windows
     with_x=${with_x:-no}
     with_pthread=${with_pthread:-no}
     ;;
 
-  darwin*|macosx*)
+  darwin*)
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
     LDDLLFLAGS="-fPIC"
@@ -1433,7 +1435,7 @@ if test "x$with_pcsclite" != "xno"
 then
     WINE_CHECK_LIB(pcsclite,SCardEstablishContext,,
                  [case $host_os in
-                    darwin*|macosx*) AC_SUBST(PCSCLITE_LIBS,"-framework PCSC") ;;
+                    darwin*) AC_SUBST(PCSCLITE_LIBS,"-framework PCSC") ;;
                   esac])
 fi
 WINE_NOTICE_WITH(pcsclite,[test "x$ac_cv_lib_pcsclite_SCardEstablishContext" != xyes],
@@ -1459,7 +1461,7 @@ then
             [DBUS_CFLAGS=""])])
 fi
 case $host_os in
-  darwin*|macosx*) ;;
+  darwin*) ;;
   *) WINE_NOTICE_WITH(dbus,[test "x$ac_cv_lib_dbus_1_dbus_connection_close" != "xyes"],
                       [libdbus ${notice_platform}development files not found, no dynamic device support.]) ;;
 esac
@@ -2040,12 +2042,7 @@ fi
 
 dnl **** Platform-specific checks ****
 
-case "$HOST_ARCH,$PE_ARCHS" in
-  x86_64,*i386*) wine_binary="wine" ;;
-  x86_64,*) wine_binary="wine64" ;;
-  *) wine_binary="wine" ;;
-esac
-AC_SUBST(WINELOADER_PROGRAMS,"$wine_binary")
+AC_SUBST(WINELOADER_PROGRAMS,"wine")
 
 case $host_os in
   linux*)
@@ -2058,8 +2055,7 @@ esac
 
 if test "$wine_use_preloader" = "yes"
 then
-  test "$wine_binary" = wine || WINE_IGNORE_FILE(loader/wine-preloader)
-  WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
+  WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS wine-preloader"
   AC_DEFINE(HAVE_WINE_PRELOADER, 1, [Define to 1 if the Wine preloader is being used.])
 fi
 
@@ -2389,9 +2385,6 @@ test "x$enable_silent_rules" = xyes && makedep_flags="$makedep_flags -S"
 
 wine_srcdir=
 test "$srcdir" = . || wine_srcdir="$srcdir/"
-
-WINE_CONFIG_SYMLINK(wine,tools/winewrapper)
-WINE_CONFIG_SYMLINK(wine64,tools/winewrapper,["$wine_binary" = wine64 -o -n "$with_wine64"])
 
 WINE_CONFIG_MAKEFILE(dlls/acledit)
 WINE_CONFIG_MAKEFILE(dlls/aclui)
@@ -3255,6 +3248,8 @@ WINE_CONFIG_MAKEFILE(dlls/windows.security.credentials.ui.userconsentverifier)
 WINE_CONFIG_MAKEFILE(dlls/windows.security.credentials.ui.userconsentverifier/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.storage.applicationdata)
 WINE_CONFIG_MAKEFILE(dlls/windows.storage.applicationdata/tests)
+WINE_CONFIG_MAKEFILE(dlls/windows.storage)
+WINE_CONFIG_MAKEFILE(dlls/windows.storage/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.system.profile.systemmanufacturers)
 WINE_CONFIG_MAKEFILE(dlls/windows.system.profile.systemmanufacturers/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.ui.xaml)
@@ -3532,6 +3527,8 @@ WINE_CONFIG_MAKEFILE(programs/tasklist)
 WINE_CONFIG_MAKEFILE(programs/tasklist/tests)
 WINE_CONFIG_MAKEFILE(programs/taskmgr)
 WINE_CONFIG_MAKEFILE(programs/termsv)
+WINE_CONFIG_MAKEFILE(programs/timeout)
+WINE_CONFIG_MAKEFILE(programs/timeout/tests)
 WINE_CONFIG_MAKEFILE(programs/uninstaller)
 WINE_CONFIG_MAKEFILE(programs/unlodctr)
 WINE_CONFIG_MAKEFILE(programs/view)
@@ -3570,6 +3567,7 @@ WINE_CONFIG_MAKEFILE(server)
 WINE_CONFIG_MAKEFILE(tools,,[test "x$enable_tools" = xno])
 WINE_CONFIG_MAKEFILE(tools/sfnt2fon,,[test "x$enable_tools" = xno])
 WINE_CONFIG_MAKEFILE(tools/widl,,[test "x$enable_tools" = xno])
+WINE_CONFIG_MAKEFILE(tools/wine,,[test "x$enable_tools" = xno])
 WINE_CONFIG_MAKEFILE(tools/winebuild,,[test "x$enable_tools" = xno])
 WINE_CONFIG_MAKEFILE(tools/winedump,,[test "x$enable_tools" = xno])
 WINE_CONFIG_MAKEFILE(tools/winegcc,,[test "x$enable_tools" = xno])
@@ -3582,13 +3580,7 @@ dnl Main ignore file
 
 WINE_IGNORE_FILE(TAGS)
 WINE_IGNORE_FILE(tags)
-WINE_IGNORE_FILE(autom4te.cache)
-WINE_IGNORE_FILE(compile_commands.json)
 WINE_IGNORE_FILE(config.log)
-WINE_IGNORE_FILE(config.status)
-WINE_IGNORE_FILE(include/config.h)
-WINE_IGNORE_FILE(include/stamp-h)
-test "$wine_binary" = wine || WINE_IGNORE_FILE(loader/wine)
 
 if test "x$enable_tools" != xno
 then
@@ -3632,17 +3624,6 @@ AC_SUBST(SHELL,[/bin/sh])
 
 dnl Rules for re-running configure
 
-WINE_APPEND_RULE(
-[all: wine
-	@echo \"Wine build complete.\"
-Makefile: config.status
-	@./config.status Makefile
-config.status: ${wine_srcdir}configure
-	@./config.status --recheck
-include/config.h: include/stamp-h
-include/stamp-h: ${wine_srcdir}include/config.h.in config.status
-	@./config.status include/config.h include/stamp-h])
-
 if test "x$enable_maintainer_mode" = xyes
 then
     WINE_APPEND_RULE(
@@ -3656,25 +3637,8 @@ fi
 
 dnl Rules for wineloader
 
-if test -n "$with_wine64"
+if test -z "$with_wine64"
 then
-    case "$with_wine64" in
-      /*) reldir="" ;;
-      *)  reldir="../" ;;
-    esac
-    dnl Get rid of old symlinks
-    rm -f fonts server 2>/dev/null
-    WINE_APPEND_RULE(
-[all: loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader
-loader/wine64 loader/wine64-preloader:
-	rm -f \$[@] && \$(LN_S) $reldir$with_wine64/\$[@] \$[@]
-$with_wine64/loader/wine:
-	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/wine \$[@]
-$with_wine64/loader/wine-preloader:
-	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/wine-preloader \$[@]
-clean::
-	rm -f loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader])
-else
     TOP_INSTALL_DEV="$TOP_INSTALL_DEV include"
     TOP_INSTALL_LIB="$TOP_INSTALL_LIB \
 fonts \
@@ -3695,18 +3659,10 @@ programs/winepath/winepath \
 server/wineserver"
 
     case $host_os in
-      cygwin*|mingw32*|darwin*|macosx*|linux-android*) ;;
+      cygwin*|mingw32*|darwin*|linux-android*) ;;
       *) TOP_INSTALL_LIB="$TOP_INSTALL_LIB loader/wine.desktop" ;;
     esac
 fi
-
-dnl Rules for cleaning
-
-WINE_APPEND_RULE(
-[distclean:: clean
-	rm -rf autom4te.cache
-maintainer-clean::
-	rm -f configure include/config.h.in])
 
 dnl Rules for generated source files
 
