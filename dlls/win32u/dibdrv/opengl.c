@@ -26,7 +26,6 @@
 
 #include <sys/types.h>
 #include <dlfcn.h>
-#include <link.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -40,6 +39,8 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
+
+#include "wine/mesa_loader.h"
 
 #define OSMESA_COLOR_INDEX	GL_COLOR_INDEX
 #define OSMESA_RGBA		GL_RGBA
@@ -72,41 +73,6 @@ static void * (*pOSMesaGetProcAddress)( const char *funcName );
 static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum type,
                                         GLsizei width, GLsizei height );
 static void (*pOSMesaPixelStore)( GLint pname, GLint value );
-
-/* OpenGL, OSMesa, EGL, Vulkan etc. are statically linked in
- * winex11.so so to avoid linking them a second time we load
- * winex11.so through a dirty hack and import the symbols from
- * there.
- */
-
-void* get_handle_to_mesa(void)
-{
-    Dl_info info;
-    char *last_path_sep;
-    size_t path_len;
-    char *winex11_so_path;
-    void *handle;
-
-    if (!dladdr(get_handle_to_mesa, &info)
-            || !(last_path_sep = strrchr(info.dli_fname, '/')))
-    {
-        ERR( "Failed to determine absoltue path to Wine's SO files.\n" );
-        return NULL;
-    }
-
-    path_len = last_path_sep - info.dli_fname + 1;
-    winex11_so_path = alloca(path_len + strlen("winex11.so") + 1);
-    memcpy(winex11_so_path, info.dli_fname, path_len);
-    strcpy(winex11_so_path + path_len, "winex11.so");
-
-    if (!(handle = dlopen(winex11_so_path, RTLD_LAZY | RTLD_LOCAL)))
-    {
-        ERR( "Failed to load %s containing statically linked Mesa: %s\n", winex11_so_path, dlerror() );
-        return NULL;
-    }
-
-    return handle;
-}
 
 static BOOL init_opengl(void)
 {

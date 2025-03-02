@@ -34,6 +34,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
+#include "wine/mesa_loader.h"
+
 PFN_vkGetDeviceProcAddr p_vkGetDeviceProcAddr = NULL;
 PFN_vkGetInstanceProcAddr p_vkGetInstanceProcAddr = NULL;
 
@@ -625,9 +627,6 @@ static const struct vulkan_driver_funcs lazydrv_funcs =
     .p_vkGetPhysicalDeviceWin32PresentationSupportKHR = lazydrv_vkGetPhysicalDeviceWin32PresentationSupportKHR,
     .p_get_host_surface_extension = lazydrv_get_host_surface_extension,
 };
-
-// Defined in win32u/dibdrv/opengl.c for now
-void* get_handle_to_mesa(void);
 
 static void vulkan_init_once(void)
 {

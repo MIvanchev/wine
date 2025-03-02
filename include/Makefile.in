@@ -936,6 +936,7 @@ SOURCES = \
 	wine/irpcss.idl \
 	wine/itss.idl \
 	wine/list.h \
+	wine/mesa_loader.h \
 	wine/mfinternal.idl \
 	wine/mmsystem16.h \
 	wine/mscvpdb.h \
