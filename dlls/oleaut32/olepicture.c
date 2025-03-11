@@ -256,6 +256,18 @@ static void OLEPictureImpl_SetIcon(OLEPictureImpl * This)
     }
 }
 
+static void OLEPictureImpl_SetEMF(OLEPictureImpl *This)
+{
+    ENHMETAHEADER emh;
+
+    GetEnhMetaFileHeader(This->desc.emf.hemf, sizeof(emh), &emh);
+
+    This->origWidth = 0;
+    This->origHeight = 0;
+    This->himetricWidth = emh.rclFrame.right - emh.rclFrame.left;
+    This->himetricHeight = emh.rclFrame.bottom - emh.rclFrame.top;
+}
+
 /************************************************************************
  * OLEPictureImpl_Construct
  *
@@ -339,8 +351,7 @@ static HRESULT OLEPictureImpl_Construct(LPPICTDESC pictDesc, BOOL fOwn, OLEPictu
         break;
 
       case PICTYPE_ENHMETAFILE:
-        FIXME("EMF is not supported\n");
-        newObject->himetricWidth = newObject->himetricHeight = 0;
+        OLEPictureImpl_SetEMF(newObject);
         break;
 
       default:
@@ -817,19 +828,6 @@ static HRESULT WINAPI OLEPictureImpl_PictureChanged(IPicture *iface)
   OLEPicture_SendNotify(This,DISPID_PICT_HANDLE);
   This->bIsDirty = TRUE;
   return S_OK;
-}
-
-/************************************************************************
- * OLEPictureImpl_SaveAsFile
- */
-static HRESULT WINAPI OLEPictureImpl_SaveAsFile(IPicture *iface,
-						IStream *pstream,
-						BOOL SaveMemCopy,
-						LONG *pcbSize)
-{
-  OLEPictureImpl *This = impl_from_IPicture(iface);
-  FIXME("(%p)->(%p, %d, %p), hacked stub.\n", This, pstream, SaveMemCopy, pcbSize);
-  return IStream_Write(pstream,This->data,This->datalen,(ULONG*)pcbSize);
 }
 
 /************************************************************************
@@ -1768,6 +1766,22 @@ static BOOL serializeIcon(HICON hIcon, void ** ppBuffer, unsigned int * pLength)
         return success;
 }
 
+static HRESULT serializeEMF(HENHMETAFILE hemf, void **buf, unsigned *size)
+{
+    if (!(*size = GetEnhMetaFileBits(hemf, 0, NULL)))
+        return E_FAIL;
+
+    if (!(*buf = HeapAlloc(GetProcessHeap(), 0, *size)))
+        return E_OUTOFMEMORY;
+
+    if (!GetEnhMetaFileBits(hemf, *size, *buf))
+    {
+        HeapFree(GetProcessHeap(), 0, *buf);
+        return E_FAIL;
+    }
+    return S_OK;
+}
+
 static HRESULT WINAPI OLEPictureImpl_Save(
   IPersistStream* iface,IStream*pStm,BOOL fClearDirty)
 {
@@ -1839,11 +1853,27 @@ static HRESULT WINAPI OLEPictureImpl_Save(
         IStream_Write(pStm, This->data, This->datalen, &dummy);
         hResult = S_OK;
         break;
+
+    case PICTYPE_ENHMETAFILE:
+        if (This->bIsDirty || !This->data)
+        {
+            hResult = serializeEMF(This->desc.emf.hemf, &pIconData, &iDataSize);
+            if (hResult != S_OK)
+                break;
+
+            HeapFree(GetProcessHeap(), 0, This->data);
+            This->data = pIconData;
+            This->datalen = iDataSize;
+        }
+        header[0] = 0x0000746c;
+        header[1] = This->datalen;
+        IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
+        IStream_Write(pStm, This->data, This->datalen, &dummy);
+        hResult = S_OK;
+        break;
+
     case PICTYPE_METAFILE:
         FIXME("(%p,%p,%d), PICTYPE_METAFILE not implemented!\n",This,pStm,fClearDirty);
-        break;
-    case PICTYPE_ENHMETAFILE:
-        FIXME("(%p,%p,%d),PICTYPE_ENHMETAFILE not implemented!\n",This,pStm,fClearDirty);
         break;
     default:
         FIXME("(%p,%p,%d), [unknown type] not implemented!\n",This,pStm,fClearDirty);
@@ -1909,6 +1939,98 @@ static HRESULT WINAPI OLEPictureImpl_GetSizeMax(IPersistStream *iface, ULARGE_IN
     return hr;
 }
 
+/************************************************************************
+ * OLEPictureImpl_SaveAsFile
+ */
+static HRESULT WINAPI OLEPictureImpl_SaveAsFile(IPicture *iface,
+    IStream *stream, BOOL mem_copy, LONG *size)
+{
+    OLEPictureImpl *This = impl_from_IPicture(iface);
+    void *data;
+    unsigned int data_size;
+    ULONG written;
+    HRESULT hr;
+
+    FIXME("(%p)->(%p,%d,%p): semi-stub\n", This, stream, mem_copy, size);
+
+    switch (This->desc.picType)
+    {
+    case PICTYPE_NONE:
+        return S_OK;
+
+    case PICTYPE_ICON:
+        if (!mem_copy) return E_FAIL;
+
+        if (This->bIsDirty || !This->data)
+        {
+            if (!serializeIcon(This->desc.icon.hicon, &data, &data_size))
+                return E_FAIL;
+            HeapFree(GetProcessHeap(), 0, This->data);
+            This->data = data;
+            This->datalen = data_size;
+        }
+        hr = IStream_Write(stream, This->data, This->datalen, &written);
+        if (hr == S_OK && size) *size = written;
+        return hr;
+
+    case PICTYPE_BITMAP:
+        if (!mem_copy) return E_FAIL;
+
+        if (This->bIsDirty || !This->data)
+        {
+            switch (This->keepOrigFormat ? This->loadtime_format : BITMAP_FORMAT_BMP)
+            {
+            case BITMAP_FORMAT_BMP:
+                hr = serializeBMP(This->desc.bmp.hbitmap, &data, &data_size);
+                if (hr != S_OK) return hr;
+                break;
+            case BITMAP_FORMAT_JPEG:
+                FIXME("BITMAP_FORMAT_JPEG is not implemented\n");
+                return E_NOTIMPL;
+            case BITMAP_FORMAT_GIF:
+                FIXME("BITMAP_FORMAT_GIF is not implemented\n");
+                return E_NOTIMPL;
+            case BITMAP_FORMAT_PNG:
+                FIXME("BITMAP_FORMAT_PNG is not implemented\n");
+                return E_NOTIMPL;
+            default:
+                FIXME("PICTYPE_BITMAP/%#x is not implemented\n", This->loadtime_format);
+                return E_NOTIMPL;
+            }
+
+            HeapFree(GetProcessHeap(), 0, This->data);
+            This->data = data;
+            This->datalen = data_size;
+        }
+        hr = IStream_Write(stream, This->data, This->datalen, &written);
+        if (hr == S_OK && size) *size = written;
+        return hr;
+
+    case PICTYPE_METAFILE:
+        FIXME("PICTYPE_METAFILE is not implemented\n");
+        return E_NOTIMPL;
+
+    case PICTYPE_ENHMETAFILE:
+        if (!mem_copy) return E_FAIL;
+
+        if (This->bIsDirty || !This->data)
+        {
+            hr = serializeEMF(This->desc.emf.hemf, &data, &data_size);
+            if (hr != S_OK) return hr;
+            HeapFree(GetProcessHeap(), 0, This->data);
+            This->data = data;
+            This->datalen = data_size;
+        }
+        hr = IStream_Write(stream, This->data, This->datalen, &written);
+        if (hr == S_OK && size) *size = written;
+        return hr;
+
+    default:
+        FIXME("%#x is not implemented\n", This->desc.picType);
+        break;
+    }
+    return E_NOTIMPL;
+}
 
 /************************************************************************
  *    IDispatch
