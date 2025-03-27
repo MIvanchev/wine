@@ -163,7 +163,7 @@ static int (*pgnutls_privkey_import_dh_raw)(gnutls_privkey_t, const gnutls_dh_pa
 static int (*pgnutls_pubkey_import_dh_raw)(gnutls_pubkey_t, const gnutls_dh_params_t, const gnutls_datum_t *);
 
 /* Not present in gnutls version < 3.8.4 */
-static int (*pgnutls_x509_spki_set_rsa_oaep_params)(gnutls_x509_spki_t, gnutls_digest_algorithm_t, gnutls_datum_t *);
+static int (*pgnutls_x509_spki_set_rsa_oaep_params)(gnutls_x509_spki_t, gnutls_digest_algorithm_t, const gnutls_datum_t *);
 
 static int libgnutls_initialized;
 
