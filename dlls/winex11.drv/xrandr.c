@@ -45,6 +45,8 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 #include "wine/vulkan.h"
 #include "wine/vulkan_driver.h"
 
+PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
+
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkDisplayKHR)
 
 static void *xrandr_handle;
@@ -125,14 +127,14 @@ static void vulkan_init_once(void)
     PFN_vkCreateInstance p_vkCreateInstance;
     VkResult vr;
 
-    p_vkCreateInstance = p_vkGetInstanceProcAddr( NULL, "vkCreateInstance" );
+    p_vkCreateInstance = (PFN_vkCreateInstance) p_vkGetInstanceProcAddr( NULL, "vkCreateInstance" );
     if ((vr = p_vkCreateInstance( &create_info, NULL, &vk_instance )))
     {
         WARN( "Failed to create a Vulkan instance, vr %d.\n", vr );
         return;
     }
 
-    p_vkDestroyInstance = p_vkGetInstanceProcAddr( vk_instance, "vkDestroyInstance" );
+    p_vkDestroyInstance = (PFN_vkDestroyInstance) p_vkGetInstanceProcAddr( vk_instance, "vkDestroyInstance" );
 #define LOAD_VK_FUNC(f)                                                             \
     if (!(p_##f = (void *)p_vkGetInstanceProcAddr( vk_instance, #f )))              \
     {                                                                               \

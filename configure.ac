@@ -1675,7 +1675,8 @@ then
               AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gst/gst.h>]],
                                                  [[static int a[sizeof(gint64) > 4 ? 1 : -1]; if (a[0]) return 0;]])],
                 [AC_MSG_RESULT([yes])
-                 WINE_CHECK_LIB(gstreamer-full-1.0,gst_pad_new,,,[-lmp3lame -lstdc++])],
+                 WINE_CHECK_LIB(gstreamer-full-1.0,gst_pad_new,
+                                [GSTREAMER_LIBS="$GSTREAMER_FULL_1_0_LIBS"],,[-lmp3lame -lstdc++])],
                 [AC_MSG_RESULT([no])
                  ac_glib2_broken=yes
                  enable_winegstreamer=${enable_winegstreamer:-no}
